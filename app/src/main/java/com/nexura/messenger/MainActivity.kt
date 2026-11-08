@@ -1,6 +1,7 @@
 package com.nexura.messenger
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -11,27 +12,40 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexura.messenger.data.*
 import kotlinx.coroutines.launch
 
-private val Bg = Color(0xFF0B1018)
-private val Panel = Color(0xFF151E2B)
-private val Accent = Color(0xFF7C9CFF)
-private val TextMain = Color(0xFFF3F5FA)
-private val Muted = Color(0xFF98A5B8)
+private val Bg = Color(0xFF080D16)
+private val Surface1 = Color(0xFF111A29)
+private val Surface2 = Color(0xFF172337)
+private val Accent = Color(0xFF86A5FF)
+private val Accent2 = Color(0xFF9A8BFF)
+private val MainText = Color(0xFFF4F6FC)
+private val SecondaryText = Color(0xFF91A0B7)
+private val Danger = Color(0xFFFF858D)
+private val Success = Color(0xFF8DDEB0)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,17 +64,18 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android.net.Uri?) {
+private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank()) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var phoneLogin by remember { mutableStateOf(false) }
-    var phone by remember { mutableStateOf("") }
-    var smsCode by remember { mutableStateOf("") }
-    var smsSent by remember { mutableStateOf(false) }
     var displayName by remember { mutableStateOf("") }
     var register by remember { mutableStateOf(false) }
+    var phone by remember { mutableStateOf("") }
+    var phoneCode by remember { mutableStateOf("") }
+    var smsSent by remember { mutableStateOf(false) }
+    var phoneMode by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -69,10 +84,29 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
     var draft by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
-    var users by remember { mutableStateOf(emptyList<Pair<String,String>>()) }
+    var users by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
+    var searching by remember { mutableStateOf(false) }
 
-    fun loadChats() { scope.launch { busy=true; try { chats=api.chats(); error="" } catch(e:Exception){ error=e.message ?: "Не удалось загрузить чаты" } finally { busy=false } } }
-    fun loadMessages(chat: ChatItem) { selected=chat; scope.launch { try { messages=api.messages(chat.id) } catch(e:Exception){ error=e.message ?: "Ошибка сообщений" } } }
+    fun loadChats() {
+        scope.launch {
+            busy = true
+            try {
+                chats = api.chats()
+                error = ""
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось загрузить чаты"
+            } finally { busy = false }
+        }
+    }
+
+    fun openChat(chat: ChatItem) {
+        selected = chat
+        messages = emptyList()
+        scope.launch {
+            try { messages = api.messages(chat.id) }
+            catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
+        }
+    }
 
     LaunchedEffect(authCallback) {
         if (authCallback?.scheme == "nexura" && authCallback.host == "auth" && authCallback.path == "/callback") {
@@ -80,140 +114,332 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android
             error = ""
             try {
                 api.consumeAuthCallback(authCallback)
-                signedIn = true
-                notice = "Почта подтверждена. Добро пожаловать в Nexura!"
-                loadChats()
+                signedIn = !store.accessToken.isNullOrBlank()
+                notice = "Добро пожаловать в Nexura!"
             } catch (e: Exception) {
-                error = e.message ?: "Не удалось подтвердить почту"
-            } finally {
-                busy = false
+                error = e.message ?: "Не удалось завершить вход"
+            } finally { busy = false }
+        }
+    }
+
+    LaunchedEffect(signedIn) {
+        if (signedIn) {
+            try {
+                if (store.accessToken.isNullOrBlank()) api.refreshSession()
+                chats = api.chats()
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось восстановить сессию"
+                if (store.accessToken.isNullOrBlank()) signedIn = false
             }
         }
     }
 
-    MaterialTheme(colorScheme = darkColorScheme(primary=Accent, background=Bg, surface=Panel, onBackground=TextMain, onSurface=TextMain)) {
-        Surface(Modifier.fillMaxSize(), color=Bg) {
-            if (!signedIn) {
-                Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement=Arrangement.Center) {
-                    Text("nexura", fontSize=42.sp, fontWeight=FontWeight.Bold, color=TextMain)
-                    Text("Общение без границ", color=Muted, modifier=Modifier.padding(bottom=28.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected=!phoneLogin, onClick={phoneLogin=false; smsSent=false; smsCode=""; error=""; notice=""}, label={Text("Email")})
-                        FilterChip(selected=phoneLogin, onClick={phoneLogin=true; smsSent=false; smsCode=""; error=""; notice=""}, label={Text("Телефон")})
-                    }
-                    if (register && !phoneLogin) OutlinedTextField(displayName,{displayName=it},label={Text("Ваше имя")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                    if (phoneLogin) {
-                        OutlinedTextField(phone,{phone=it; smsSent=false},label={Text("Номер телефона")},placeholder={Text("+491234567890")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                        if (smsSent) OutlinedTextField(smsCode,{smsCode=it.filter(Char::isDigit).take(8)},label={Text("Код из SMS")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                        Text("Укажите номер в международном формате, например +49…",color=Muted,fontSize=12.sp,modifier=Modifier.padding(top=4.dp))
-                    } else {
-                        OutlinedTextField(email,{email=it},label={Text("Email")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                        OutlinedTextField(password,{password=it},label={Text("Пароль")},visualTransformation=PasswordVisualTransformation(),singleLine=true,modifier=Modifier.fillMaxWidth())
-                    }
-                    if (error.isNotBlank()) Text(error,color=Color(0xFFFF8585),modifier=Modifier.padding(vertical=8.dp))
-                    if (notice.isNotBlank()) Text(notice,color=Color(0xFF8FE0B0),modifier=Modifier.padding(vertical=8.dp))
-                    if (!phoneLogin && !register) TextButton(
-                        onClick = {
-                            scope.launch {
-                                busy = true
-                                error = ""
-                                notice = ""
-                                try {
-                                    api.resendConfirmation(email.trim())
-                                    notice = "Запрос принят. Если SMTP настроен, письмо придёт на почту."
-                                } catch (e: Exception) {
-                                    error = e.message ?: "Не удалось запросить письмо"
-                                } finally { busy = false }
-                            }
-                        },
-                        enabled = !busy && email.contains("@")
-                    ) { Text("Отправить письмо подтверждения повторно") }
-                    if (phoneLogin) {
-                        Button(onClick={
-                            scope.launch { busy=true; error=""; notice=""; try {
-                                if (!smsSent) {
-                                    api.sendPhoneCode(phone, displayName)
-                                    smsSent=true
-                                    notice="Код отправлен по SMS на $phone"
-                                } else {
-                                    api.verifyPhoneCode(phone, smsCode)
-                                    signedIn=!store.accessToken.isNullOrBlank()
-                                    if(signedIn) loadChats()
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = Accent, secondary = Accent2, background = Bg, surface = Surface1,
+            onBackground = MainText, onSurface = MainText
+        )
+    ) {
+        Surface(Modifier.fillMaxSize(), color = Bg) {
+            when {
+                !signedIn -> {
+                    Column(
+                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF121D32), Bg, Bg))).padding(horizontal = 24.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Box(Modifier.size(62.dp).clip(RoundedCornerShape(20.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(31.dp))
+                        }
+                        Spacer(Modifier.height(22.dp))
+                        Text("nexura", fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-1).sp)
+                        Text("Твоё пространство для общения", color = SecondaryText, fontSize = 15.sp, modifier = Modifier.padding(top = 5.dp, bottom = 28.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = !phoneMode, onClick = { phoneMode = false; error = ""; notice = "" }, label = { Text("Email") })
+                            FilterChip(selected = phoneMode, onClick = { phoneMode = true; error = ""; notice = "" }, label = { Text("Телефон") })
+                        }
+                        if (phoneMode) {
+                            AuthField(phone, { phone = it; smsSent = false }, "Номер телефона", "+49 123 456789", keyboard = ImeAction.Next)
+                            if (smsSent) AuthField(phoneCode, { phoneCode = it.filter(Char::isDigit).take(8) }, "Код из SMS", "Введите код")
+                            Text("Используйте международный формат номера", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                        } else {
+                            if (register) AuthField(displayName, { displayName = it }, "Ваше имя", "Как к вам обращаться")
+                            AuthField(email, { email = it }, "Email", "name@example.com", keyboard = ImeAction.Next)
+                            OutlinedTextField(
+                                value = password, onValueChange = { password = it },
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                                label = { Text("Пароль") }, singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = authFieldColors()
+                            )
+                        }
+                        if (error.isNotBlank()) Text(error, color = Danger, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
+                        if (notice.isNotBlank()) Text(notice, color = Success, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    busy = true; error = ""; notice = ""
+                                    try {
+                                        if (phoneMode) {
+                                            if (!smsSent) {
+                                                api.sendPhoneCode(phone)
+                                                smsSent = true
+                                                notice = "Код отправлен на $phone"
+                                            } else {
+                                                api.verifyPhoneCode(phone, phoneCode)
+                                                signedIn = !store.accessToken.isNullOrBlank()
+                                            }
+                                        } else {
+                                            if (register) api.signUp(email.trim(), password, displayName.trim())
+                                            else api.signIn(email.trim(), password)
+                                            signedIn = !store.accessToken.isNullOrBlank()
+                                            if (!signedIn && register) notice = "Аккаунт создан. Подтвердите email по ссылке из письма."
+                                        }
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось выполнить вход" }
+                                    finally { busy = false }
                                 }
-                            } catch(e:Exception){error=e.message ?: "Ошибка входа по телефону"} finally {busy=false} }
-                        }, enabled=!busy && phone.startsWith("+") && phone.count { it.isDigit() } in 8..15 && (!smsSent || smsCode.length in 4..8), modifier=Modifier.fillMaxWidth().padding(top=16.dp)) {
-                            Text(if(busy) "Подождите…" else if(smsSent) "Подтвердить код и войти" else "Получить SMS-код")
+                            },
+                            enabled = !busy && if (phoneMode) phone.startsWith("+") && phone.count { it.isDigit() } in 8..15 && (!smsSent || phoneCode.length in 4..8)
+                                else email.contains("@") && password.length >= 6 && (!register || displayName.isNotBlank()),
+                            modifier = Modifier.fillMaxWidth().padding(top = 18.dp).height(52.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) { Text(if (busy) "Подождите…" else if (phoneMode) if (smsSent) "Подтвердить код" else "Получить SMS-код" else if (register) "Создать аккаунт" else "Войти", fontWeight = FontWeight.SemiBold) }
+                        if (!phoneMode) {
+                            OutlinedButton(
+                                onClick = {
+                                    val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
+                                    val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=google&redirect_to=$redirect"
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(52.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
+                            ) { Text("Продолжить с Google", fontWeight = FontWeight.Medium) }
+                            TextButton(onClick = { register = !register; error = ""; notice = "" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                                Text(if (register) "Уже есть аккаунт? Войти" else "Создать аккаунт")
+                            }
+                            if (!register) TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        busy = true; error = ""; notice = ""
+                                        try {
+                                            api.resendConfirmation(email.trim())
+                                            notice = "Если адрес зарегистрирован, письмо подтверждения будет отправлено."
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось отправить письмо" }
+                                        finally { busy = false }
+                                    }
+                                }, enabled = !busy && email.contains("@"), modifier = Modifier.align(Alignment.CenterHorizontally)
+                            ) { Text("Отправить письмо повторно", color = SecondaryText, fontSize = 12.sp) }
                         }
-                        if (smsSent) TextButton(onClick={smsSent=false; smsCode=""; notice=""}, enabled=!busy) { Text("Изменить номер") }
-                    } else {
-                        Button(onClick={
-                            scope.launch { busy=true; error=""; try {
-                                if(register) api.signUp(email.trim(),password,displayName.trim()) else api.signIn(email.trim(),password)
-                                signedIn=!store.accessToken.isNullOrBlank()
-                                if(signedIn) loadChats()
-                            } catch(e:Exception){error=e.message ?: "Ошибка авторизации"} finally {busy=false} }
-                        }, enabled=!busy && email.isNotBlank() && password.length>=6, modifier=Modifier.fillMaxWidth().padding(top=16.dp)) {
-                            Text(if(busy) "Подождите…" else if(register) "Создать аккаунт" else "Войти")
-                        }
+                        Text("Защищённое пространство для ваших разговоров", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 18.dp))
                     }
-                    TextButton(onClick={register=!register;error=""}) { Text(if(register) "Уже есть аккаунт? Войти" else "Создать аккаунт") }
                 }
-            } else if (selected == null) {
-                Column(Modifier.fillMaxSize().padding(18.dp)) {
-                    Row(verticalAlignment=Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("nexura",fontSize=34.sp,fontWeight=FontWeight.Bold,color=TextMain)
-                            Text("Ваши сообщения",color=Muted)
+                selected == null -> {
+                    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("nexura", fontSize = 31.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-1).sp)
+                                Text("Сообщения", color = SecondaryText, fontSize = 13.sp)
+                            }
+                            IconButton(onClick = { loadChats() }) { Icon(Icons.Default.Refresh, "Обновить", tint = MainText) }
+                            IconButton(onClick = { scope.launch { try { api.signOut(); signedIn = false; chats = emptyList() } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } } }) {
+                                Icon(Icons.Default.Settings, "Выйти", tint = SecondaryText)
+                            }
                         }
-                        IconButton(onClick={loadChats()}) { Icon(Icons.Default.Refresh,contentDescription="Обновить",tint=TextMain) }
-                        TextButton(onClick={scope.launch { api.signOut(); signedIn=false; chats= emptyList() }}) { Text("Выйти") }
-                    }
-                    OutlinedTextField(search,{search=it},modifier=Modifier.fillMaxWidth().padding(top=18.dp),placeholder={Text("Найти пользователя")},singleLine=true)
-                    Button(onClick={scope.launch { try { users=api.findUsers(search) } catch(e:Exception){error=e.message ?: "Поиск недоступен"} }},enabled=search.length>=2,modifier=Modifier.padding(top=6.dp)) { Text("Найти") }
-                    users.forEach { user -> Row(Modifier.fillMaxWidth().clickable {
-                        scope.launch { try { val id=api.createDirect(user.first); loadChats(); selected=ChatItem(id,user.second,"direct",null); loadMessages(selected!!) } catch(e:Exception){error=e.message ?: "Не удалось открыть чат"} }
-                    }.padding(vertical=8.dp),verticalAlignment=Alignment.CenterVertically) {
-                        Box(Modifier.size(38.dp).background(Accent,CircleShape),contentAlignment=Alignment.Center){Text(user.second.take(1).uppercase(),color=Bg)}
-                        Text(user.second,color=TextMain,modifier=Modifier.padding(start=12.dp))
-                    } }
-                    if(error.isNotBlank()) Text(error,color=Color(0xFFFF8585),modifier=Modifier.padding(vertical=8.dp))
-                    Text("Чаты",fontWeight=FontWeight.SemiBold,fontSize=20.sp,color=TextMain,modifier=Modifier.padding(top=18.dp,bottom=8.dp))
-                    if(chats.isEmpty()) Text(if(busy) "Загружаем…" else "Пока нет чатов. Найдите пользователя, чтобы начать общение.",color=Muted)
-                    LazyColumn { items(chats,key={it.id}) { chat ->
-                        Row(Modifier.fillMaxWidth().clickable { loadMessages(chat) }.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically) {
-                            Box(Modifier.size(46.dp).background(Panel,CircleShape),contentAlignment=Alignment.Center){Text(if(chat.kind=="group") "👥" else chat.title.take(1).uppercase(),color=TextMain)}
-                            Column(Modifier.padding(start=12.dp)) { Text(chat.title,color=TextMain,fontWeight=FontWeight.Medium); Text(if(chat.kind=="group") "Групповой чат" else "Личная переписка",color=Muted,fontSize=12.sp) }
-                        }
-                        HorizontalDivider(color=Panel)
-                    } }
-                }
-            } else {
-                Column(Modifier.fillMaxSize()) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
-                        IconButton(onClick={selected=null;messages= emptyList();loadChats()}) { Icon(Icons.Default.ArrowBack,contentDescription="Назад",tint=TextMain) }
-                        Column(Modifier.weight(1f)) { Text(selected!!.title,color=TextMain,fontWeight=FontWeight.SemiBold); Text("Nexura",color=Muted,fontSize=12.sp) }
-                        IconButton(onClick={scope.launch { try { messages=api.messages(selected!!.id) } catch(e:Exception){error=e.message ?: "Ошибка"} }}) { Icon(Icons.Default.Refresh,contentDescription="Обновить",tint=TextMain) }
-                    }
-                    HorizontalDivider(color=Panel)
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(12.dp),reverseLayout=false) {
-                        items(messages,key={it.id}) { msg ->
-                            val mine=msg.senderId==store.userId
-                            Row(Modifier.fillMaxWidth(),horizontalArrangement=if(mine) Arrangement.End else Arrangement.Start) {
-                                Column(Modifier.widthIn(max=300.dp).background(if(mine) Color(0xFF263A66) else Panel,RoundedCornerShape(16.dp)).padding(12.dp)) {
-                                    Text(msg.content,color=TextMain)
-                                    Text(msg.createdAt.replace("T"," ").take(16),color=Muted,fontSize=10.sp,modifier=Modifier.align(Alignment.End))
+                        OutlinedTextField(
+                            value = search, onValueChange = { search = it; users = emptyList() },
+                            modifier = Modifier.fillMaxWidth(), placeholder = { Text("Найти человека по имени") },
+                            leadingIcon = { Icon(Icons.Default.Search, null, tint = SecondaryText) },
+                            trailingIcon = { if (search.isNotBlank()) TextButton(onClick = { search = ""; users = emptyList() }) { Text("Сбросить") } },
+                            singleLine = true, shape = RoundedCornerShape(16.dp), colors = authFieldColors(),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                if (search.length >= 2) scope.launch { searching = true; try { users = api.findUsers(search) } catch (e: Exception) { error = e.message ?: "Поиск недоступен" }; searching = false }
+                            })
+                        )
+                        Button(
+                            onClick = { scope.launch { searching = true; error = ""; try { users = api.findUsers(search) } catch (e: Exception) { error = e.message ?: "Поиск недоступен" }; searching = false } },
+                            enabled = search.length >= 2 && !searching,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(44.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) { Text(if (searching) "Ищем…" else "Найти пользователя") }
+                        if (users.isNotEmpty()) {
+                            Text("Результаты поиска", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
+                            users.forEach { user ->
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
+                                        scope.launch {
+                                            try {
+                                                val id = api.createDirect(user.first)
+                                                val chat = ChatItem(id, user.second, "direct", null)
+                                                selected = chat
+                                                messages = api.messages(id)
+                                                loadChats()
+                                            } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
+                                        }
+                                    }.padding(vertical = 9.dp, horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Avatar(user.second)
+                                    Text(user.second, color = MainText, modifier = Modifier.padding(start = 12.dp).weight(1f))
+                                    Text("Написать", color = Accent, fontSize = 12.sp)
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
+                        }
+                        Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Ваши чаты", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("${chats.size}", color = SecondaryText, fontSize = 13.sp)
+                        }
+                        if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+                        if (chats.isEmpty()) {
+                            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(Modifier.size(76.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.ChatBubbleOutline, null, tint = Accent, modifier = Modifier.size(34.dp))
+                                    }
+                                    Text(if (busy) "Загружаем чаты…" else "Здесь пока тихо", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+                                    Text("Найдите человека выше и начните разговор", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                                }
+                            }
+                        } else {
+                            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
+                                items(chats, key = { it.id }) { chat ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { openChat(chat) }.padding(vertical = 11.dp, horizontal = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (chat.kind == "group") GroupAvatar() else Avatar(chat.title)
+                                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                            Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                            Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                                        }
+                                        Text("›", color = SecondaryText, fontSize = 24.sp)
+                                    }
+                                    HorizontalDivider(color = Surface1)
+                                }
+                            }
                         }
                     }
-                    Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
-                        OutlinedTextField(draft,{draft=it},modifier=Modifier.weight(1f),placeholder={Text("Сообщение…")},maxLines=4)
-                        IconButton(onClick={ val value=draft.trim(); val chat=selected; if(value.isNotEmpty() && chat!=null) scope.launch { try { api.sendMessage(chat.id,value); draft=""; messages=api.messages(chat.id) } catch(e:Exception){error=e.message ?: "Не отправлено"} } },enabled=draft.isNotBlank()) { Icon(Icons.Default.Send,contentDescription="Отправить",tint=Accent) }
+                }
+                else -> {
+                    val chat = selected!!
+                    Column(Modifier.fillMaxSize()) {
+                        Row(Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { selected = null; messages = emptyList(); loadChats() }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
+                            if (chat.kind == "group") GroupAvatar() else Avatar(chat.title)
+                            Column(Modifier.weight(1f).padding(start = 11.dp)) {
+                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold)
+                                Text(if (chat.kind == "group") "Группа" else "Nexura", color = SecondaryText, fontSize = 11.sp)
+                            }
+                            IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id) } catch (e: Exception) { error = e.message ?: "Ошибка обновления" } } }) {
+                                Icon(Icons.Default.Refresh, "Обновить", tint = SecondaryText)
+                            }
+                        }
+                        HorizontalDivider(color = Surface2)
+                        if (messages.isEmpty()) {
+                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Text("Напишите первое сообщение 👋", color = SecondaryText, fontSize = 13.sp)
+                            }
+                        } else {
+                            LazyColumn(
+                                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                contentPadding = PaddingValues(bottom = 10.dp)
+                            ) {
+                                items(messages, key = { it.id }) { msg ->
+                                    val mine = msg.senderId == store.userId
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+                                        Column(
+                                            Modifier.widthIn(max = 310.dp).clip(RoundedCornerShape(
+                                                topStart = 18.dp, topEnd = 18.dp,
+                                                bottomStart = if (mine) 18.dp else 5.dp,
+                                                bottomEnd = if (mine) 5.dp else 18.dp
+                                            )).background(if (mine) Color(0xFF304B83) else Surface1).padding(horizontal = 13.dp, vertical = 10.dp)
+                                        ) {
+                                            Text(msg.content, color = MainText, fontSize = 14.sp)
+                                            Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 9.sp, modifier = Modifier.align(Alignment.End).padding(top = 5.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                        Row(
+                            Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = draft, onValueChange = { draft = it },
+                                modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…") },
+                                maxLines = 4, shape = RoundedCornerShape(22.dp), colors = authFieldColors(),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = {
+                                    val text = draft.trim()
+                                    if (text.isNotEmpty()) scope.launch {
+                                        try { api.sendMessage(chat.id, text); draft = ""; messages = api.messages(chat.id) }
+                                        catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
+                                    }
+                                })
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    val text = draft.trim()
+                                    if (text.isNotEmpty()) scope.launch {
+                                        try { api.sendMessage(chat.id, text); draft = ""; messages = api.messages(chat.id) }
+                                        catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
+                                    }
+                                },
+                                enabled = draft.isNotBlank(),
+                                modifier = Modifier.size(48.dp).background(if (draft.isNotBlank()) Accent else Surface2, CircleShape)
+                            ) { Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText) }
+                        }
                     }
-                    if(error.isNotBlank()) Text(error,color=Color(0xFFFF8585),modifier=Modifier.padding(horizontal=16.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AuthField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    keyboard: ImeAction = ImeAction.Next
+) {
+    OutlinedTextField(
+        value = value, onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        label = { Text(label) }, placeholder = { Text(placeholder) },
+        singleLine = true, shape = RoundedCornerShape(16.dp),
+        keyboardOptions = KeyboardOptions(imeAction = keyboard),
+        colors = authFieldColors()
+    )
+}
+
+@Composable
+private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = Accent,
+    unfocusedBorderColor = Color(0xFF2B3A51),
+    focusedLabelColor = Accent,
+    unfocusedLabelColor = SecondaryText,
+    cursorColor = Accent,
+    focusedTextColor = MainText,
+    unfocusedTextColor = MainText
+)
+
+@Composable
+private fun Avatar(name: String) {
+    Box(Modifier.size(48.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+        Text(name.trim().firstOrNull()?.uppercase() ?: "N", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+    }
+}
+
+@Composable
+private fun GroupAvatar() {
+    Box(Modifier.size(48.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+        Text("👥", fontSize = 22.sp)
     }
 }
