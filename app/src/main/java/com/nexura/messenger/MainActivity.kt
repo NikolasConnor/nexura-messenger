@@ -182,7 +182,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         if (signedIn) {
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
-                api.myProfile() // Create a profile row for accounts that have not opened settings yet.\n                val pushToken = FirebaseMessaging.getInstance().token.await()
+                api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                val pushToken = FirebaseMessaging.getInstance().token.await()
                 if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
                 chats = api.chats()
             } catch (e: Exception) {
