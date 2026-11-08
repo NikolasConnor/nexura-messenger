@@ -100,7 +100,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
     var draft by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
-    var users by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
+    var users by remember { mutableStateOf(emptyList<UserItem>()) }
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -112,7 +112,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var createGroupOpen by remember { mutableStateOf(false) }
     var groupTitle by remember { mutableStateOf("") }
     var groupSearch by remember { mutableStateOf("") }
-    var groupUsers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
+    var groupUsers by remember { mutableStateOf(emptyList<UserItem>()) }
     var selectedGroupUsers by remember { mutableStateOf(emptySet<String>()) }
     var creatingGroup by remember { mutableStateOf(false) }
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
@@ -182,7 +182,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         if (signedIn) {
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
-                val pushToken = FirebaseMessaging.getInstance().token.await()
+                api.myProfile() // Create a profile row for accounts that have not opened settings yet.\n                val pushToken = FirebaseMessaging.getInstance().token.await()
                 if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
                 chats = api.chats()
             } catch (e: Exception) {
@@ -380,9 +380,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     OutlinedTextField(value = groupSearch, onValueChange = { groupSearch = it }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), singleLine = true, label = { Text("Найти участников") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }))
                                     TextButton(onClick = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }) { Text("Искать") }
                                     groupUsers.forEach { person ->
-                                        Row(Modifier.fillMaxWidth().clickable { selectedGroupUsers = if (person.first in selectedGroupUsers) selectedGroupUsers - person.first else selectedGroupUsers + person.first }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Row(Modifier.fillMaxWidth().clickable { selectedGroupUsers = if (person.id in selectedGroupUsers) selectedGroupUsers - person.first else selectedGroupUsers + person.first }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Checkbox(checked = person.first in selectedGroupUsers, onCheckedChange = { checked -> selectedGroupUsers = if (checked) selectedGroupUsers + person.first else selectedGroupUsers - person.first })
-                                            Avatar(person.second)
+                                            Avatar(person.displayName, person.avatar)
                                             Text(person.second, color = MainText, modifier = Modifier.padding(start = 10.dp).weight(1f))
                                         }
                                     }
@@ -415,8 +415,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
                                         scope.launch {
                                             try {
-                                                val id = api.createDirect(user.first)
-                                                val chat = ChatItem(id, user.second, "direct", null)
+                                                val id = api.createDirect(user.id)
+                                                val chat = ChatItem(id, user.displayName, "direct", null, avatar = user.avatar)
                                                 selected = chat
                                                 messages = api.messages(id)
                                                 loadChats()
@@ -453,7 +453,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { openChat(chat) }.padding(vertical = 11.dp, horizontal = 7.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        if (chat.kind == "group") GroupAvatar() else Avatar(chat.title)
+                                        if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
                                         Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                             Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                                             Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
@@ -627,9 +627,16 @@ private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-private fun Avatar(name: String) {
+private fun Avatar(name: String, avatar: String? = null) {
+    val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+    val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
+        ?: name.takeIf { it in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙") }
     Box(Modifier.size(48.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
-        if (name in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙")) Text(name, fontSize = 23.sp) else Text(name.trim().firstOrNull()?.uppercase() ?: "N", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        when {
+            imageUrl != null -> AsyncImage(model = imageUrl, contentDescription = "Аватар $name", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            !emoji.isNullOrBlank() -> Text(emoji, fontSize = 23.sp)
+            else -> Text(name.trim().firstOrNull()?.uppercase() ?: "N", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        }
     }
 }
 
