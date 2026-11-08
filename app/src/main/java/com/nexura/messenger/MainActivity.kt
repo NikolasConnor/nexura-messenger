@@ -173,7 +173,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
     fun inviteContact(contact: DeviceContact) {
-        val shareText = "Привет, \${contact.name}! Давай общаться в Nexura Messenger. Найди Nexura в Google Play: https://play.google.com/store/apps/details?id=com.nexura.messenger"
+        val shareText = "Привет, ${contact.name}! Давай общаться в Nexura Messenger. Найди Nexura в Google Play: https://play.google.com/store/apps/details?id=com.nexura.messenger"
         val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, shareText) }
         context.startActivity(Intent.createChooser(send, "Пригласить в Nexura"))
     }
@@ -500,7 +500,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 if (contactsError.isNotBlank()) Text(contactsError, color = if (contactsSynced) SecondaryText else Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                                 if (contactsSynced) {
                                     val registered = deviceContacts.count { it.match != null }
-                                    Text("В Nexura: $registered · Не зарегистрированы: \${deviceContacts.size - registered}", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
+                                    Text("В Nexura: $registered · Не зарегистрированы: ${deviceContacts.size - registered}", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                                     LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
                                         items(deviceContacts, key = { it.phone }) { person ->
                                             Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
