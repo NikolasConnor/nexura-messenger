@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexura.messenger.data.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 private val Bg = Color(0xFF080D16)
 private val Surface1 = Color(0xFF111A29)
@@ -132,6 +133,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось восстановить сессию"
                 if (store.accessToken.isNullOrBlank()) signedIn = false
+            }
+        }
+    }
+
+    // Keep the open conversation fresh without requiring the user to tap Refresh.
+    // The list is refreshed less often to avoid unnecessary database traffic.
+    LaunchedEffect(signedIn, selected?.id) {
+        if (signedIn) {
+            while (true) {
+                delay(if (selected != null) 2500L else 15000L)
+                try {
+                    val currentChat = selected
+                    if (currentChat != null) {
+                        val latest = api.messages(currentChat.id)
+                        if (selected?.id == currentChat.id) messages = latest
+                    } else {
+                        chats = api.chats()
+                    }
+                } catch (_: Exception) {
+                    // A temporary network interruption should not erase the current screen.
+                }
             }
         }
     }
