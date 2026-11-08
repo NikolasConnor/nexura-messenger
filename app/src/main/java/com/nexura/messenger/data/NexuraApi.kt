@@ -14,8 +14,9 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 
-data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0)
+data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂")
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
+data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text", val replyToId: String? = null, val editedAt: String? = null)
 
 class NexuraApi(private val store: SessionStore) {
@@ -122,16 +123,45 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
         val raw = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,last_read_at,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc"))
-        return (0 until raw.length()).mapNotNull { i ->
+        val base = (0 until raw.length()).mapNotNull { i ->
             val membership = raw.optJSONObject(i) ?: return@mapNotNull null
             val c = membership.optJSONObject("conversations") ?: return@mapNotNull null
-            val id = c.optString("id")
-            val lastRead = membership.optString("last_read_at").takeIf { it.isNotBlank() } ?: "1970-01-01T00:00:00Z"
+            val id = c.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val kind = c.optString("kind").takeIf { it != "null" } ?: "direct"
+            val lastRead = membership.optString("last_read_at").takeIf { it.isNotBlank() && it != "null" } ?: "1970-01-01T00:00:00Z"
             val unread = try {
-                JSONArray(call("/rest/v1/messages?select=id&conversation_id=eq.$id&sender_id=neq.$uid&created_at=gt.${java.net.URLEncoder.encode(lastRead, "UTF-8")}&deleted_at=is.null&limit=100")).length()
+                val encoded = java.net.URLEncoder.encode(lastRead, "UTF-8")
+                JSONArray(call("/rest/v1/messages?select=id&conversation_id=eq.$id&sender_id=neq.$uid&created_at=gt.$encoded&deleted_at=is.null&limit=100")).length()
             } catch (_: Exception) { 0 }
-            ChatItem(id, c.optString("title").ifBlank { if (c.optString("kind") == "direct") "Личный чат" else "Группа" },
-                c.optString("kind"), c.optString("last_message_at").takeIf { it.isNotBlank() }, unread)
+            val title = c.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: if (kind == "direct") "Пользователь" else "Группа"
+            ChatItem(id, title, kind, c.optString("last_message_at").takeIf { it.isNotBlank() && it != "null" }, unread)
+        }
+        val directIds = base.filter { it.kind == "direct" }.map { it.id }
+        if (directIds.isEmpty()) return base
+        val membershipRows = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,user_id&conversation_id=in.(${directIds.joinToString(",")})&user_id=neq.$uid"))
+        val peerByChat = mutableMapOf<String, String>()
+        val peerIds = mutableSetOf<String>()
+        for (i in 0 until membershipRows.length()) {
+            val row = membershipRows.optJSONObject(i) ?: continue
+            val chatId = row.optString("conversation_id")
+            val peerId = row.optString("user_id")
+            if (chatId.isNotBlank() && peerId.isNotBlank() && peerId != "null") { peerByChat[chatId] = peerId; peerIds.add(peerId) }
+        }
+        if (peerIds.isEmpty()) return base
+        val profileRows = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=in.(${peerIds.joinToString(",")})"))
+        val profiles = mutableMapOf<String, Pair<String, String>>()
+        for (i in 0 until profileRows.length()) {
+            val p = profileRows.optJSONObject(i) ?: continue
+            val id = p.optString("id")
+            val name = p.optString("display_name").takeIf { it.isNotBlank() && it != "null" } ?: p.optString("username").takeIf { it.isNotBlank() && it != "null" } ?: "Пользователь"
+            val avatar = p.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂"
+            profiles[id] = name to avatar
+        }
+        return base.map { chat ->
+            if (chat.kind != "direct") chat else {
+                val profile = profiles[peerByChat[chat.id]]
+                chat.copy(title = profile?.first ?: "Пользователь", avatar = profile?.second ?: "🙂")
+            }
         }
     }
     suspend fun messages(chatId: String): List<MessageItem> {
@@ -242,13 +272,16 @@ class NexuraApi(private val store: SessionStore) {
         call("/rest/v1/profiles?id=eq.$uid", "PATCH", payload.toString(), prefer = "return=minimal")
     }
 
-    suspend fun findUsers(query: String): List<Pair<String,String>> {
-        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)&limit=20"))
-        return (0 until raw.length()).map { i ->
-            val p = raw.getJSONObject(i)
-            p.optString("id") to (p.optString("display_name").ifBlank { p.optString("username") })
-        }.filter { it.first != store.userId }
+    suspend fun findUsers(query: String): List<UserItem> {
+        val encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)&limit=20"))
+        return (0 until raw.length()).mapNotNull { i ->
+            val p = raw.optJSONObject(i) ?: return@mapNotNull null
+            val id = p.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val name = p.optString("display_name").takeIf { it.isNotBlank() && it != "null" } ?: p.optString("username").takeIf { it.isNotBlank() && it != "null" } ?: "Пользователь"
+            val avatar = p.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂"
+            UserItem(id, name, avatar)
+        }.filter { it.id != store.userId }
     }
     private fun normalizeUuid(value: String): String {
         val raw = value.trim()
