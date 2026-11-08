@@ -185,6 +185,13 @@ class NexuraApi(private val store: SessionStore) {
         return uuid
     }
 
+    suspend fun createGroup(title: String, memberIds: List<String>): String {
+        val ids = JSONArray()
+        memberIds.distinct().forEach { ids.put(normalizeUuid(it)) }
+        val payload = JSONObject().put("p_title", title.trim()).put("p_member_ids", ids)
+        return normalizeUuid(call("/rest/v1/rpc/create_group_conversation", "POST", payload.toString()))
+    }
+
     suspend fun createDirect(userId: String): String {
         val result = call("/rest/v1/rpc/create_direct_conversation", "POST",
             JSONObject().put("p_other_user_id", normalizeUuid(userId)).toString())
