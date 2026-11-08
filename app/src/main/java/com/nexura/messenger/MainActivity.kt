@@ -58,13 +58,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
-private val Bg = Color(0xFF080D16)
-private val Surface1 = Color(0xFF111A29)
-private val Surface2 = Color(0xFF172337)
-private val Accent = Color(0xFF86A5FF)
-private val Accent2 = Color(0xFF9A8BFF)
+private val Bg = Color(0xFF0B1220)
+private val Surface1 = Color(0xFF151F30)
+private val Surface2 = Color(0xFF202D42)
+private val Accent = Color(0xFF75B7FF)
+private val Accent2 = Color(0xFF8C9EFF)
 private val MainText = Color(0xFFF4F6FC)
-private val SecondaryText = Color(0xFF91A0B7)
+private val SecondaryText = Color(0xFFA7B4C8)
 private val Danger = Color(0xFFFF858D)
 private val Success = Color(0xFF8DDEB0)
 
@@ -430,18 +430,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 selected == null -> {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("nexura", fontSize = 31.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-1).sp)
-                                Text("Сообщения", color = SecondaryText, fontSize = 13.sp)
+                                Text("Nexura", fontSize = 29.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.5).sp)
+                                Text("Всегда на связи", color = SecondaryText, fontSize = 13.sp)
                             }
                             IconButton(onClick = { showChatFilter = !showChatFilter; if (!showChatFilter) chatFilter = "" }) {
                                 Icon(Icons.Default.Search, "Поиск по чатам", tint = MainText)
                             }
-                            IconButton(onClick = { loadChats() }) { Icon(Icons.Default.Refresh, "Обновить", tint = MainText) }
                             IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) { Icon(Icons.Default.GroupAdd, "Создать группу", tint = Accent) }
                             IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
-                                Icon(Icons.Default.Settings, "Настройки", tint = SecondaryText)
+                                Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                             }
                         }
                         if (homeTab == "chats" && showChatFilter) {
@@ -570,9 +569,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         }
                         if (homeTab == "chats") {
-                        Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Ваши чаты", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            Text("${visibleChats.size}", color = SecondaryText, fontSize = 13.sp)
+                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Недавние", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("${visibleChats.size} чатов", color = SecondaryText, fontSize = 12.sp)
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         if (visibleChats.isEmpty()) {
@@ -592,13 +591,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
                                 items(visibleChats, key = { it.id }) { chat ->
                                     Row(
-                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { openChat(chat) }.padding(vertical = 11.dp, horizontal = 7.dp),
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable { openChat(chat) }.padding(vertical = 13.dp, horizontal = 9.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
-                                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                            Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                                            Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                                        Column(Modifier.weight(1f).padding(start = 13.dp)) {
+                                            Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
+                                            Text(if (chat.kind == "group") "Групповой чат · Открыть переписку" else "Личный чат · Открыть переписку", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                                         }
                                         if (chat.unreadCount > 0) {
                                             Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -836,7 +835,7 @@ private fun Avatar(name: String, avatar: String? = null) {
     val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
     val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
         ?: name.takeIf { it in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙") }
-    Box(Modifier.size(48.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(54.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
         when {
             imageUrl != null -> AsyncImage(model = imageUrl, contentDescription = "Аватар $name", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             !emoji.isNullOrBlank() -> Text(emoji, fontSize = 23.sp)
@@ -847,7 +846,7 @@ private fun Avatar(name: String, avatar: String? = null) {
 
 @Composable
 private fun GroupAvatar() {
-    Box(Modifier.size(48.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(54.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
         Text("👥", fontSize = 22.sp)
     }
 }
