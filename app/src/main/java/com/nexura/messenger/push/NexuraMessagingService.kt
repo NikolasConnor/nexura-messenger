@@ -1,5 +1,11 @@
 package com.nexura.messenger.push
 
+import com.nexura.messenger.data.NexuraApi
+import com.nexura.messenger.data.SessionStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -13,7 +19,20 @@ import com.google.firebase.messaging.RemoteMessage
 import com.nexura.messenger.MainActivity
 
 class NexuraMessagingService : FirebaseMessagingService() {
-    override fun onNewToken(token: String) { }
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                val store = SessionStore(applicationContext)
+                if (store.accessToken.isNullOrBlank()) return@launch
+                val api = NexuraApi(store)
+                if (store.userId.isNullOrBlank()) api.refreshSession()
+                if (!store.userId.isNullOrBlank()) api.registerPushToken(token)
+            } catch (_: Exception) {
+                // Registration is retried by MainActivity after the next sign-in.
+            }
+        }
+    }
     override fun onMessageReceived(message: RemoteMessage) {
         val title = message.data["title"] ?: message.notification?.title ?: "Nexura"
         val body = message.data["body"] ?: message.notification?.body ?: "Новое сообщение"
