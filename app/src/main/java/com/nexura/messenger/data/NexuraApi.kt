@@ -17,6 +17,7 @@ import java.util.UUID
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂")
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
+data class ContactMatch(val phone: String, val userId: String, val displayName: String, val avatar: String)
 data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text", val replyToId: String? = null, val editedAt: String? = null)
 
 class NexuraApi(private val store: SessionStore) {
@@ -271,6 +272,22 @@ class NexuraApi(private val store: SessionStore) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val payload = JSONObject().put("display_name", displayName.trim()).put("avatar_url", avatar)
         call("/rest/v1/profiles?id=eq.$uid", "PATCH", payload.toString(), prefer = "return=minimal")
+    }
+
+    suspend fun matchContacts(phoneNumbers: List<String>): List<ContactMatch> {
+        if (phoneNumbers.isEmpty()) return emptyList()
+        val numbers = JSONArray()
+        phoneNumbers.distinct().take(500).forEach { numbers.put(it) }
+        val raw = JSONArray(call("/rest/v1/rpc/match_contact_users", "POST",
+            JSONObject().put("p_phone_numbers", numbers).toString()))
+        return (0 until raw.length()).mapNotNull { i ->
+            val row = raw.optJSONObject(i) ?: return@mapNotNull null
+            val phone = row.optString("phone").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val id = row.optString("user_id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            ContactMatch(phone, id,
+                row.optString("display_name").ifBlank { "Пользователь" },
+                row.optString("avatar_url").ifBlank { "🙂" })
+        }
     }
 
     suspend fun findUsers(query: String): List<UserItem> {
