@@ -31,25 +31,42 @@ class NexuraApi(private val store: SessionStore) {
         .connectTimeout(20, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
-        val builder = Request.Builder().url("$BASE_URL$path")
-            .header("apikey", PUBLIC_KEY).header("Accept", "application/json")
-        val token = if (auth) store.accessToken else null
-        builder.header("Authorization", "Bearer ${token ?: PUBLIC_KEY}")
-        if (prefer != null) builder.header("Prefer", prefer)
         val requestBody = body?.toRequestBody(JSON)
-        when (method) {
-            "POST" -> builder.post(requestBody ?: "".toRequestBody(JSON))
-            "PATCH" -> builder.patch(requestBody ?: "".toRequestBody(JSON))
-            "DELETE" -> builder.delete(requestBody)
-            else -> builder.get()
-        }
-        client.newCall(builder.build()).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                val message = try { JSONObject(text).optString("message").ifBlank { text } } catch (_: Exception) { text }
-                throw IOException(message.ifBlank { "HTTP ${response.code}" })
+        fun buildRequest(token: String?): Request {
+            val builder = Request.Builder().url("$BASE_URL$path")
+                .header("apikey", PUBLIC_KEY)
+                .header("Accept", "application/json")
+                .header("Authorization", "Bearer ${token ?: PUBLIC_KEY}")
+            if (prefer != null) builder.header("Prefer", prefer)
+            when (method) {
+                "POST" -> builder.post(requestBody ?: "".toRequestBody(JSON))
+                "PATCH" -> builder.patch(requestBody ?: "".toRequestBody(JSON))
+                "DELETE" -> builder.delete(requestBody)
+                else -> builder.get()
             }
-            text
+            return builder.build()
+        }
+
+        var response = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
+        // Refresh an expired access token once, then retry the original request.
+        if (response.code == 401 && auth && !store.refreshToken.isNullOrBlank()) {
+            response.close()
+            refreshSession()
+            val freshToken = store.accessToken
+                ?: throw IOException("Сессия истекла. Войдите в Nexura ещё раз.")
+            response = client.newCall(buildRequest(freshToken)).execute()
+        }
+        response.use {
+            val responseText = it.body?.string().orEmpty()
+            if (!it.isSuccessful) {
+                val message = try {
+                    JSONObject(responseText).optString("message").ifBlank { responseText }
+                } catch (_: Exception) {
+                    responseText
+                }
+                throw IOException(message.ifBlank { "HTTP ${it.code}" })
+            }
+            responseText
         }
     }
 
