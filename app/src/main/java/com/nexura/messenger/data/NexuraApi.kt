@@ -143,7 +143,16 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun myProfile(): UserProfile {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=eq.$uid&limit=1"))
-        if (raw.length() == 0) throw IOException("Профиль ещё не создан. Попробуйте перезайти в аккаунт.")
+        if (raw.length() == 0) {
+            val authUser = JSONObject(call("/auth/v1/user", auth = true))
+            val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
+            val emailName = authUser.optString("email").substringBefore("@").takeIf { it.isNotBlank() } ?: "Пользователь"
+            val display = metadata.optString("display_name").ifBlank { emailName }
+            call("/rest/v1/profiles", "POST",
+                JSONObject().put("id", uid).put("display_name", display).put("avatar_url", "🙂").toString(),
+                prefer = "return=minimal")
+            return UserProfile(uid, display, "", "🙂")
+        }
         val p = raw.getJSONObject(0)
         return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"))
     }
