@@ -2,6 +2,9 @@ package com.nexura.messenger
 
 import android.Manifest
 import android.content.Intent
+import android.provider.ContactsContract
+import android.telephony.PhoneNumberUtils
+import java.util.Locale
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
@@ -49,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexura.messenger.data.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
@@ -62,6 +67,8 @@ private val MainText = Color(0xFFF4F6FC)
 private val SecondaryText = Color(0xFF91A0B7)
 private val Danger = Color(0xFFFF858D)
 private val Success = Color(0xFF8DDEB0)
+
+private data class DeviceContact(val name: String, val phone: String, val match: ContactMatch? = null)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -106,6 +113,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var homeTab by remember { mutableStateOf("chats") }
+    var deviceContacts by remember { mutableStateOf(emptyList<DeviceContact>()) }
+    var syncingContacts by remember { mutableStateOf(false) }
+    var contactsSynced by remember { mutableStateOf(false) }
+    var contactsError by remember { mutableStateOf("") }
     var chatFilter by remember { mutableStateOf("") }
     var showChatFilter by remember { mutableStateOf(false) }
     var openMessageMenu by remember { mutableStateOf<String?>(null) }
@@ -124,6 +135,48 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editDraft by remember { mutableStateOf("") }
+
+    fun syncContacts() {
+        scope.launch {
+            syncingContacts = true
+            contactsError = ""
+            try {
+                val rawContacts = withContext(Dispatchers.IO) {
+                    val found = linkedMapOf<String, String>()
+                    val country = Locale.getDefault().country.ifBlank { "US" }
+                    val projection = arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER)
+                    context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, projection, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                        val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                        while (cursor.moveToNext() && found.size < 500) {
+                            val name = if (nameIndex >= 0) cursor.getString(nameIndex).orEmpty() else ""
+                            val rawNumber = if (numberIndex >= 0) cursor.getString(numberIndex).orEmpty() else ""
+                            val normalized = try { PhoneNumberUtils.formatNumberToE164(rawNumber, country) } catch (_: Exception) { null }
+                            val phone = normalized ?: rawNumber.filterIndexed { index, ch -> ch.isDigit() || (ch == '+' && index == 0) }
+                            if (phone.matches(Regex("^\\+[1-9][0-9]{7,14}$"))) found.putIfAbsent(phone, name.ifBlank { phone })
+                        }
+                    }
+                    found.map { DeviceContact(it.value, it.key) }
+                }
+                val matches = api.matchContacts(rawContacts.map { it.phone })
+                val byPhone = matches.associateBy { it.phone }
+                deviceContacts = rawContacts.map { it.copy(match = byPhone[it.phone]) }
+                contactsSynced = true
+                if (deviceContacts.isEmpty()) contactsError = "В адресной книге не найдено номеров в международном формате."
+            } catch (e: Exception) { contactsError = e.message ?: "Не удалось синхронизировать контакты" }
+            finally { syncingContacts = false }
+        }
+    }
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) syncContacts() else contactsError = "Разрешите доступ к контактам, чтобы найти знакомых в Nexura."
+    }
+
+    fun inviteContact(contact: DeviceContact) {
+        val shareText = "Привет, \${contact.name}! Давай общаться в Nexura Messenger. Найди Nexura в Google Play: https://play.google.com/store/apps/details?id=com.nexura.messenger"
+        val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, shareText) }
+        context.startActivity(Intent.createChooser(send, "Пригласить в Nexura"))
+    }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && selected != null) {
@@ -428,6 +481,52 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                        if (homeTab == "contacts") {
+                            Column(Modifier.fillMaxSize().padding(top = 12.dp)) {
+                                Text("Контакты", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                                Text("Найдём знакомых, которые уже используют Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
+                                Card(colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(14.dp)) {
+                                        Text("Синхронизация адресной книги", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text("Номера используются только для поиска совпадений. Они не публикуются в профиле.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                                        Button(onClick = {
+                                            if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED) syncContacts()
+                                            else contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                                        }, enabled = !syncingContacts, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(12.dp)) {
+                                            Text(if (syncingContacts) "Синхронизируем…" else if (contactsSynced) "Обновить контакты" else "Найти контакты")
+                                        }
+                                    }
+                                }
+                                if (contactsError.isNotBlank()) Text(contactsError, color = if (contactsSynced) SecondaryText else Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+                                if (contactsSynced) {
+                                    val registered = deviceContacts.count { it.match != null }
+                                    Text("В Nexura: $registered · Не зарегистрированы: \${deviceContacts.size - registered}", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
+                                    LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
+                                        items(deviceContacts, key = { it.phone }) { person ->
+                                            Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                if (person.match != null) Avatar(person.match.displayName, person.match.avatar) else Avatar(person.name, "👤")
+                                                Column(Modifier.weight(1f).padding(start = 11.dp)) {
+                                                    Text(person.match?.displayName ?: person.name, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                                    Text(if (person.match != null) "Уже в Nexura" else "Пока не зарегистрирован", color = if (person.match != null) Success else SecondaryText, fontSize = 11.sp)
+                                                }
+                                                if (person.match != null) {
+                                                    TextButton(onClick = {
+                                                        scope.launch {
+                                                            try {
+                                                                val id = api.createDirect(person.match.userId)
+                                                                openChat(ChatItem(id, person.match.displayName, "direct", null, avatar = person.match.avatar))
+                                                                homeTab = "chats"
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
+                                                        }
+                                                    }) { Text("Написать") }
+                                                } else TextButton(onClick = { inviteContact(person) }) { Text("Пригласить") }
+                                            }
+                                            HorizontalDivider(color = Surface1)
+                                        }
+                                    }
+                                } else Spacer(Modifier.weight(1f))
+                            }
+                        }
                         if (homeTab == "search") {
                         OutlinedTextField(
                             value = search, onValueChange = { search = it; users = emptyList() },
@@ -522,6 +621,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 onClick = { homeTab = "chats"; createGroupOpen = false },
                                 icon = { Icon(Icons.Default.ChatBubbleOutline, contentDescription = null) },
                                 label = { Text("Чаты") }
+                            )
+                            NavigationBarItem(
+                                selected = homeTab == "contacts",
+                                onClick = { homeTab = "contacts"; createGroupOpen = false },
+                                icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
+                                label = { Text("Контакты") }
                             )
                             NavigationBarItem(
                                 selected = homeTab == "search",
