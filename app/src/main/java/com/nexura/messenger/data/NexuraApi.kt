@@ -1,5 +1,6 @@
 package com.nexura.messenger.data
 
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -18,6 +19,7 @@ class NexuraApi(private val store: SessionStore) {
     companion object {
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
         const val PUBLIC_KEY = "sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY"
+        const val AUTH_REDIRECT = "nexura://auth/callback"
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
     private val client = OkHttpClient.Builder()
@@ -46,17 +48,37 @@ class NexuraApi(private val store: SessionStore) {
         }
     }
 
+    suspend fun consumeAuthCallback(uri: Uri) {
+        val fragment = uri.fragment.orEmpty()
+        val params = Uri.parse("https://nexura.invalid/?$fragment")
+        val errorDescription = params.getQueryParameter("error_description")
+            ?: uri.getQueryParameter("error_description")
+        if (!errorDescription.isNullOrBlank()) throw IOException(Uri.decode(errorDescription))
+        val access = params.getQueryParameter("access_token")
+            ?: uri.getQueryParameter("access_token")
+            ?: throw IOException("В ссылке подтверждения нет токена авторизации. Запросите новое письмо.")
+        val refresh = params.getQueryParameter("refresh_token")
+            ?: uri.getQueryParameter("refresh_token")
+        if (refresh.isNullOrBlank()) throw IOException("Не удалось получить токен обновления. Запросите новое письмо.")
+        store.accessToken = access
+        store.refreshToken = refresh
+        val user = JSONObject(call("/auth/v1/user", auth = true))
+        store.userId = user.optString("id").takeIf { it.isNotBlank() }
+            ?: throw IOException("Supabase не вернул профиль пользователя.")
+    }
+
     suspend fun signIn(email: String, password: String) {
         val result = JSONObject(call("/auth/v1/token?grant_type=password", "POST",
             JSONObject().put("email", email).put("password", password).toString(), auth = false))
         saveSession(result)
     }
     suspend fun signUp(email: String, password: String, displayName: String) {
-        val result = JSONObject(call("/auth/v1/signup", "POST",
+        val redirect = java.net.URLEncoder.encode(AUTH_REDIRECT, "UTF-8")
+        val result = JSONObject(call("/auth/v1/signup?redirect_to=$redirect", "POST",
             JSONObject().put("email", email).put("password", password)
                 .put("data", JSONObject().put("display_name", displayName)).toString(), auth = false))
         if (result.has("access_token")) saveSession(result)
-        else throw IOException("Аккаунт создан. Подтвердите email, затем войдите.")
+        else throw IOException("Аккаунт создан. Подтвердите email по ссылке из письма, затем вернитесь в Nexura.")
     }
     private fun saveSession(o: JSONObject) {
         store.accessToken = o.optString("access_token").takeIf { it.isNotBlank() }
@@ -71,7 +93,8 @@ class NexuraApi(private val store: SessionStore) {
         saveSession(o)
     }
     suspend fun resendConfirmation(email: String) {
-        call("/auth/v1/resend", "POST",
+        val redirect = java.net.URLEncoder.encode(AUTH_REDIRECT, "UTF-8")
+        call("/auth/v1/resend?redirect_to=$redirect", "POST",
             JSONObject().put("type", "signup").put("email", email.trim()).toString(),
             auth = false)
     }
