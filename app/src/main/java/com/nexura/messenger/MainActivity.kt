@@ -109,6 +109,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupUsers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
     var selectedGroupUsers by remember { mutableStateOf(emptySet<String>()) }
     var creatingGroup by remember { mutableStateOf(false) }
+    var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var editDraft by remember { mutableStateOf("") }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && selected != null) {
@@ -145,9 +148,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     fun openChat(chat: ChatItem) {
         selected = chat
         messages = emptyList()
+        replyTarget = null
         scope.launch {
-            try { messages = api.messages(chat.id) }
-            catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
+            try {
+                messages = api.messages(chat.id)
+                api.markChatRead(chat.id)
+                chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
+            } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
         }
     }
 
@@ -443,7 +450,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                                             Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
                                         }
-                                        Text("›", color = SecondaryText, fontSize = 24.sp)
+                                        if (chat.unreadCount > 0) {
+                                            Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                                Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        } else Text("›", color = SecondaryText, fontSize = 24.sp)
                                     }
                                     HorizontalDivider(color = Surface1)
                                 }
@@ -452,6 +463,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                 }
                 else -> {
+                    if (editingTarget != null) {
+                        AlertDialog(
+                            onDismissRequest = { editingTarget = null },
+                            title = { Text("Изменить сообщение") },
+                            text = { OutlinedTextField(value = editDraft, onValueChange = { editDraft = it }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5) },
+                            confirmButton = { TextButton(onClick = { val target = editingTarget!!; scope.launch { try { api.editMessage(target.id, editDraft); messages = api.messages(selected!!.id); editingTarget = null } catch (e: Exception) { error = e.message ?: "Не удалось изменить сообщение" } } }) { Text("Сохранить") } },
+                            dismissButton = { TextButton(onClick = { editingTarget = null }) { Text("Отмена") } }
+                        )
+                    }
                     val chat = selected!!
                     Column(Modifier.fillMaxSize()) {
                         Row(Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -490,12 +510,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 bottomEnd = if (mine) 5.dp else 18.dp
                                             )).background(if (mine) Color(0xFF304B83) else Surface1).padding(horizontal = 13.dp, vertical = 10.dp)
                                         ) {
+                                            if (msg.replyToId != null) {
+                                                val parent = messages.firstOrNull { it.id == msg.replyToId }
+                                                Text("↪ Ответ: ${parent?.content?.take(70) ?: "сообщение"}", color = Accent, fontSize = 11.sp, modifier = Modifier.padding(bottom = 5.dp))
+                                            }
                                             if (msg.messageType == "image") {
                                                 AsyncImage(model = msg.content, contentDescription = "Изображение", modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
                                             } else {
                                                 Text(msg.content, color = MainText, fontSize = 14.sp)
                                             }
-                                            Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 9.sp, modifier = Modifier.align(Alignment.End).padding(top = 5.dp))
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
+                                                if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 9.sp)
+                                                Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 9.sp)
+                                            }
+                                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                                TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Ответить", fontSize = 10.sp, color = Accent) }
+                                                if (mine && msg.messageType == "text") {
+                                                    TextButton(onClick = { editingTarget = msg; editDraft = msg.content }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Изменить", fontSize = 10.sp, color = Accent) }
+                                                    TextButton(onClick = { scope.launch { try { api.deleteMessage(msg.id); messages = messages.filterNot { it.id == msg.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить" } }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Удалить", fontSize = 10.sp, color = Danger) }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -506,6 +540,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            if (replyTarget != null) {
+                                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text("Ответ на: ${replyTarget!!.content.take(45)}", color = Accent, fontSize = 11.sp)
+                                    TextButton(onClick = { replyTarget = null }, contentPadding = PaddingValues(0.dp)) { Text("Отменить", color = SecondaryText, fontSize = 10.sp) }
+                                }
+                            }
                             IconButton(onClick = { imagePicker.launch("image/*") }, enabled = !sendingImage && !sendingMessage) {
                                 if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
                                 else Icon(Icons.Default.Image, "Прикрепить фото", tint = Accent)
@@ -520,7 +560,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (text.isNotEmpty() && !sendingMessage) scope.launch {
                                         sendingMessage = true
                                         error = ""
-                                        try { api.sendMessage(chat.id, text); draft = ""; messages = api.messages(chat.id) }
+                                        try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
                                         catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
                                         finally { sendingMessage = false }
                                     }
