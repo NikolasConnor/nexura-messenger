@@ -67,6 +67,21 @@ class NexuraApi(private val store: SessionStore) {
             ?: throw IOException("Supabase не вернул профиль пользователя.")
     }
 
+    suspend fun sendPhoneCode(phone: String, displayName: String = "") {
+        val payload = JSONObject().put("phone", phone.trim()).put("create_user", true)
+        if (displayName.isNotBlank()) payload.put("data", JSONObject().put("display_name", displayName.trim()))
+        call("/auth/v1/otp", "POST", payload.toString(), auth = false)
+    }
+    suspend fun verifyPhoneCode(phone: String, code: String) {
+        val result = JSONObject(call("/auth/v1/verify", "POST",
+            JSONObject().put("phone", phone.trim()).put("token", code.trim()).put("type", "sms").toString(),
+            auth = false))
+        saveSession(result)
+        if (store.accessToken.isNullOrBlank() || store.userId.isNullOrBlank()) {
+            throw IOException("Код принят, но Supabase не вернул полноценную сессию. Попробуйте войти ещё раз.")
+        }
+    }
+
     suspend fun signIn(email: String, password: String) {
         val result = JSONObject(call("/auth/v1/token?grant_type=password", "POST",
             JSONObject().put("email", email).put("password", password).toString(), auth = false))
