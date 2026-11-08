@@ -51,6 +51,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore) {
     var displayName by remember { mutableStateOf("") }
     var register by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    var notice by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var chats by remember { mutableStateOf(emptyList<ChatItem>()) }
     var selected by remember { mutableStateOf<ChatItem?>(null) }
@@ -72,6 +73,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore) {
                     OutlinedTextField(email,{email=it},label={Text("Email")},singleLine=true,modifier=Modifier.fillMaxWidth())
                     OutlinedTextField(password,{password=it},label={Text("Пароль")},visualTransformation=PasswordVisualTransformation(),singleLine=true,modifier=Modifier.fillMaxWidth())
                     if (error.isNotBlank()) Text(error,color=Color(0xFFFF8585),modifier=Modifier.padding(vertical=8.dp))
+                    if (notice.isNotBlank()) Text(notice,color=Color(0xFF8FE0B0),modifier=Modifier.padding(vertical=8.dp))
+                    if (!register) TextButton(
+                        onClick = {
+                            scope.launch {
+                                busy = true
+                                error = ""
+                                notice = ""
+                                try {
+                                    api.resendConfirmation(email.trim())
+                                    notice = "Запрос на повторную отправку принят. Проверьте входящие и папку «Спам»."
+                                } catch (e: Exception) {
+                                    error = e.message ?: "Не удалось запросить письмо"
+                                } finally { busy = false }
+                            }
+                        },
+                        enabled = !busy && email.contains("@")
+                    ) { Text("Отправить письмо подтверждения повторно") }
                     Button(onClick={
                         scope.launch { busy=true; error=""; try {
                             if(register) api.signUp(email.trim(),password,displayName.trim()) else api.signIn(email.trim(),password)
