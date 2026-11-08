@@ -247,6 +247,7 @@ class NexuraApi(private val store: SessionStore) {
         call("/rest/v1/messages", "POST",
             JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "image").put("content", path).toString(),
             prefer = "return=minimal")
+        notifyChatPush(chatId, "📷 Фото")
     }
 
     suspend fun myProfile(): UserProfile {
