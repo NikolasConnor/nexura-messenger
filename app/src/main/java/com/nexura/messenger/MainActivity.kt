@@ -527,7 +527,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Ответить", fontSize = 10.sp, color = Accent) }
                                                 if (mine && msg.messageType == "text") {
                                                     TextButton(onClick = { editingTarget = msg; editDraft = msg.content }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Изменить", fontSize = 10.sp, color = Accent) }
-                                                    TextButton(onClick = { scope.launch { try { api.deleteMessage(msg.id); messages = messages.filterNot { it.id == msg.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить" } }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Удалить", fontSize = 10.sp, color = Danger) }
+                                                    TextButton(onClick = { scope.launch { try { api.deleteMessage(msg.id); messages = messages.filterNot { it.id == msg.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить" } } }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Удалить", fontSize = 10.sp, color = Danger) }
                                                 }
                                             }
                                         }
