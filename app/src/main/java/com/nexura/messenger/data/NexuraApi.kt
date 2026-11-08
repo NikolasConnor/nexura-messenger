@@ -14,9 +14,9 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 
-data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?)
+data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
-data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text")
+data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text", val replyToId: String? = null, val editedAt: String? = null)
 
 class NexuraApi(private val store: SessionStore) {
     companion object {
@@ -121,27 +121,56 @@ class NexuraApi(private val store: SessionStore) {
     }
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
-        val raw = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc"))
+        val raw = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,last_read_at,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc"))
         return (0 until raw.length()).mapNotNull { i ->
-            val c = raw.optJSONObject(i)?.optJSONObject("conversations") ?: return@mapNotNull null
-            ChatItem(c.optString("id"), c.optString("title").ifBlank { if (c.optString("kind") == "direct") "Личный чат" else "Группа" },
-                c.optString("kind"), c.optString("last_message_at").takeIf { it.isNotBlank() })
+            val membership = raw.optJSONObject(i) ?: return@mapNotNull null
+            val c = membership.optJSONObject("conversations") ?: return@mapNotNull null
+            val id = c.optString("id")
+            val lastRead = membership.optString("last_read_at").takeIf { it.isNotBlank() } ?: "1970-01-01T00:00:00Z"
+            val unread = try {
+                JSONArray(call("/rest/v1/messages?select=id&conversation_id=eq.$id&sender_id=neq.$uid&created_at=gt.${java.net.URLEncoder.encode(lastRead, "UTF-8")}&deleted_at=is.null&limit=100")).length()
+            } catch (_: Exception) { 0 }
+            ChatItem(id, c.optString("title").ifBlank { if (c.optString("kind") == "direct") "Личный чат" else "Группа" },
+                c.optString("kind"), c.optString("last_message_at").takeIf { it.isNotBlank() }, unread)
         }
     }
     suspend fun messages(chatId: String): List<MessageItem> {
-        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=300"))
+        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=300"))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
             val type = m.optString("message_type", "text")
             val content = m.optString("content")
             val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
-            MessageItem(m.getString("id"), m.optString("sender_id"), rendered, m.optString("created_at"), type)
+            MessageItem(m.getString("id"), m.optString("sender_id"), rendered, m.optString("created_at"), type,
+                m.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" },
+                m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" })
         }
     }
-    suspend fun sendMessage(chatId: String, text: String) {
+    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        call("/rest/v1/messages", "POST",
-            JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "text").put("content", text).toString(),
+        val payload = JSONObject().put("conversation_id", chatId).put("sender_id", uid)
+            .put("message_type", "text").put("content", text)
+        if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
+        call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
+    }
+
+    suspend fun markChatRead(chatId: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        call("/rest/v1/conversation_members?conversation_id=eq.$chatId&user_id=eq.$uid", "PATCH",
+            JSONObject().put("last_read_at", java.time.Instant.now().toString()).toString(),
+            prefer = "return=minimal")
+    }
+
+    suspend fun editMessage(messageId: String, newText: String) {
+        if (newText.isBlank()) throw IOException("Сообщение не может быть пустым")
+        call("/rest/v1/messages?id=eq.${normalizeUuid(messageId)}&message_type=eq.text", "PATCH",
+            JSONObject().put("content", newText.trim()).put("edited_at", java.time.Instant.now().toString()).toString(),
+            prefer = "return=minimal")
+    }
+
+    suspend fun deleteMessage(messageId: String) {
+        call("/rest/v1/messages?id=eq.${normalizeUuid(messageId)}", "PATCH",
+            JSONObject().put("deleted_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
     }
     private suspend fun signedAttachmentUrl(path: String): String {
