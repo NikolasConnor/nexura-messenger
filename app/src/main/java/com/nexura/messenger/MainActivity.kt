@@ -55,6 +55,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android
     var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank()) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var phoneLogin by remember { mutableStateOf(false) }
+    var phone by remember { mutableStateOf("") }
+    var smsCode by remember { mutableStateOf("") }
+    var smsSent by remember { mutableStateOf(false) }
     var displayName by remember { mutableStateOf("") }
     var register by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -93,12 +97,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement=Arrangement.Center) {
                     Text("nexura", fontSize=42.sp, fontWeight=FontWeight.Bold, color=TextMain)
                     Text("Общение без границ", color=Muted, modifier=Modifier.padding(bottom=28.dp))
-                    if (register) OutlinedTextField(displayName,{displayName=it},label={Text("Ваше имя")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                    OutlinedTextField(email,{email=it},label={Text("Email")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                    OutlinedTextField(password,{password=it},label={Text("Пароль")},visualTransformation=PasswordVisualTransformation(),singleLine=true,modifier=Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected=!phoneLogin, onClick={phoneLogin=false; smsSent=false; smsCode=""; error=""; notice=""}, label={Text("Email")})
+                        FilterChip(selected=phoneLogin, onClick={phoneLogin=true; smsSent=false; smsCode=""; error=""; notice=""}, label={Text("Телефон")})
+                    }
+                    if (register && !phoneLogin) OutlinedTextField(displayName,{displayName=it},label={Text("Ваше имя")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                    if (phoneLogin) {
+                        OutlinedTextField(phone,{phone=it; smsSent=false},label={Text("Номер телефона")},placeholder={Text("+491234567890")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                        if (smsSent) OutlinedTextField(smsCode,{smsCode=it.filter(Char::isDigit).take(8)},label={Text("Код из SMS")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                        Text("Укажите номер в международном формате, например +49…",color=Muted,fontSize=12.sp,modifier=Modifier.padding(top=4.dp))
+                    } else {
+                        OutlinedTextField(email,{email=it},label={Text("Email")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                        OutlinedTextField(password,{password=it},label={Text("Пароль")},visualTransformation=PasswordVisualTransformation(),singleLine=true,modifier=Modifier.fillMaxWidth())
+                    }
                     if (error.isNotBlank()) Text(error,color=Color(0xFFFF8585),modifier=Modifier.padding(vertical=8.dp))
                     if (notice.isNotBlank()) Text(notice,color=Color(0xFF8FE0B0),modifier=Modifier.padding(vertical=8.dp))
-                    if (!register) TextButton(
+                    if (!phoneLogin && !register) TextButton(
                         onClick = {
                             scope.launch {
                                 busy = true
@@ -106,7 +120,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android
                                 notice = ""
                                 try {
                                     api.resendConfirmation(email.trim())
-                                    notice = "Запрос на повторную отправку принят. Проверьте входящие и папку «Спам»."
+                                    notice = "Запрос принят. Если SMTP настроен, письмо придёт на почту."
                                 } catch (e: Exception) {
                                     error = e.message ?: "Не удалось запросить письмо"
                                 } finally { busy = false }
@@ -114,14 +128,33 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android
                         },
                         enabled = !busy && email.contains("@")
                     ) { Text("Отправить письмо подтверждения повторно") }
-                    Button(onClick={
-                        scope.launch { busy=true; error=""; try {
-                            if(register) api.signUp(email.trim(),password,displayName.trim()) else api.signIn(email.trim(),password)
-                            signedIn=!store.accessToken.isNullOrBlank()
-                            if(signedIn) loadChats()
-                        } catch(e:Exception){error=e.message ?: "Ошибка авторизации"} finally {busy=false} }
-                    }, enabled=!busy && email.isNotBlank() && password.length>=6, modifier=Modifier.fillMaxWidth().padding(top=16.dp)) {
-                        Text(if(busy) "Подождите…" else if(register) "Создать аккаунт" else "Войти")
+                    if (phoneLogin) {
+                        Button(onClick={
+                            scope.launch { busy=true; error=""; notice=""; try {
+                                if (!smsSent) {
+                                    api.sendPhoneCode(phone, displayName)
+                                    smsSent=true
+                                    notice="Код отправлен по SMS на $phone"
+                                } else {
+                                    api.verifyPhoneCode(phone, smsCode)
+                                    signedIn=!store.accessToken.isNullOrBlank()
+                                    if(signedIn) loadChats()
+                                }
+                            } catch(e:Exception){error=e.message ?: "Ошибка входа по телефону"} finally {busy=false} }
+                        }, enabled=!busy && phone.startsWith("+") && phone.count { it.isDigit() } in 8..15 && (!smsSent || smsCode.length in 4..8), modifier=Modifier.fillMaxWidth().padding(top=16.dp)) {
+                            Text(if(busy) "Подождите…" else if(smsSent) "Подтвердить код и войти" else "Получить SMS-код")
+                        }
+                        if (smsSent) TextButton(onClick={smsSent=false; smsCode=""; notice=""}, enabled=!busy) { Text("Изменить номер") }
+                    } else {
+                        Button(onClick={
+                            scope.launch { busy=true; error=""; try {
+                                if(register) api.signUp(email.trim(),password,displayName.trim()) else api.signIn(email.trim(),password)
+                                signedIn=!store.accessToken.isNullOrBlank()
+                                if(signedIn) loadChats()
+                            } catch(e:Exception){error=e.message ?: "Ошибка авторизации"} finally {busy=false} }
+                        }, enabled=!busy && email.isNotBlank() && password.length>=6, modifier=Modifier.fillMaxWidth().padding(top=16.dp)) {
+                            Text(if(busy) "Подождите…" else if(register) "Создать аккаунт" else "Войти")
+                        }
                     }
                     TextButton(onClick={register=!register;error=""}) { Text(if(register) "Уже есть аккаунт? Войти" else "Создать аккаунт") }
                 }
