@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -103,6 +104,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var homeTab by remember { mutableStateOf("chats") }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var sendingMessage by remember { mutableStateOf(false) }
     var sendingImage by remember { mutableStateOf(false) }
@@ -211,6 +213,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     // A temporary network interruption should not erase the current screen.
                 }
             }
+        }
+    }
+
+    BackHandler(enabled = signedIn && (selected != null || settingsOpen || createGroupOpen || homeTab != "chats")) {
+        when {
+            editingTarget != null -> editingTarget = null
+            createGroupOpen -> createGroupOpen = false
+            selected != null -> { selected = null; messages = emptyList(); replyTarget = null; loadChats() }
+            settingsOpen -> { settingsOpen = false; error = ""; notice = "" }
+            homeTab != "chats" -> homeTab = "chats"
         }
     }
 
@@ -392,6 +404,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                        if (homeTab == "search") {
                         OutlinedTextField(
                             value = search, onValueChange = { search = it; users = emptyList() },
                             modifier = Modifier.fillMaxWidth(), placeholder = { Text("Найти человека по имени") },
@@ -432,6 +445,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                        }
+                        if (homeTab == "chats") {
                         Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Ваши чаты", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             Text("${chats.size}", color = SecondaryText, fontSize = 13.sp)
@@ -468,6 +483,43 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     HorizontalDivider(color = Surface1)
                                 }
                             }
+                        }
+                        }
+                        NavigationBar(
+                            modifier = Modifier.fillMaxWidth(),
+                            containerColor = Surface1,
+                            tonalElevation = 0.dp
+                        ) {
+                            NavigationBarItem(
+                                selected = homeTab == "chats",
+                                onClick = { homeTab = "chats"; createGroupOpen = false },
+                                icon = { Icon(Icons.Default.ChatBubbleOutline, contentDescription = null) },
+                                label = { Text("Чаты") }
+                            )
+                            NavigationBarItem(
+                                selected = homeTab == "search",
+                                onClick = { homeTab = "search"; createGroupOpen = false },
+                                icon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                label = { Text("Поиск") }
+                            )
+                            NavigationBarItem(
+                                selected = settingsOpen,
+                                onClick = {
+                                    settingsOpen = true
+                                    error = ""; notice = ""
+                                    scope.launch {
+                                        try {
+                                            val p = api.myProfile()
+                                            profileName = p.displayName
+                                            profileAvatar = p.avatar.ifBlank { "🙂" }
+                                        } catch (e: Exception) {
+                                            error = e.message ?: "Не удалось загрузить профиль"
+                                        }
+                                    }
+                                },
+                                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                label = { Text("Профиль") }
+                            )
                         }
                     }
                 }
