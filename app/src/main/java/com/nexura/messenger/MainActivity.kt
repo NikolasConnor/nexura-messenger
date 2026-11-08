@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
@@ -105,6 +106,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var homeTab by remember { mutableStateOf("chats") }
+    var chatFilter by remember { mutableStateOf("") }
+    var showChatFilter by remember { mutableStateOf(false) }
+    var openMessageMenu by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var sendingMessage by remember { mutableStateOf(false) }
     var sendingImage by remember { mutableStateOf(false) }
@@ -140,6 +144,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         }
     }
+
+    val visibleChats = chats.filter { it.title.contains(chatFilter, ignoreCase = true) }
 
     fun loadChats() {
         scope.launch {
@@ -376,11 +382,29 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("nexura", fontSize = 31.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-1).sp)
                                 Text("Сообщения", color = SecondaryText, fontSize = 13.sp)
                             }
+                            IconButton(onClick = { showChatFilter = !showChatFilter; if (!showChatFilter) chatFilter = "" }) {
+                                Icon(Icons.Default.Search, "Поиск по чатам", tint = MainText)
+                            }
                             IconButton(onClick = { loadChats() }) { Icon(Icons.Default.Refresh, "Обновить", tint = MainText) }
                             IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) { Icon(Icons.Default.GroupAdd, "Создать группу", tint = Accent) }
                             IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                 Icon(Icons.Default.Settings, "Настройки", tint = SecondaryText)
                             }
+                        }
+                        if (homeTab == "chats" && showChatFilter) {
+                            OutlinedTextField(
+                                value = chatFilter,
+                                onValueChange = { chatFilter = it },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                singleLine = true,
+                                placeholder = { Text("Поиск по вашим чатам") },
+                                leadingIcon = { Icon(Icons.Default.Search, null, tint = SecondaryText) },
+                                trailingIcon = {
+                                    if (chatFilter.isNotBlank()) TextButton(onClick = { chatFilter = "" }) { Text("Очистить") }
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                colors = authFieldColors()
+                            )
                         }
                         if (createGroupOpen) {
                             Card(Modifier.fillMaxWidth().padding(top = 12.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
@@ -449,22 +473,25 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "chats") {
                         Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Ваши чаты", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            Text("${chats.size}", color = SecondaryText, fontSize = 13.sp)
+                            Text("${visibleChats.size}", color = SecondaryText, fontSize = 13.sp)
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
-                        if (chats.isEmpty()) {
+                        if (visibleChats.isEmpty()) {
                             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Box(Modifier.size(76.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Default.ChatBubbleOutline, null, tint = Accent, modifier = Modifier.size(34.dp))
                                     }
-                                    Text(if (busy) "Загружаем чаты…" else "Здесь пока тихо", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-                                    Text("Найдите человека выше и начните разговор", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                                    Text(if (busy) "Загружаем чаты…" else if (chatFilter.isNotBlank()) "Ничего не найдено" else "Здесь пока тихо", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+                                    Text(if (chatFilter.isNotBlank()) "Попробуйте изменить запрос" else "Найдите человека через вкладку «Поиск» и начните разговор", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                                    if (chatFilter.isBlank() && !busy) {
+                                        TextButton(onClick = { homeTab = "search" }) { Text("Найти собеседника") }
+                                    }
                                 }
                             }
                         } else {
                             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
-                                items(chats, key = { it.id }) { chat ->
+                                items(visibleChats, key = { it.id }) { chat ->
                                     Row(
                                         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { openChat(chat) }.padding(vertical = 11.dp, horizontal = 7.dp),
                                         verticalAlignment = Alignment.CenterVertically
@@ -549,7 +576,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         HorizontalDivider(color = Surface2)
                         if (messages.isEmpty()) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Text("Напишите первое сообщение 👋", color = SecondaryText, fontSize = 13.sp)
+                                Text(if (busy) "Загружаем сообщения…" else "Напишите первое сообщение 👋", color = SecondaryText, fontSize = 13.sp)
                             }
                         } else {
                             val messageListState = rememberLazyListState()
@@ -584,11 +611,31 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 9.sp)
                                                 Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 9.sp)
                                             }
-                                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                                                TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Ответить", fontSize = 10.sp, color = Accent) }
-                                                if (mine && msg.messageType == "text") {
-                                                    TextButton(onClick = { editingTarget = msg; editDraft = msg.content }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Изменить", fontSize = 10.sp, color = Accent) }
-                                                    TextButton(onClick = { scope.launch { try { api.deleteMessage(msg.id); messages = messages.filterNot { it.id == msg.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить" } } }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("Удалить", fontSize = 10.sp, color = Danger) }
+                                            Row(horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                                Box {
+                                                    IconButton(
+                                                        onClick = { openMessageMenu = if (openMessageMenu == msg.id) null else msg.id },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) { Icon(Icons.Default.MoreVert, "Действия с сообщением", tint = Color(0xFFB7C4D9), modifier = Modifier.size(17.dp)) }
+                                                    DropdownMenu(
+                                                        expanded = openMessageMenu == msg.id,
+                                                        onDismissRequest = { openMessageMenu = null }
+                                                    ) {
+                                                        DropdownMenuItem(text = { Text("Ответить") }, onClick = { replyTarget = msg; openMessageMenu = null })
+                                                        if (mine && msg.messageType == "text") {
+                                                            DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
+                                                            DropdownMenuItem(
+                                                                text = { Text("Удалить", color = Danger) },
+                                                                onClick = {
+                                                                    openMessageMenu = null
+                                                                    scope.launch {
+                                                                        try { api.deleteMessage(msg.id); messages = messages.filterNot { it.id == msg.id } }
+                                                                        catch (e: Exception) { error = e.message ?: "Не удалось удалить" }
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -634,7 +681,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (text.isNotEmpty() && !sendingMessage) scope.launch {
                                         sendingMessage = true
                                         error = ""
-                                        try { api.sendMessage(chat.id, text); draft = ""; messages = api.messages(chat.id) }
+                                        try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
                                         catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
                                         finally { sendingMessage = false }
                                     }
