@@ -1,6 +1,8 @@
 package com.nexura.messenger
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -46,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import com.nexura.messenger.data.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.tasks.await
+import com.google.firebase.messaging.FirebaseMessaging
 
 private val Bg = Color(0xFF080D16)
 private val Surface1 = Color(0xFF111A29)
@@ -76,6 +80,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val scope = rememberCoroutineScope()
     var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank()) }
     var email by remember { mutableStateOf("") }
@@ -176,6 +182,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         if (signedIn) {
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
+                val pushToken = FirebaseMessaging.getInstance().token.await()
+                if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
                 chats = api.chats()
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось восстановить сессию"
