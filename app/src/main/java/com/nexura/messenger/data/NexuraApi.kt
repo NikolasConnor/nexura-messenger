@@ -105,7 +105,7 @@ class NexuraApi(private val store: SessionStore) {
     }
     suspend fun createDirect(userId: String): String {
         val result = JSONObject(call("/rest/v1/rpc/create_direct_conversation", "POST",
-            JSONObject().put("target_user_id", userId).toString()))
-        return if (result.has("id")) result.getString("id") else result.toString().trim('"')
+            JSONObject().put("p_other_user_id", userId).toString()))
+        return result.trim().removeSurrounding("\\\"")
     }
 }
