@@ -768,7 +768,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Text(replyTarget!!.content.take(75).ifBlank { "Фото" }, color = SecondaryText, fontSize = 12.sp, maxLines = 1)
                                     }
                                     IconButton(onClick = { replyTarget = null }, modifier = Modifier.size(32.dp)) {
-                                        Icon(Icons.Default.Close, "Отменить ответ", tint = SecondaryText)
+                                        Text("×", color = SecondaryText, fontSize = 24.sp)
                                     }
                                 }
                                 Spacer(Modifier.height(7.dp))
@@ -780,7 +780,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
-                                    else Icon(Icons.Default.Add, "Прикрепить фото", tint = Accent, modifier = Modifier.size(25.dp))
+                                    else Text("+", color = Accent, fontSize = 29.sp, fontWeight = FontWeight.Light)
                                 }
                                 OutlinedTextField(
                                     value = draft, onValueChange = { draft = it },
