@@ -129,7 +129,7 @@ class NexuraApi(private val store: SessionStore) {
         }
     }
     suspend fun messages(chatId: String): List<MessageItem> {
-        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=300"))
+        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=300"))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
             val type = m.optString("message_type", "text")
