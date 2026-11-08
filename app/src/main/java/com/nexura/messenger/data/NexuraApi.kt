@@ -146,12 +146,25 @@ class NexuraApi(private val store: SessionStore) {
                 m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" })
         }
     }
+    suspend fun registerPushToken(token: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val payload = JSONObject().put("user_id", uid).put("token", token).put("platform", "android").put("updated_at", java.time.Instant.now().toString())
+        call("/rest/v1/device_tokens?on_conflict=token", "POST", payload.toString(), prefer = "resolution=merge-duplicates,return=minimal")
+    }
+
+    private suspend fun notifyChatPush(chatId: String, preview: String) {
+        try {
+            call("/functions/v1/send-chat-push", "POST", JSONObject().put("conversation_id", normalizeUuid(chatId)).put("preview", preview.take(180)).toString())
+        } catch (_: Exception) { }
+    }
+
     suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val payload = JSONObject().put("conversation_id", chatId).put("sender_id", uid)
             .put("message_type", "text").put("content", text)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
+        notifyChatPush(chatId, text)
     }
 
     suspend fun markChatRead(chatId: String) {
