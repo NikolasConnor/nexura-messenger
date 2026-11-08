@@ -13,6 +13,7 @@ import org.json.JSONTokener
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂")
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
@@ -28,7 +29,12 @@ class NexuraApi(private val store: SessionStore) {
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(25, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+    private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
@@ -183,7 +189,7 @@ class NexuraApi(private val store: SessionStore) {
         }
     }
     suspend fun messages(chatId: String): List<MessageItem> {
-        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=300"))
+        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=150"))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
             val type = m.optString("message_type", "text")
@@ -235,11 +241,19 @@ class NexuraApi(private val store: SessionStore) {
             prefer = "return=minimal")
     }
     private suspend fun signedAttachmentUrl(path: String): String {
+        val now = System.currentTimeMillis()
+        signedUrlCache[path]?.let { cached ->
+            if (cached.second > now) return cached.first
+            signedUrlCache.remove(path, cached)
+        }
         val payload = JSONObject().put("expiresIn", 3600)
         val result = JSONObject(call("/storage/v1/object/sign/chat-attachments/$path", "POST", payload.toString()))
         val signed = result.optString("signedURL").ifBlank { result.optString("signedUrl") }
         if (signed.isBlank()) throw IOException("Не удалось получить ссылку на изображение")
-        return if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
+        val url = if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
+        if (signedUrlCache.size > 500) signedUrlCache.clear()
+        signedUrlCache[path] = url to (now + 55 * 60 * 1000L)
+        return url
     }
 
     suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String) {
