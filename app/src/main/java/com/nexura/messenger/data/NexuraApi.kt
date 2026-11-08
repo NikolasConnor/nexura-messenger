@@ -14,6 +14,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?)
+data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
 data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String)
 
 class NexuraApi(private val store: SessionStore) {
@@ -139,6 +140,20 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "text").put("content", text).toString(),
             prefer = "return=minimal")
     }
+    suspend fun myProfile(): UserProfile {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=eq.$uid&limit=1"))
+        if (raw.length() == 0) throw IOException("Профиль ещё не создан. Попробуйте перезайти в аккаунт.")
+        val p = raw.getJSONObject(0)
+        return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"))
+    }
+
+    suspend fun updateMyProfile(displayName: String, avatar: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val payload = JSONObject().put("display_name", displayName.trim()).put("avatar_url", avatar)
+        call("/rest/v1/profiles?id=eq.$uid", "PATCH", payload.toString(), prefer = "return=minimal")
+    }
+
     suspend fun findUsers(query: String): List<Pair<String,String>> {
         val encoded = java.net.URLEncoder.encode(query, "UTF-8")
         val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)&limit=20"))
