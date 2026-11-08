@@ -380,10 +380,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     OutlinedTextField(value = groupSearch, onValueChange = { groupSearch = it }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), singleLine = true, label = { Text("Найти участников") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }))
                                     TextButton(onClick = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }) { Text("Искать") }
                                     groupUsers.forEach { person ->
-                                        Row(Modifier.fillMaxWidth().clickable { selectedGroupUsers = if (person.id in selectedGroupUsers) selectedGroupUsers - person.first else selectedGroupUsers + person.first }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(checked = person.first in selectedGroupUsers, onCheckedChange = { checked -> selectedGroupUsers = if (checked) selectedGroupUsers + person.first else selectedGroupUsers - person.first })
+                                        Row(Modifier.fillMaxWidth().clickable { selectedGroupUsers = if (person.id in selectedGroupUsers) selectedGroupUsers - person.id else selectedGroupUsers + person.id }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = person.id in selectedGroupUsers, onCheckedChange = { checked -> selectedGroupUsers = if (checked) selectedGroupUsers + person.id else selectedGroupUsers - person.id })
                                             Avatar(person.displayName, person.avatar)
-                                            Text(person.second, color = MainText, modifier = Modifier.padding(start = 10.dp).weight(1f))
+                                            Text(person.displayName, color = MainText, modifier = Modifier.padding(start = 10.dp).weight(1f))
                                         }
                                     }
                                     Text("Выбрано: ${selectedGroupUsers.size}", color = SecondaryText, fontSize = 12.sp)
@@ -425,8 +425,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }.padding(vertical = 9.dp, horizontal = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Avatar(user.second)
-                                    Text(user.second, color = MainText, modifier = Modifier.padding(start = 12.dp).weight(1f))
+                                    Avatar(user.displayName, user.avatar)
+                                    Text(user.displayName, color = MainText, modifier = Modifier.padding(start = 12.dp).weight(1f))
                                     Text("Написать", color = Accent, fontSize = 12.sp)
                                 }
                             }
