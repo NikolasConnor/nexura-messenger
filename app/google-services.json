@@ -1,0 +1,16 @@
+{
+  "project_info": {
+    "project_number": "193224087128",
+    "project_id": "nexura-messenger",
+    "storage_bucket": "nexura-messenger.firebasestorage.app"
+  },
+  "client": [{
+    "client_info": {
+      "mobilesdk_app_id": "1:193224087128:android:666fbef136a1886dc59c2d",
+      "android_client_info": { "package_name": "com.nexura.messenger" }
+    },
+    "api_key": [{ "current_key": "AIzaSyBkG2h4qcymr-d3h8OwoQIbOlY6Rq-rVsg" }],
+    "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+  }],
+  "configuration_version": "1"
+}
