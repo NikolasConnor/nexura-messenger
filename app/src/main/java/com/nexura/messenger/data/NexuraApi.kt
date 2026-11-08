@@ -12,10 +12,11 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.UUID
 
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
-data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String)
+data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text")
 
 class NexuraApi(private val store: SessionStore) {
     companion object {
@@ -131,7 +132,10 @@ class NexuraApi(private val store: SessionStore) {
         val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=300"))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
-            MessageItem(m.getString("id"), m.optString("sender_id"), m.optString("content"), m.optString("created_at"))
+            val type = m.optString("message_type", "text")
+            val content = m.optString("content")
+            val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
+            MessageItem(m.getString("id"), m.optString("sender_id"), rendered, m.optString("created_at"), type)
         }
     }
     suspend fun sendMessage(chatId: String, text: String) {
@@ -140,6 +144,39 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "text").put("content", text).toString(),
             prefer = "return=minimal")
     }
+    private suspend fun signedAttachmentUrl(path: String): String {
+        val payload = JSONObject().put("expiresIn", 3600)
+        val result = JSONObject(call("/storage/v1/object/sign/chat-attachments/$path", "POST", payload.toString()))
+        val signed = result.optString("signedURL").ifBlank { result.optString("signedUrl") }
+        if (signed.isBlank()) throw IOException("Не удалось получить ссылку на изображение")
+        return if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
+    }
+
+    suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (mimeType !in listOf("image/jpeg", "image/png", "image/webp", "image/gif")) {
+            throw IOException("Поддерживаются JPG, PNG, WEBP и GIF")
+        }
+        if (bytes.size > 20 * 1024 * 1024) throw IOException("Максимальный размер изображения — 20 МБ")
+        val extension = when (mimeType) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
+        val path = "$chatId/${UUID.randomUUID()}.$extension"
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("$BASE_URL/storage/v1/object/chat-attachments/$path")
+                .header("apikey", PUBLIC_KEY)
+                .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
+                .header("Content-Type", mimeType)
+                .post(bytes.toRequestBody(mimeType.toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IOException(response.body?.string().orEmpty().ifBlank { "Не удалось загрузить изображение" })
+            }
+        }
+        call("/rest/v1/messages", "POST",
+            JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "image").put("content", path).toString(),
+            prefer = "return=minimal")
+    }
+
     suspend fun myProfile(): UserProfile {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=eq.$uid&limit=1"))
