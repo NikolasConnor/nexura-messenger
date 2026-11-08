@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -91,6 +92,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var sendingMessage by remember { mutableStateOf(false) }
 
     fun loadChats() {
         scope.launch {
@@ -400,8 +402,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Напишите первое сообщение 👋", color = SecondaryText, fontSize = 13.sp)
                             }
                         } else {
+                            val messageListState = rememberLazyListState()
+                            LaunchedEffect(chat.id, messages.size) {
+                                if (messages.isNotEmpty()) messageListState.animateScrollToItem(messages.lastIndex)
+                            }
                             LazyColumn(
-                                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                state = messageListState,
+                                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                                 contentPadding = PaddingValues(bottom = 10.dp)
                             ) {
                                 items(messages, key = { it.id }) { msg ->
@@ -433,9 +440,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                                 keyboardActions = KeyboardActions(onSend = {
                                     val text = draft.trim()
-                                    if (text.isNotEmpty()) scope.launch {
+                                    if (text.isNotEmpty() && !sendingMessage) scope.launch {
+                                        sendingMessage = true
+                                        error = ""
                                         try { api.sendMessage(chat.id, text); draft = ""; messages = api.messages(chat.id) }
                                         catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
+                                        finally { sendingMessage = false }
                                     }
                                 })
                             )
@@ -443,14 +453,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(
                                 onClick = {
                                     val text = draft.trim()
-                                    if (text.isNotEmpty()) scope.launch {
+                                    if (text.isNotEmpty() && !sendingMessage) scope.launch {
+                                        sendingMessage = true
+                                        error = ""
                                         try { api.sendMessage(chat.id, text); draft = ""; messages = api.messages(chat.id) }
                                         catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
+                                        finally { sendingMessage = false }
                                     }
                                 },
-                                enabled = draft.isNotBlank(),
+                                enabled = draft.isNotBlank() && !sendingMessage,
                                 modifier = Modifier.size(48.dp).background(if (draft.isNotBlank()) Accent else Surface2, CircleShape)
-                            ) { Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText) }
+                            ) { if (sendingMessage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp) else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText) }
                         }
                     }
                 }
