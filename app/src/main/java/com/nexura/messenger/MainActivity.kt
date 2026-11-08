@@ -666,15 +666,20 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     val chat = selected!!
                     Column(Modifier.fillMaxSize()) {
-                        Row(Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { selected = null; messages = emptyList(); loadChats() }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
-                            if (chat.kind == "group") GroupAvatar() else Avatar(chat.title)
-                            Column(Modifier.weight(1f).padding(start = 11.dp)) {
-                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold)
-                                Text(if (chat.kind == "group") "Группа" else "Nexura", color = SecondaryText, fontSize = 11.sp)
+                        Row(
+                            Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 6.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { selected = null; messages = emptyList(); replyTarget = null; loadChats() }) {
+                                Icon(Icons.Default.ArrowBack, "Назад к чатам", tint = MainText)
                             }
-                            IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id) } catch (e: Exception) { error = e.message ?: "Ошибка обновления" } } }) {
-                                Icon(Icons.Default.Refresh, "Обновить", tint = SecondaryText)
+                            if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
+                                Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp)
+                            }
+                            IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id) } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" } } }) {
+                                Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
                             }
                         }
                         HorizontalDivider(color = Surface2)
@@ -711,16 +716,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             } else {
                                                 Text(msg.content, color = MainText, fontSize = 14.sp)
                                             }
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) {
-                                                if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 9.sp)
-                                                Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 9.sp)
-                                            }
-                                            Row(horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(top = 5.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.End
+                                            ) {
+                                                if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 10.sp)
+                                                Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 10.sp)
                                                 Box {
                                                     IconButton(
                                                         onClick = { openMessageMenu = if (openMessageMenu == msg.id) null else msg.id },
-                                                        modifier = Modifier.size(28.dp)
-                                                    ) { Icon(Icons.Default.MoreVert, "Действия с сообщением", tint = Color(0xFFB7C4D9), modifier = Modifier.size(17.dp)) }
+                                                        modifier = Modifier.size(24.dp)
+                                                    ) { Icon(Icons.Default.MoreVert, "Действия с сообщением", tint = Color(0xFFB7C4D9), modifier = Modifier.size(15.dp)) }
                                                     DropdownMenu(
                                                         expanded = openMessageMenu == msg.id,
                                                         onDismissRequest = { openMessageMenu = null }
@@ -748,51 +755,69 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
-                        Row(
-                            Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
                             if (replyTarget != null) {
-                                Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                                    Text("Ответ на: ${replyTarget!!.content.take(45)}", color = Accent, fontSize = 11.sp)
-                                    TextButton(onClick = { replyTarget = null }, contentPadding = PaddingValues(0.dp)) { Text("Отменить", color = SecondaryText, fontSize = 10.sp) }
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface2).padding(start = 12.dp, end = 4.dp, top = 7.dp, bottom = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Ответ на сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(replyTarget!!.content.take(75).ifBlank { "Фото" }, color = SecondaryText, fontSize = 12.sp, maxLines = 1)
+                                    }
+                                    IconButton(onClick = { replyTarget = null }, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Default.Close, "Отменить ответ", tint = SecondaryText)
+                                    }
+                                }
+                                Spacer(Modifier.height(7.dp))
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { imagePicker.launch("image/*") },
+                                    enabled = !sendingImage && !sendingMessage,
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
+                                    else Icon(Icons.Default.Add, "Прикрепить фото", tint = Accent, modifier = Modifier.size(25.dp))
+                                }
+                                OutlinedTextField(
+                                    value = draft, onValueChange = { draft = it },
+                                    modifier = Modifier.weight(1f),
+                                    placeholder = { Text("Написать сообщение", fontSize = 14.sp) },
+                                    maxLines = 5, shape = RoundedCornerShape(24.dp), colors = authFieldColors(),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                    keyboardActions = KeyboardActions(onSend = {
+                                        val text = draft.trim()
+                                        if (text.isNotEmpty() && !sendingMessage) scope.launch {
+                                            sendingMessage = true
+                                            error = ""
+                                            try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
+                                            catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
+                                            finally { sendingMessage = false }
+                                        }
+                                    })
+                                )
+                                Spacer(Modifier.width(7.dp))
+                                IconButton(
+                                    onClick = {
+                                        val text = draft.trim()
+                                        if (text.isNotEmpty() && !sendingMessage) scope.launch {
+                                            sendingMessage = true
+                                            error = ""
+                                            try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
+                                            catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
+                                            finally { sendingMessage = false }
+                                        }
+                                    },
+                                    enabled = draft.isNotBlank() && !sendingMessage,
+                                    modifier = Modifier.size(46.dp).background(if (draft.isNotBlank()) Accent else Surface2, CircleShape)
+                                ) {
+                                    if (sendingMessage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
+                                    else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText)
                                 }
                             }
-                            IconButton(onClick = { imagePicker.launch("image/*") }, enabled = !sendingImage && !sendingMessage) {
-                                if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
-                                else Icon(Icons.Default.Image, "Прикрепить фото", tint = Accent)
-                            }
-                            OutlinedTextField(
-                                value = draft, onValueChange = { draft = it },
-                                modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…") },
-                                maxLines = 4, shape = RoundedCornerShape(22.dp), colors = authFieldColors(),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                keyboardActions = KeyboardActions(onSend = {
-                                    val text = draft.trim()
-                                    if (text.isNotEmpty() && !sendingMessage) scope.launch {
-                                        sendingMessage = true
-                                        error = ""
-                                        try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
-                                        catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
-                                        finally { sendingMessage = false }
-                                    }
-                                })
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            IconButton(
-                                onClick = {
-                                    val text = draft.trim()
-                                    if (text.isNotEmpty() && !sendingMessage) scope.launch {
-                                        sendingMessage = true
-                                        error = ""
-                                        try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
-                                        catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
-                                        finally { sendingMessage = false }
-                                    }
-                                },
-                                enabled = draft.isNotBlank() && !sendingMessage,
-                                modifier = Modifier.size(48.dp).background(if (draft.isNotBlank()) Accent else Surface2, CircleShape)
-                            ) { if (sendingMessage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp) else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText) }
                         }
                     }
                 }
