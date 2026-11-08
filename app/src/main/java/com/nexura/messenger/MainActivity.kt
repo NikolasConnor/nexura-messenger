@@ -1,5 +1,6 @@
 package com.nexura.messenger
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -37,13 +38,19 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val store = SessionStore(this)
         val api = NexuraApi(store)
-        setContent { NexuraApp(api, store) }
+        setContent { NexuraApp(api, store, intent?.data) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        recreate()
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NexuraApp(api: NexuraApi, store: SessionStore) {
+private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: android.net.Uri?) {
     val scope = rememberCoroutineScope()
     var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank()) }
     var email by remember { mutableStateOf("") }
@@ -62,6 +69,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore) {
 
     fun loadChats() { scope.launch { busy=true; try { chats=api.chats(); error="" } catch(e:Exception){ error=e.message ?: "Не удалось загрузить чаты" } finally { busy=false } } }
     fun loadMessages(chat: ChatItem) { selected=chat; scope.launch { try { messages=api.messages(chat.id) } catch(e:Exception){ error=e.message ?: "Ошибка сообщений" } } }
+
+    LaunchedEffect(authCallback) {
+        if (authCallback?.scheme == "nexura" && authCallback.host == "auth" && authCallback.path == "/callback") {
+            busy = true
+            error = ""
+            try {
+                api.consumeAuthCallback(authCallback)
+                signedIn = true
+                notice = "Почта подтверждена. Добро пожаловать в Nexura!"
+                loadChats()
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось подтвердить почту"
+            } finally {
+                busy = false
+            }
+        }
+    }
 
     MaterialTheme(colorScheme = darkColorScheme(primary=Accent, background=Bg, surface=Panel, onBackground=TextMain, onSurface=TextMain)) {
         Surface(Modifier.fillMaxSize(), color=Bg) {
