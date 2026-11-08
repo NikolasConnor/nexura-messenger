@@ -70,6 +70,11 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("refresh_token", refresh).toString(), auth = false))
         saveSession(o)
     }
+    suspend fun resendConfirmation(email: String) {
+        call("/auth/v1/resend", "POST",
+            JSONObject().put("type", "signup").put("email", email.trim()).toString(),
+            auth = false)
+    }
     suspend fun signOut() {
         try { call("/auth/v1/logout", "POST", "{}", auth = true) } finally { store.clear() }
     }
