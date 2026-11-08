@@ -93,6 +93,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var settingsOpen by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var sendingMessage by remember { mutableStateOf(false) }
+    var profileName by remember { mutableStateOf("") }
+    var profileAvatar by remember { mutableStateOf("🙂") }
+    var savingProfile by remember { mutableStateOf(false) }
 
     fun loadChats() {
         scope.launch {
@@ -274,7 +277,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Text("АККАУНТ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(18.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) { Avatar("N"); Column(Modifier.padding(start = 12.dp)) { Text("Ваш аккаунт Nexura", color = MainText, fontWeight = FontWeight.SemiBold); Text("Вы вошли в систему", color = Success, fontSize = 12.sp) } }
+                                Row(verticalAlignment = Alignment.CenterVertically) { Avatar(profileAvatar); Column(Modifier.padding(start = 12.dp)) { Text(profileName.ifBlank { "Ваш аккаунт Nexura" }, color = MainText, fontWeight = FontWeight.SemiBold); Text("Профиль Nexura", color = Success, fontSize = 12.sp) } }
+                                HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                Text("Имя в Nexura", color = SecondaryText, fontSize = 12.sp)
+                                OutlinedTextField(value = profileName, onValueChange = { profileName = it.take(40) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, placeholder = { Text("Ваше имя") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                Text("Аватар", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp, bottom = 7.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙").forEach { emoji ->
+                                        Box(Modifier.size(38.dp).clip(CircleShape).background(if (profileAvatar == emoji) Accent.copy(alpha = 0.25f) else Surface2).clickable { profileAvatar = emoji }, contentAlignment = Alignment.Center) { Text(emoji, fontSize = 21.sp) }
+                                    }
+                                }
+                                Button(onClick = { scope.launch { savingProfile = true; error = ""; notice = ""; try { api.updateMyProfile(profileName, profileAvatar); notice = "Профиль сохранён." } catch (e: Exception) { error = e.message ?: "Не удалось сохранить профиль" } finally { savingProfile = false } } }, enabled = !savingProfile && profileName.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
@@ -303,7 +316,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Сообщения", color = SecondaryText, fontSize = 13.sp)
                             }
                             IconButton(onClick = { loadChats() }) { Icon(Icons.Default.Refresh, "Обновить", tint = MainText) }
-                            IconButton(onClick = { settingsOpen = true; error = ""; notice = "" }) {
+                            IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                 Icon(Icons.Default.Settings, "Настройки", tint = SecondaryText)
                             }
                         }
@@ -504,7 +517,7 @@ private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
 @Composable
 private fun Avatar(name: String) {
     Box(Modifier.size(48.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
-        Text(name.trim().firstOrNull()?.uppercase() ?: "N", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        if (name in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙")) Text(name, fontSize = 23.sp) else Text(name.trim().firstOrNull()?.uppercase() ?: "N", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
     }
 }
 
