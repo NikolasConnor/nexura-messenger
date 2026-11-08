@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +35,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -94,6 +98,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var settingsOpen by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var sendingMessage by remember { mutableStateOf(false) }
+    var sendingImage by remember { mutableStateOf(false) }
     var profileName by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
     var savingProfile by remember { mutableStateOf(false) }
@@ -103,6 +108,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupUsers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
     var selectedGroupUsers by remember { mutableStateOf(emptySet<String>()) }
     var creatingGroup by remember { mutableStateOf(false) }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && selected != null) {
+            scope.launch {
+                sendingImage = true
+                error = ""
+                try {
+                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw IllegalStateException("Не удалось прочитать изображение")
+                    api.sendImageMessage(selected!!.id, bytes, mime)
+                    messages = api.messages(selected!!.id)
+                } catch (e: Exception) {
+                    error = e.message ?: "Не удалось отправить изображение"
+                } finally {
+                    sendingImage = false
+                }
+            }
+        }
+    }
 
     fun loadChats() {
         scope.launch {
@@ -464,7 +489,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 bottomEnd = if (mine) 5.dp else 18.dp
                                             )).background(if (mine) Color(0xFF304B83) else Surface1).padding(horizontal = 13.dp, vertical = 10.dp)
                                         ) {
-                                            Text(msg.content, color = MainText, fontSize = 14.sp)
+                                            if (msg.messageType == "image") {
+                                                AsyncImage(model = msg.content, contentDescription = "Изображение", modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                            } else {
+                                                Text(msg.content, color = MainText, fontSize = 14.sp)
+                                            }
                                             Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 9.sp, modifier = Modifier.align(Alignment.End).padding(top = 5.dp))
                                         }
                                     }
@@ -476,6 +505,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            IconButton(onClick = { imagePicker.launch("image/*") }, enabled = !sendingImage && !sendingMessage) {
+                                if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
+                                else Icon(Icons.Default.Image, "Прикрепить фото", tint = Accent)
+                            }
                             OutlinedTextField(
                                 value = draft, onValueChange = { draft = it },
                                 modifier = Modifier.weight(1f), placeholder = { Text("Сообщение…") },
