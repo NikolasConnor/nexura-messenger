@@ -259,7 +259,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
             while (true) {
-                delay(if (selected != null) 2500L else 15000L)
+                delay(if (selected != null) 5000L else 20000L)
                 try {
                     val currentChat = selected
                     if (currentChat != null) {
