@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
@@ -96,6 +97,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var profileName by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
     var savingProfile by remember { mutableStateOf(false) }
+    var createGroupOpen by remember { mutableStateOf(false) }
+    var groupTitle by remember { mutableStateOf("") }
+    var groupSearch by remember { mutableStateOf("") }
+    var groupUsers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
+    var selectedGroupUsers by remember { mutableStateOf(emptySet<String>()) }
+    var creatingGroup by remember { mutableStateOf(false) }
 
     fun loadChats() {
         scope.launch {
@@ -316,8 +323,31 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Сообщения", color = SecondaryText, fontSize = 13.sp)
                             }
                             IconButton(onClick = { loadChats() }) { Icon(Icons.Default.Refresh, "Обновить", tint = MainText) }
+                            IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) { Icon(Icons.Default.GroupAdd, "Создать группу", tint = Accent) }
                             IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                 Icon(Icons.Default.Settings, "Настройки", tint = SecondaryText)
+                            }
+                        }
+                        if (createGroupOpen) {
+                            Card(Modifier.fillMaxWidth().padding(top = 12.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Новая группа", color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = { createGroupOpen = false }) { Text("Закрыть") }
+                                    }
+                                    OutlinedTextField(value = groupTitle, onValueChange = { groupTitle = it.take(60) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Название группы") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                    OutlinedTextField(value = groupSearch, onValueChange = { groupSearch = it }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), singleLine = true, label = { Text("Найти участников") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }))
+                                    TextButton(onClick = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }) { Text("Искать") }
+                                    groupUsers.forEach { person ->
+                                        Row(Modifier.fillMaxWidth().clickable { selectedGroupUsers = if (person.first in selectedGroupUsers) selectedGroupUsers - person.first else selectedGroupUsers + person.first }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = person.first in selectedGroupUsers, onCheckedChange = { checked -> selectedGroupUsers = if (checked) selectedGroupUsers + person.first else selectedGroupUsers - person.first })
+                                            Avatar(person.second)
+                                            Text(person.second, color = MainText, modifier = Modifier.padding(start = 10.dp).weight(1f))
+                                        }
+                                    }
+                                    Text("Выбрано: ${selectedGroupUsers.size}", color = SecondaryText, fontSize = 12.sp)
+                                    Button(onClick = { scope.launch { creatingGroup = true; error = ""; try { val id = api.createGroup(groupTitle, selectedGroupUsers.toList()); val chat = ChatItem(id, groupTitle.trim(), "group", null); createGroupOpen = false; selected = chat; messages = emptyList(); chats = api.chats() } catch (e: Exception) { error = e.message ?: "Не удалось создать группу" } finally { creatingGroup = false } } }, enabled = !creatingGroup && groupTitle.trim().length >= 2 && selectedGroupUsers.isNotEmpty(), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text(if (creatingGroup) "Создаём…" else "Создать группу") }
+                                }
                             }
                         }
                         OutlinedTextField(
