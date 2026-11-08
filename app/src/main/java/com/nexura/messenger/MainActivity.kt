@@ -89,6 +89,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var search by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
     var searching by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     fun loadChats() {
         scope.launch {
@@ -261,6 +263,36 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Text("Защищённое пространство для ваших разговоров", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 18.dp))
                     }
                 }
+                selected == null && settingsOpen -> {
+                    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { settingsOpen = false; error = ""; notice = "" }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
+                            Text("Настройки", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text("АККАУНТ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(18.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) { Avatar("N"); Column(Modifier.padding(start = 12.dp)) { Text("Ваш аккаунт Nexura", color = MainText, fontWeight = FontWeight.SemiBold); Text("Вы вошли в систему", color = Success, fontSize = 12.sp) } }
+                                HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
+                                Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
+                            }
+                        }
+                        Text("СЕАНС И БЕЗОПАСНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text("Авторизация", color = MainText, fontWeight = FontWeight.SemiBold)
+                                Text("Сессия хранится на устройстве в зашифрованном виде.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                                OutlinedButton(onClick = { scope.launch { busy = true; error = ""; notice = ""; try { api.refreshSession(); chats = api.chats(); notice = "Сессия успешно обновлена." } catch (e: Exception) { error = e.message ?: "Не удалось обновить сессию" } finally { busy = false } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(13.dp)) { Text(if (busy) "Проверяем…" else "Проверить и обновить сессию") }
+                            }
+                        }
+                        if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                        if (notice.isNotBlank()) Text(notice, color = Success, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                        Spacer(Modifier.weight(1f))
+                        OutlinedButton(onClick = { showLogoutDialog = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp).height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) { Text("Выйти из аккаунта") }
+                    }
+                    if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { api.signOut(); signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; notice = "" } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
+                }
                 selected == null -> {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -269,8 +301,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Сообщения", color = SecondaryText, fontSize = 13.sp)
                             }
                             IconButton(onClick = { loadChats() }) { Icon(Icons.Default.Refresh, "Обновить", tint = MainText) }
-                            IconButton(onClick = { scope.launch { try { api.signOut(); signedIn = false; chats = emptyList() } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } } }) {
-                                Icon(Icons.Default.Settings, "Выйти", tint = SecondaryText)
+                            IconButton(onClick = { settingsOpen = true; error = ""; notice = "" }) {
+                                Icon(Icons.Default.Settings, "Настройки", tint = SecondaryText)
                             }
                         }
                         OutlinedTextField(
