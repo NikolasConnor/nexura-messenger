@@ -9,6 +9,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -146,9 +147,23 @@ class NexuraApi(private val store: SessionStore) {
             p.optString("id") to (p.optString("display_name").ifBlank { p.optString("username") })
         }.filter { it.first != store.userId }
     }
+    private fun normalizeUuid(value: String): String {
+        val raw = value.trim()
+        val decoded = try {
+            JSONTokener(raw).nextValue() as? String
+        } catch (_: Exception) {
+            null
+        }
+        val uuid = (decoded ?: raw.trim('"')).trim()
+        if (!uuid.matches(Regex("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))) {
+            throw IOException("Сервер вернул некорректный ID чата.")
+        }
+        return uuid
+    }
+
     suspend fun createDirect(userId: String): String {
         val result = call("/rest/v1/rpc/create_direct_conversation", "POST",
-            JSONObject().put("p_other_user_id", userId).toString())
-        return result.trim().removeSurrounding("\\\"")
+            JSONObject().put("p_other_user_id", normalizeUuid(userId)).toString())
+        return normalizeUuid(result)
     }
 }
