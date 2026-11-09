@@ -1019,8 +1019,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         profileMedia.chunked(3).forEach { group ->
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 group.forEach { item ->
-                                                    Box(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).background(Surface2)) {
-                                                        AsyncImage(model = item.content, contentDescription = "Медиа из переписки", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                    Box(
+                                                        Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp))
+                                                            .background(Surface2)
+                                                            .clickable {
+                                                                mediaViewerUri = Uri.parse(item.content)
+                                                                mediaViewerType = if (item.mediaKind == "video") "video" else "image"
+                                                            }
+                                                    ) {
+                                                        AsyncImage(model = item.content, contentDescription = "Открыть медиа из переписки", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                                                         if (item.mediaKind == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(30.dp))
                                                     }
                                                 }
