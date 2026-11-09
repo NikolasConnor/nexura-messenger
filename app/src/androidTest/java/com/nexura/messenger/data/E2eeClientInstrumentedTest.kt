@@ -149,7 +149,8 @@ class E2eeClientInstrumentedTest {
         assertEquals(envelope, decoded)
         assertEquals(true, E2eeMessageEnvelope.isEnvelope(envelope.encode()))
         assertEquals(false, E2eeMessageEnvelope.isEnvelope("ordinary legacy text"))
-        val unknown = JSONObject(envelope.encode()).put("protocol", "future-unknown").toString()
+        val unknown = JSONObject(envelope.encode()).put("protocol", "nexura-olm-v2").toString()
+        assertEquals(true, E2eeMessageEnvelope.isEnvelope(unknown))
         assertEquals(false, runCatching { E2eeMessageEnvelope.decode(unknown) }.isSuccess)
     }
 
