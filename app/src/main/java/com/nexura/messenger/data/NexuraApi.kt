@@ -175,16 +175,39 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
         val raw = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,last_read_at,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc"))
+        val readAfterByChat = mutableMapOf<String, String>()
+        val allChatIds = mutableListOf<String>()
+        for (i in 0 until raw.length()) {
+            val membership = raw.optJSONObject(i) ?: continue
+            val conversation = membership.optJSONObject("conversations") ?: continue
+            val id = conversation.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: continue
+            allChatIds += id
+            readAfterByChat[id] = membership.optString("last_read_at")
+                .takeIf { it.isNotBlank() && it != "null" } ?: "1970-01-01T00:00:00Z"
+        }
+        val unreadByChat = mutableMapOf<String, Int>()
+        if (allChatIds.isNotEmpty()) {
+            val unreadRows = JSONArray(call(
+                "/rest/v1/messages?select=conversation_id,created_at&conversation_id=in.(" +
+                    allChatIds.distinct().joinToString(",") + ")&sender_id=neq." + uid +
+                    "&deleted_at=is.null&order=created_at.desc&limit=5000"
+            ))
+            for (i in 0 until unreadRows.length()) {
+                val row = unreadRows.optJSONObject(i) ?: continue
+                val chatId = row.optString("conversation_id")
+                val lastRead = readAfterByChat[chatId] ?: continue
+                if (row.optString("created_at") > lastRead) {
+                    unreadByChat[chatId] = (unreadByChat[chatId] ?: 0) + 1
+                }
+            }
+        }
+
         val base = (0 until raw.length()).mapNotNull { i ->
             val membership = raw.optJSONObject(i) ?: return@mapNotNull null
             val c = membership.optJSONObject("conversations") ?: return@mapNotNull null
             val id = c.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
             val kind = c.optString("kind").takeIf { it != "null" } ?: "direct"
-            val lastRead = membership.optString("last_read_at").takeIf { it.isNotBlank() && it != "null" } ?: "1970-01-01T00:00:00Z"
-            val unread = try {
-                val encoded = java.net.URLEncoder.encode(lastRead, "UTF-8")
-                JSONArray(call("/rest/v1/messages?select=id&conversation_id=eq.$id&sender_id=neq.$uid&created_at=gt.$encoded&deleted_at=is.null&limit=100")).length()
-            } catch (_: Exception) { 0 }
+            val unread = unreadByChat[id] ?: 0
             val title = c.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: if (kind == "direct") "Пользователь" else "Группа"
             ChatItem(id, title, kind, c.optString("last_message_at").takeIf { it.isNotBlank() && it != "null" }, unread)
         }
