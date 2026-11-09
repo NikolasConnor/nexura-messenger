@@ -5,6 +5,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 class SessionStore(context: Context) {
+    private val appContext = context.applicationContext
+    val mediaCacheDir: java.io.File get() = java.io.File(appContext.cacheDir, "nexura-media-cache").also { if (!it.exists()) it.mkdirs() }
     private val prefs = EncryptedSharedPreferences.create(
         context,
         "nexura_session",
@@ -23,3 +25,4 @@ class SessionStore(context: Context) {
         set(value) { prefs.edit().putString("user_id", value).apply() }
     fun clear() { prefs.edit().clear().apply() }
 }
+
