@@ -17,7 +17,9 @@ data class CallUiState(
     val video: Boolean = false,
     val muted: Boolean = false,
     val cameraEnabled: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val localVideoTrack: org.webrtc.VideoTrack? = null,
+    val remoteVideoTrack: org.webrtc.VideoTrack? = null
 )
 
 class CallCoordinator(
@@ -150,7 +152,8 @@ class CallCoordinator(
                             .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))
                 } else queuedIce.add(candidate)
             },
-            onRemoteVideo = { },
+            onRemoteVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(remoteVideoTrack = track)) } },
+            onLocalVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(localVideoTrack = track)) } },
             onState = { value -> scope.launch { publish(CallUiState(status = value, active = true, video = videoMode)) } }
         )
     }
@@ -204,6 +207,7 @@ class CallCoordinator(
     private fun finish(closeSignaling: Boolean = true) {
         engine?.close()
         engine = null
+        publish((lastState ?: CallUiState()).copy(localVideoTrack = null, remoteVideoTrack = null))
         pendingOffer = null
         pendingCallId = null
         callId = null
