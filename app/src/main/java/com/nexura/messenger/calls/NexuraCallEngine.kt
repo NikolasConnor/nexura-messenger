@@ -32,6 +32,7 @@ class NexuraCallEngine(
     private val previousAudioMode = audioManager.mode
     private val previousSpeakerState = audioManager.isSpeakerphoneOn
     private val egl = EglBase.create()
+    fun sharedEglContext(): EglBase.Context = egl.eglBaseContext
     private val factory: PeerConnectionFactory
     private val peer: PeerConnection
     private val audioSource: AudioSource
@@ -84,7 +85,7 @@ class NexuraCallEngine(
                 override fun onRenegotiationNeeded() {}
                 override fun onAddTrack(receiver: org.webrtc.RtpReceiver, streams: Array<out org.webrtc.MediaStream>) {
                     val track = receiver.track()
-                    if (track is VideoTrack) onRemoteVideo(track)
+                    if (track is VideoTrack) { track.setEnabled(true); onRemoteVideo(track) }
                 }
                 override fun onTrack(transceiver: org.webrtc.RtpTransceiver) {
                     val track = transceiver.receiver.track()
