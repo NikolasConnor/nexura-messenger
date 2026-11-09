@@ -253,7 +253,7 @@ class NexuraApi(private val store: SessionStore) {
             val replyTo = m.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }
             val edited = m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" }
 
-            if (type in setOf("text", "media") &&
+            if (type in setOf("text", "media", "call") &&
                 (E2eeMessageEnvelope.isEnvelope(content) || E2eeGroupMessageEnvelope.isEnvelope(content))) {
                 val decrypted = if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
                     runCatching {
