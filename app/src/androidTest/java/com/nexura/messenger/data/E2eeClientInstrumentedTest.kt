@@ -12,6 +12,14 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
+import javax.crypto.Cipher
+import javax.crypto.CipherOutputStream
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
+import android.util.Base64
 
 @RunWith(AndroidJUnit4::class)
 class E2eeClientInstrumentedTest {
@@ -166,6 +174,52 @@ class E2eeClientInstrumentedTest {
         val unknown = JSONObject(envelope.encode()).put("protocol", "nexura-olm-v2").toString()
         assertEquals(true, E2eeMessageEnvelope.isEnvelope(unknown))
         assertEquals(false, runCatching { E2eeMessageEnvelope.decode(unknown) }.isSuccess)
+    }
+
+    @Test
+    fun encryptedMediaRoundTripsAndRejectsTampering() {
+        val dir = File(context.cacheDir, "e2ee-media-test").also { it.mkdirs() }
+        val plain = ByteArray(512 * 1024) { (it % 251).toByte() }
+        val key = ByteArray(32) { (it + 3).toByte() }
+        val iv = ByteArray(12) { (it + 9).toByte() }
+        val encrypted = File.createTempFile("media-test-", ".enc", dir)
+        val decrypted = File.createTempFile("media-test-", ".dec", dir)
+        val tamperedOutput = File.createTempFile("media-test-", ".bad", dir)
+        try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+            CipherOutputStream(FileOutputStream(encrypted), cipher).use { it.write(plain) }
+            val digest = MessageDigest.getInstance("SHA-256").digest(encrypted.readBytes())
+                .joinToString("") { "%02x".format(it) }
+            E2eeMediaCrypto.decryptFile(
+                encrypted, decrypted,
+                Base64.encodeToString(key, Base64.NO_WRAP),
+                Base64.encodeToString(iv, Base64.NO_WRAP),
+                digest
+            )
+            assertArrayEquals(plain, decrypted.readBytes())
+
+            val bytes = encrypted.readBytes()
+            bytes[bytes.lastIndex] = (bytes.last().toInt() xor 0x01).toByte()
+            encrypted.writeBytes(bytes)
+            assertEquals(
+                true,
+                runCatching {
+                    E2eeMediaCrypto.decryptFile(
+                        encrypted, tamperedOutput,
+                        Base64.encodeToString(key, Base64.NO_WRAP),
+                        Base64.encodeToString(iv, Base64.NO_WRAP),
+                        digest
+                    )
+                }.isFailure
+            )
+            assertEquals(false, tamperedOutput.exists() && tamperedOutput.length() > 0)
+        } finally {
+            encrypted.delete()
+            decrypted.delete()
+            tamperedOutput.delete()
+            dir.delete()
+        }
     }
 
     @Test
