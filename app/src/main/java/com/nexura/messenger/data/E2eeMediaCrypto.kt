@@ -3,6 +3,7 @@ package com.nexura.messenger.data
 import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.os.Build
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -14,6 +15,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
+import kotlin.math.roundToInt
 import javax.crypto.Cipher
 import javax.crypto.CipherOutputStream
 import javax.crypto.spec.GCMParameterSpec
@@ -45,8 +47,10 @@ object E2eeMediaCrypto {
     ): EncryptedMediaFile {
         val mime = resolver.getType(uri)?.lowercase()
             ?: throw IOException("Не удалось определить формат файла")
-        val allowed = mime in setOf("image/jpeg", "image/png", "image/webp", "video/mp4")
-        if (!allowed) throw IOException("Поддерживаются JPG, PNG, WebP и MP4")
+        val isImage = mime.startsWith("image/")
+        if (!isImage && mime != "video/mp4") {
+            throw IOException("Поддерживаются изображения и видео MP4")
+        }
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }?.takeIf { it.isNotBlank() }?.replace(Regex("[^A-Za-z0-9._ -]"), "_")?.take(100)
@@ -94,20 +98,53 @@ object E2eeMediaCrypto {
     }
 
     private fun optimizeImage(resolver: ContentResolver, uri: Uri, cacheDir: File, mime: String): Pair<File, String> {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: throw IOException("Не удалось прочитать изображение")
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("Повреждённое изображение")
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = 1
-            while (bounds.outWidth / (inSampleSize * 2) >= 1920 || bounds.outHeight / (inSampleSize * 2) >= 1920) {
-                inSampleSize *= 2
+        // ImageDecoder supports modern Android image codecs (including HEIC on supported versions).
+        // Older Android versions use the BitmapFactory fallback.
+        val bitmap = try {
+            if (Build.VERSION.SDK_INT >= 28) {
+                val source = ImageDecoder.createSource(resolver, uri)
+                ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    val width = info.size.width.coerceAtLeast(1)
+                    val height = info.size.height.coerceAtLeast(1)
+                    val scale = minOf(1f, 1920f / maxOf(width, height))
+                    decoder.setTargetSize(
+                        (width * scale).roundToInt().coerceAtLeast(1),
+                        (height * scale).roundToInt().coerceAtLeast(1)
+                    )
+                }
+            } else {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                    ?: throw IOException("Галерея не предоставила доступ к изображению")
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                    throw IOException("Формат изображения не поддерживается на этой версии Android")
+                }
+                val largest = maxOf(bounds.outWidth, bounds.outHeight)
+                var sample = 1
+                while (largest / (sample * 2) >= 1920) sample *= 2
+                val options = BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+                    ?: throw IOException("Не удалось декодировать изображение из галереи")
             }
+        } catch (error: Exception) {
+            if (error is IOException) throw error
+            throw IOException("Не удалось прочитать изображение из галереи: " + (error.message ?: error.javaClass.simpleName), error)
         }
-        val bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-            ?: throw IOException("Не удалось декодировать изображение")
-        val outputMime = when (mime) { "image/png" -> "image/png"; "image/webp" -> "image/webp"; else -> "image/jpeg" }
-        val extension = when (outputMime) { "image/png" -> ".png"; "image/webp" -> ".webp"; else -> ".jpg" }
+
+        val outputMime = when (mime) {
+            "image/png" -> "image/png"
+            "image/webp" -> "image/webp"
+            else -> "image/jpeg"
+        }
+        val extension = when (outputMime) {
+            "image/png" -> ".png"
+            "image/webp" -> ".webp"
+            else -> ".jpg"
+        }
         val output = File.createTempFile("nexura-image-", extension, cacheDir)
         try {
             val format = when (outputMime) {
@@ -117,7 +154,9 @@ object E2eeMediaCrypto {
             }
             FileOutputStream(output).use { stream ->
                 val quality = if (outputMime == "image/png") 100 else 82
-                if (!bitmap.compress(format, quality, stream)) throw IOException("Не удалось оптимизировать изображение")
+                if (!bitmap.compress(format, quality, stream)) {
+                    throw IOException("Не удалось подготовить изображение к отправке")
+                }
             }
             return output to outputMime
         } catch (error: Exception) {
