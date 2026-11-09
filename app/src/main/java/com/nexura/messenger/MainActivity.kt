@@ -90,6 +90,16 @@ class MainActivity : ComponentActivity() {
         setContent { NexuraApp(api, store, intent?.data) }
     }
 
+    override fun onStart() {
+        super.onStart()
+        getSharedPreferences("nexura_runtime", MODE_PRIVATE).edit().putBoolean("activity_visible", true).apply()
+    }
+
+    override fun onStop() {
+        getSharedPreferences("nexura_runtime", MODE_PRIVATE).edit().putBoolean("activity_visible", false).apply()
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
