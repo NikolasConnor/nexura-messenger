@@ -602,15 +602,20 @@ class NexuraApi(private val store: SessionStore) {
             sender.optString("protocol") != "olm-v1" || sender.optInt("bundle_version") != 1) {
             throw IOException("Идентичность отправителя группы не подтверждена")
         }
+        val myDeviceId = e2ee.deviceId()
+        if (senderId == uid) {
+            val own = JSONObject(e2ee.ensureDevice())
+            if (envelope.senderDeviceId != myDeviceId ||
+                sender.optString("curve25519_key") != own.optString("curve25519") ||
+                sender.optString("ed25519_key") != own.optString("ed25519")) {
+                throw IOException("Идентичность отправляющего устройства не совпадает")
+            }
+            return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
+                ?: throw IOException("Локальная копия группового сообщения недоступна")
+        }
         if (!e2ee.isRemoteDeviceTrusted(senderId, envelope.senderDeviceId,
                 sender.optString("curve25519_key"), sender.optString("ed25519_key"))) {
             throw IOException("Сначала проверьте отпечаток отправителя группы")
-        }
-        val myDeviceId = e2ee.deviceId()
-        if (senderId == uid) {
-            if (envelope.senderDeviceId != myDeviceId) throw IOException("Сообщение отправлено с другого устройства")
-            return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
-                ?: throw IOException("Локальная копия группового сообщения недоступна")
         }
         val recipient = envelope.recipients.singleOrNull {
             it.userId == uid && it.deviceId == myDeviceId
