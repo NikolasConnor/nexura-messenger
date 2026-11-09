@@ -128,7 +128,8 @@ class E2eeClient(context: Context, userId: String) {
         recipientEd25519: String,
         recipientOneTimeKey: String,
         recipientOneTimeKeySignature: String,
-        firstPlaintext: ByteArray
+        firstPlaintext: ByteArray,
+        messageId: String = UUID.randomUUID().toString()
     ): String {
         require(conversationId.isNotBlank()) { "conversationId must not be blank" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
@@ -141,22 +142,37 @@ class E2eeClient(context: Context, userId: String) {
             firstPlaintext
         )
         require(result.size == 2) { "Invalid native outbound-session result" }
-        store.save(sessionKey(conversationId), result[0])
-        return String(result[1], StandardCharsets.UTF_8)
+        val ciphertext = String(result[1], StandardCharsets.UTF_8)
+        store.saveBatch(mapOf(
+            sessionKey(conversationId) to result[0],
+            messageCacheKey(conversationId, messageId) to firstPlaintext,
+            outboxKey(conversationId, messageId) to JSONObject()
+                .put("kind", E2eeMessageEnvelope.Kind.PRE_KEY.wireValue)
+                .put("ciphertext", ciphertext)
+                .toString().toByteArray(StandardCharsets.UTF_8)
+        ))
+        return ciphertext
     }
 
     @Synchronized
     fun acceptDirectSession(
         conversationId: String,
         senderCurve25519: String,
-        preKeyEnvelope: String
+        preKeyEnvelope: String,
+        messageId: String? = null
     ): ByteArray {
         require(conversationId.isNotBlank()) { "conversationId must not be blank" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val result = E2eeNative.nativeAcceptInbound(account, senderCurve25519, preKeyEnvelope)
         require(result.size == 3) { "Invalid native inbound-session result" }
-        store.save(ACCOUNT_KEY, result[0])
-        store.save(sessionKey(conversationId), result[1])
+        val states = linkedMapOf(
+            ACCOUNT_KEY to result[0],
+            sessionKey(conversationId) to result[1]
+        )
+        if (!messageId.isNullOrBlank()) {
+            states[messageCacheKey(conversationId, messageId)] = result[2]
+        }
+        store.saveBatch(states)
         return result[2]
     }
 
@@ -174,7 +190,7 @@ class E2eeClient(context: Context, userId: String) {
         require(curve25519IdentityKey.length in 40..64 && ed25519IdentityKey.length in 40..64) {
             "Invalid device identity keys"
         }
-        val canonical = "nexura-device-identity:v1\\n$curve25519IdentityKey\\n$ed25519IdentityKey"
+        val canonical = "nexura-device-identity:v1\n$curve25519IdentityKey\n$ed25519IdentityKey"
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(canonical.toByteArray(StandardCharsets.UTF_8))
         return digest.joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
@@ -214,23 +230,59 @@ class E2eeClient(context: Context, userId: String) {
     }
 
     @Synchronized
-    fun encryptDirectMessage(conversationId: String, plaintext: ByteArray): String {
+    fun encryptDirectMessage(
+        conversationId: String,
+        plaintext: ByteArray,
+        messageId: String = UUID.randomUUID().toString()
+    ): String {
         val session = store.load(sessionKey(conversationId))
             ?: error("No E2EE session for this conversation")
         val result = E2eeNative.nativeEncrypt(session, plaintext)
         require(result.size == 2) { "Invalid native encryption result" }
-        store.save(sessionKey(conversationId), result[0])
-        return String(result[1], StandardCharsets.UTF_8)
+        val ciphertext = String(result[1], StandardCharsets.UTF_8)
+        store.saveBatch(mapOf(
+            sessionKey(conversationId) to result[0],
+            messageCacheKey(conversationId, messageId) to plaintext,
+            outboxKey(conversationId, messageId) to JSONObject()
+                .put("kind", E2eeMessageEnvelope.Kind.NORMAL.wireValue)
+                .put("ciphertext", ciphertext)
+                .toString().toByteArray(StandardCharsets.UTF_8)
+        ))
+        return ciphertext
     }
 
     @Synchronized
-    fun decryptDirectMessage(conversationId: String, envelope: String): ByteArray {
+    fun decryptDirectMessage(
+        conversationId: String,
+        envelope: String,
+        messageId: String? = null
+    ): ByteArray {
         val session = store.load(sessionKey(conversationId))
             ?: error("No E2EE session for this conversation")
         val result = E2eeNative.nativeDecrypt(session, envelope)
         require(result.size == 2) { "Invalid native decryption result" }
-        store.save(sessionKey(conversationId), result[0])
+        val states = linkedMapOf(sessionKey(conversationId) to result[0])
+        if (!messageId.isNullOrBlank()) {
+            states[messageCacheKey(conversationId, messageId)] = result[1]
+        }
+        store.saveBatch(states)
         return result[1]
+    }
+
+    @Synchronized
+    fun cachedMessage(conversationId: String, messageId: String): ByteArray? =
+        store.load(messageCacheKey(conversationId, messageId))
+
+    @Synchronized
+    fun pendingOutboundEnvelope(conversationId: String, messageId: String): String? {
+        val bytes = store.load(outboxKey(conversationId, messageId)) ?: return null
+        return JSONObject(String(bytes, StandardCharsets.UTF_8)).optString("ciphertext")
+            .takeIf { it.isNotBlank() }
+    }
+
+    @Synchronized
+    fun markOutboundDelivered(conversationId: String, messageId: String) {
+        store.delete(outboxKey(conversationId, messageId))
     }
 
     /** Permanently remove this user's local E2EE identity and all local sessions. */
@@ -240,6 +292,10 @@ class E2eeClient(context: Context, userId: String) {
     }
 
     private fun sessionKey(conversationId: String): String = "olm-session:$conversationId"
+    private fun messageCacheKey(conversationId: String, messageId: String): String =
+        "message-cache:$conversationId:$messageId"
+    private fun outboxKey(conversationId: String, messageId: String): String =
+        "outbox:$conversationId:$messageId"
 
     private fun trustedDeviceKey(userId: String, deviceId: String): String =
         "trusted-device:$userId:$deviceId"
