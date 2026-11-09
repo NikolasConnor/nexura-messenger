@@ -318,7 +318,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             throw IllegalStateException("Не все устройства участников подтверждены. Нажмите на замок группы.")
                         }
                     }
-                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text)
+                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
                 }
                 draft = ""
                 replyTarget = null
