@@ -16,6 +16,12 @@ on:
 permissions:
   contents: read
 
+# Keep only the newest branch build alive; several pushes can otherwise start
+# simultaneous emulators and exhaust runner disk/RAM.
+concurrency:
+  group: nexura-e2ee-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
