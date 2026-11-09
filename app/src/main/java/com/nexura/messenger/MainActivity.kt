@@ -152,7 +152,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var mediaViewerType by remember { mutableStateOf("image") }
     var profileName by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
+    var profileBio by remember { mutableStateOf("") }
+    var profileAge by remember { mutableStateOf("") }
+    var profilePhotoUri by remember { mutableStateOf<Uri?>(null) }
     var savingProfile by remember { mutableStateOf(false) }
+    var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var loadingProfile by remember { mutableStateOf(false) }
     var createGroupOpen by remember { mutableStateOf(false) }
     var groupTitle by remember { mutableStateOf("") }
     var groupSearch by remember { mutableStateOf("") }
@@ -257,6 +263,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         sendPickedMedia(uri)
+    }
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        profilePhotoUri = uri
     }
 
     val visibleChats = chats.filter { it.title.contains(chatFilter, ignoreCase = true) }
@@ -553,7 +562,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Text("АККАУНТ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(18.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) { Avatar(profileAvatar); Column(Modifier.padding(start = 12.dp)) { Text(profileName.ifBlank { "Ваш аккаунт Nexura" }, color = MainText, fontWeight = FontWeight.SemiBold); Text("Профиль Nexura", color = Success, fontSize = 12.sp) } }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.clickable { avatarPicker.launch("image/*") }) {
+                                        if (profilePhotoUri != null) AsyncImage(model = profilePhotoUri, contentDescription = "Фото профиля", modifier = Modifier.size(58.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                                        else Avatar(profileName.ifBlank { "Ваш профиль" }, profileAvatar)
+                                    }
+                                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                                        Text(profileName.ifBlank { "Ваш аккаунт Nexura" }, color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text("Нажмите на фото, чтобы изменить", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    TextButton(onClick = { avatarPicker.launch("image/*") }) { Text("Фото") }
+                                }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("Имя в Nexura", color = SecondaryText, fontSize = 12.sp)
                                 OutlinedTextField(value = profileName, onValueChange = { profileName = it.take(40) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, placeholder = { Text("Ваше имя") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
@@ -563,7 +582,28 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Box(Modifier.size(38.dp).clip(CircleShape).background(if (profileAvatar == emoji) Accent.copy(alpha = 0.25f) else Surface2).clickable { profileAvatar = emoji }, contentAlignment = Alignment.Center) { Text(emoji, fontSize = 21.sp) }
                                     }
                                 }
-                                Button(onClick = { scope.launch { savingProfile = true; error = ""; notice = ""; try { api.updateMyProfile(profileName, profileAvatar); notice = "Профиль сохранён." } catch (e: Exception) { error = e.message ?: "Не удалось сохранить профиль" } finally { savingProfile = false } } }, enabled = !savingProfile && profileName.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
+                                Text("О себе", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+                                OutlinedTextField(value = profileBio, onValueChange = { profileBio = it.take(160) }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 3, placeholder = { Text("Расскажите немного о себе") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                Text("${profileBio.length}/160", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.align(Alignment.End))
+                                Text("Возраст (необязательно)", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, bottom = 5.dp))
+                                OutlinedTextField(value = profileAge, onValueChange = { profileAge = it.filter(Char::isDigit).take(3) }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Например, 25") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                Button(onClick = { scope.launch {
+                                    savingProfile = true; error = ""; notice = ""
+                                    try {
+                                        if (profilePhotoUri != null) {
+                                            val uri = profilePhotoUri!!
+                                            val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
+                                            val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                                            profileAvatar = withContext(Dispatchers.IO) { api.uploadAvatar(bytes, mime) }
+                                            profilePhotoUri = null
+                                        }
+                                        val age = profileAge.toIntOrNull()
+                                        if (profileAge.isNotBlank() && age == null) throw IOException("Проверьте возраст")
+                                        api.updateMyProfile(profileName, profileAvatar, profileBio, age)
+                                        notice = "Профиль сохранён."
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось сохранить профиль" }
+                                    finally { savingProfile = false }
+                                } }, enabled = !savingProfile && profileName.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
@@ -624,7 +664,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
@@ -948,6 +988,49 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         )
                     }
+                    viewedProfile?.let { profile ->
+                        Dialog(onDismissRequest = { viewedProfile = null; profileMedia = emptyList() }) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp),
+                                colors = CardDefaults.cardColors(containerColor = Surface1),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                                        Text("Профиль", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart))
+                                        IconButton(onClick = { viewedProfile = null; profileMedia = emptyList() }) { Text("×", color = SecondaryText, fontSize = 24.sp) }
+                                    }
+                                    Avatar(profile.displayName, profile.avatar)
+                                    Text(profile.displayName, color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+                                    if (profile.username.isNotBlank()) Text("@${profile.username}", color = SecondaryText, fontSize = 13.sp)
+                                    if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
+                                    Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                                    HorizontalDivider(Modifier.padding(vertical = 16.dp), color = Surface2)
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Медиа из чата", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                        Text("${profileMedia.size}", color = SecondaryText, fontSize = 12.sp)
+                                    }
+                                    if (loadingProfile) {
+                                        CircularProgressIndicator(Modifier.padding(20.dp), color = Accent)
+                                    } else if (profileMedia.isEmpty()) {
+                                        Text("Фото и видео пока нет", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 16.dp))
+                                    } else {
+                                        profileMedia.chunked(3).forEach { group ->
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                group.forEach { item ->
+                                                    Box(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).background(Surface2)) {
+                                                        AsyncImage(model = item.content, contentDescription = "Медиа из переписки", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                        if (item.mediaKind == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(30.dp))
+                                                    }
+                                                }
+                                                repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Column(Modifier.fillMaxSize()) {
                         Row(
                             Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 6.dp, vertical = 8.dp),
@@ -956,8 +1039,36 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(onClick = { selected = null; messages = emptyList(); replyTarget = null; loadChats() }) {
                                 Icon(Icons.Default.ArrowBack, "Назад к чатам", tint = MainText)
                             }
-                            if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
-                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            if (chat.kind == "group") {
+                                GroupAvatar()
+                            } else {
+                                Box(Modifier.clickable {
+                                    val peerId = chat.peerUserId
+                                    if (peerId != null) {
+                                        loadingProfile = true
+                                        scope.launch {
+                                            try {
+                                                viewedProfile = api.userProfile(peerId)
+                                                profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                            } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
+                                            finally { loadingProfile = false }
+                                        }
+                                    } else error = "Не удалось определить собеседника"
+                                }) { Avatar(chat.title, chat.avatar) }
+                            }
+                            Column(Modifier.weight(1f).padding(start = 12.dp).clickable(enabled = chat.kind == "direct") {
+                                val peerId = chat.peerUserId
+                                if (peerId != null) {
+                                    loadingProfile = true
+                                    scope.launch {
+                                        try {
+                                            viewedProfile = api.userProfile(peerId)
+                                            profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
+                                        finally { loadingProfile = false }
+                                    }
+                                }
+                            }) {
                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
                                 Text(
                                     if (chat.kind == "group") "Групповой чат" else "Личная переписка",
