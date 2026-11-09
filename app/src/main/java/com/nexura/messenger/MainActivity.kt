@@ -905,7 +905,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             visible = showCallDialog,
                             autoAction = pendingCallAction,
                             onCallFinished = { duration, outgoing, video, result ->
-                                scope.launch {
+                                if (outgoing) scope.launch {
                                     try {
                                         val client = e2eeClient ?: throw IllegalStateException("Не удалось сохранить историю звонка: E2EE не готово")
                                         val record = org.json.JSONObject()
