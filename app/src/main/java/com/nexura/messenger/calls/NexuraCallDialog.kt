@@ -54,8 +54,18 @@ fun NexuraCallDialog(
     var remoteRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     var localRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     DisposableEffect(Unit) { onDispose { remoteRenderer?.release(); localRenderer?.release(); eglContext.release() } }
-    LaunchedEffect(ui.remoteVideoTrack, remoteRenderer) { remoteRenderer?.let { renderer -> ui.remoteVideoTrack?.addSink(renderer) } }
-    LaunchedEffect(ui.localVideoTrack, localRenderer) { localRenderer?.let { renderer -> ui.localVideoTrack?.addSink(renderer) } }
+    DisposableEffect(ui.remoteVideoTrack, remoteRenderer) {
+        val track = ui.remoteVideoTrack
+        val renderer = remoteRenderer
+        if (track != null && renderer != null) track.addSink(renderer)
+        onDispose { if (track != null && renderer != null) track.removeSink(renderer) }
+    }
+    DisposableEffect(ui.localVideoTrack, localRenderer) {
+        val track = ui.localVideoTrack
+        val renderer = localRenderer
+        if (track != null && renderer != null) track.addSink(renderer)
+        onDispose { if (track != null && renderer != null) track.removeSink(renderer) }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -132,7 +142,7 @@ fun NexuraCallDialog(
                                 remoteRenderer = renderer
                             }
                         },
-                        update = { renderer -> ui.remoteVideoTrack?.addSink(renderer) }
+                        update = { }
                     )
                     if (ui.localVideoTrack != null) {
                         AndroidView(
@@ -145,7 +155,7 @@ fun NexuraCallDialog(
                                     localRenderer = renderer
                                 }
                             },
-                            update = { renderer -> ui.localVideoTrack?.addSink(renderer) }
+                            update = { }
                         )
                     }
                 }
