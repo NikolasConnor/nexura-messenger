@@ -281,6 +281,13 @@ class E2eeClient(context: Context, userId: String) {
     }
 
     @Synchronized
+    fun pendingOutboundKind(conversationId: String, messageId: String): E2eeMessageEnvelope.Kind? {
+        val bytes = store.load(outboxKey(conversationId, messageId)) ?: return null
+        val kind = JSONObject(String(bytes, StandardCharsets.UTF_8)).optString("kind")
+        return E2eeMessageEnvelope.Kind.fromWire(kind)
+    }
+
+    @Synchronized
     fun markOutboundDelivered(conversationId: String, messageId: String) {
         store.delete(outboxKey(conversationId, messageId))
     }
