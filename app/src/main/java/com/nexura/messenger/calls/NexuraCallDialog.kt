@@ -55,7 +55,15 @@ fun NexuraCallDialog(
     val eglContext = remember { EglBase.create() }
     var remoteRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     var localRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
-    DisposableEffect(Unit) { onDispose { remoteRenderer?.release(); localRenderer?.release(); eglContext.release() } }
+    val latestRemoteRenderer by rememberUpdatedState(remoteRenderer)
+    val latestLocalRenderer by rememberUpdatedState(localRenderer)
+    DisposableEffect(Unit) {
+        onDispose {
+            latestRemoteRenderer?.release()
+            latestLocalRenderer?.release()
+            eglContext.release()
+        }
+    }
     DisposableEffect(ui.remoteVideoTrack, remoteRenderer) {
         val track = ui.remoteVideoTrack
         val renderer = remoteRenderer
