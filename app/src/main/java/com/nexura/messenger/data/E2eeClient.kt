@@ -178,6 +178,8 @@ class E2eeClient(context: Context, userId: String) {
 
     private fun groupSessionKey(conversationId: String, peerUserId: String, peerDeviceId: String): String =
         "olm-group-session:$conversationId:$peerUserId:$peerDeviceId"
+    private fun groupOutboxKey(conversationId: String, messageId: String, peerUserId: String, peerDeviceId: String): String =
+        "group-outbox:$conversationId:$messageId:$peerUserId:$peerDeviceId"
 
     @Synchronized
     fun hasGroupSession(conversationId: String, peerUserId: String, peerDeviceId: String): Boolean =
@@ -205,7 +207,10 @@ class E2eeClient(context: Context, userId: String) {
         val ciphertext = String(result[1], StandardCharsets.UTF_8)
         store.saveBatch(mapOf(
             key to result[0],
-            messageCacheKey(conversationId, messageId) to plaintext
+            messageCacheKey(conversationId, messageId) to plaintext,
+            groupOutboxKey(conversationId, messageId, peerUserId, peerDeviceId) to JSONObject()
+                .put("kind", E2eeMessageEnvelope.Kind.PRE_KEY.wireValue)
+                .put("ciphertext", ciphertext).toString().toByteArray(StandardCharsets.UTF_8)
         ))
         return ciphertext
     }
@@ -242,11 +247,35 @@ class E2eeClient(context: Context, userId: String) {
         val session = store.load(key) ?: error("No E2EE group session for recipient device")
         val result = E2eeNative.nativeEncrypt(session, plaintext)
         require(result.size == 2) { "Invalid group encryption result" }
+        val ciphertext = String(result[1], StandardCharsets.UTF_8)
         store.saveBatch(mapOf(
             key to result[0],
-            messageCacheKey(conversationId, messageId) to plaintext
+            messageCacheKey(conversationId, messageId) to plaintext,
+            groupOutboxKey(conversationId, messageId, peerUserId, peerDeviceId) to JSONObject()
+                .put("kind", E2eeMessageEnvelope.Kind.NORMAL.wireValue)
+                .put("ciphertext", ciphertext).toString().toByteArray(StandardCharsets.UTF_8)
         ))
-        return String(result[1], StandardCharsets.UTF_8)
+        return ciphertext
+    }
+
+    @Synchronized
+    fun pendingGroupEnvelope(
+        conversationId: String, messageId: String, peerUserId: String, peerDeviceId: String
+    ): E2eeGroupRecipientEnvelope? {
+        val bytes = store.load(groupOutboxKey(conversationId, messageId, peerUserId, peerDeviceId)) ?: return null
+        val json = JSONObject(String(bytes, StandardCharsets.UTF_8))
+        return E2eeGroupRecipientEnvelope(
+            peerUserId, peerDeviceId,
+            E2eeMessageEnvelope.Kind.fromWire(json.getString("kind")),
+            json.getString("ciphertext")
+        )
+    }
+
+    @Synchronized
+    fun markGroupOutboundDelivered(conversationId: String, messageId: String, recipients: List<E2eeGroupRecipientEnvelope>) {
+        recipients.forEach { recipient ->
+            store.delete(groupOutboxKey(conversationId, messageId, recipient.userId, recipient.deviceId))
+        }
     }
 
     @Synchronized
