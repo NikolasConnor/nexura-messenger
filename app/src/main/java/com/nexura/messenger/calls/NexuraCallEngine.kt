@@ -24,6 +24,7 @@ class NexuraCallEngine(
     private val videoEnabled: Boolean,
     private val onLocalIce: (IceCandidate) -> Unit,
     private val onRemoteVideo: (VideoTrack?) -> Unit,
+    private val onLocalVideo: (VideoTrack?) -> Unit,
     private val onState: (String) -> Unit
 ) {
     private val egl = EglBase.create()
@@ -102,6 +103,7 @@ class NexuraCallEngine(
             capturer!!.initialize(textureHelper, context, videoSource!!.capturerObserver)
             capturer!!.startCapture(1280, 720, 30)
             videoTrack = factory.createVideoTrack("nexura_video", videoSource)
+            onLocalVideo(videoTrack)
             peer.addTrack(videoTrack, listOf("nexura_stream"))
         }
     }
@@ -162,6 +164,7 @@ class NexuraCallEngine(
     fun setMuted(muted: Boolean) { audioTrack.setEnabled(!muted) }
     fun setCameraEnabled(enabled: Boolean) { videoTrack?.setEnabled(enabled) }
     fun switchCamera() { capturer?.switchCamera(null) }
+    fun localVideoTrack(): VideoTrack? = videoTrack
 
     fun close() {
         if (!closed.compareAndSet(false, true)) return
