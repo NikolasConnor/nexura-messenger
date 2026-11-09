@@ -5,6 +5,7 @@ import android.content.Intent
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
+import java.util.UUID
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -135,6 +137,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editDraft by remember { mutableStateOf("") }
+    var e2eeClient by remember { mutableStateOf<E2eeClient?>(null) }
+    var e2eeStatus by remember { mutableStateOf("Шифрование не проверено") }
+    var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
+    var trustPeerId by remember { mutableStateOf<String?>(null) }
 
     fun syncContacts() {
         scope.launch {
@@ -218,10 +224,41 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         replyTarget = null
         scope.launch {
             try {
-                messages = api.messages(chat.id)
+                messages = api.messages(chat.id, e2eeClient)
                 api.markChatRead(chat.id)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
             } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
+        }
+    }
+
+    fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
+        val messageId = UUID.randomUUID().toString()
+        scope.launch {
+            sendingMessage = true
+            error = ""
+            try {
+                if (chat.kind != "direct") {
+                    throw IllegalStateException("Групповое E2EE ещё не реализовано. Открытая отправка отключена.")
+                }
+                val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
+                val peerId = api.directPeerUserId(chat.id)
+                val devices = api.activeE2eeDevices(peerId)
+                if (devices.size != 1) {
+                    throw IllegalStateException("Для защищённого чата пока требуется ровно одно активное устройство собеседника")
+                }
+                val remote = devices.single()
+                if (!client.isRemoteDeviceTrusted(peerId, remote.deviceId, remote.curve25519Key, remote.ed25519Key)) {
+                    throw IllegalStateException("Нажмите на замок вверху чата и сверьте отпечаток устройства собеседника")
+                }
+                api.sendEncryptedDirectMessage(chat.id, remote, client, messageId, text, replyToId)
+                draft = ""
+                replyTarget = null
+                messages = api.messages(chat.id, client)
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось отправить защищённое сообщение"
+            } finally {
+                sendingMessage = false
+            }
         }
     }
 
@@ -244,14 +281,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
-                // Register public E2EE device keys when the reviewed key-directory
-                // schema is available. Failure must not block ordinary chat access.
+                // Initialize local E2EE identity and publish public keys when the
+                // reviewed key-directory migration has been deployed.
                 val e2eeUserId = store.userId
                 if (!e2eeUserId.isNullOrBlank()) {
+                    val client = E2eeClient(context.applicationContext, e2eeUserId)
+                    e2eeClient = client
                     try {
-                        api.publishE2eeDevice(E2eeClient(context.applicationContext, e2eeUserId))
-                    } catch (_: Exception) {
-                        // E2EE remains unavailable until its server schema is deployed.
+                        val available = api.publishE2eeDevice(client)
+                        e2eeStatus = "Устройство зарегистрировано · $available ключей"
+                    } catch (e: Exception) {
+                        e2eeStatus = "Каталог ключей недоступен: ${e.message ?: "ожидается настройка сервера"}"
                     }
                 }
                 val pushToken = FirebaseMessaging.getInstance().token.await()
@@ -273,7 +313,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 try {
                     val currentChat = selected
                     if (currentChat != null) {
-                        val latest = api.messages(currentChat.id)
+                        val latest = api.messages(currentChat.id, e2eeClient)
                         if (selected?.id == currentChat.id) messages = latest
                     } else {
                         chats = api.chats()
@@ -564,7 +604,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 val id = api.createDirect(user.id)
                                                 val chat = ChatItem(id, user.displayName, "direct", null, avatar = user.avatar)
                                                 selected = chat
-                                                messages = api.messages(id)
+                                                messages = api.messages(id, e2eeClient)
                                                 loadChats()
                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
                                         }
@@ -670,11 +710,48 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             onDismissRequest = { editingTarget = null },
                             title = { Text("Изменить сообщение") },
                             text = { OutlinedTextField(value = editDraft, onValueChange = { editDraft = it }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5) },
-                            confirmButton = { TextButton(onClick = { val target = editingTarget!!; scope.launch { try { api.editMessage(target.id, editDraft); messages = api.messages(selected!!.id); editingTarget = null } catch (e: Exception) { error = e.message ?: "Не удалось изменить сообщение" } } }) { Text("Сохранить") } },
+                            confirmButton = { TextButton(onClick = { val target = editingTarget!!; scope.launch { try { api.editMessage(target.id, editDraft); messages = api.messages(selected!!.id, e2eeClient); editingTarget = null } catch (e: Exception) { error = e.message ?: "Не удалось изменить сообщение" } } }) { Text("Сохранить") } },
                             dismissButton = { TextButton(onClick = { editingTarget = null }) { Text("Отмена") } }
                         )
                     }
                     val chat = selected!!
+                    if (trustCandidate != null && trustPeerId != null) {
+                        val remote = trustCandidate!!
+                        val client = e2eeClient
+                        val ownBundle = runCatching { JSONObject(client?.ensureDevice() ?: "{}") }.getOrNull()
+                        val remoteFingerprint = client?.deviceFingerprint(remote.curve25519Key, remote.ed25519Key) ?: "Недоступен"
+                        val ownFingerprint = if (ownBundle != null && ownBundle.has("curve25519") && ownBundle.has("ed25519")) {
+                            client?.deviceFingerprint(ownBundle.getString("curve25519"), ownBundle.getString("ed25519")) ?: "Недоступен"
+                        } else "Недоступен"
+                        AlertDialog(
+                            onDismissRequest = { trustCandidate = null; trustPeerId = null },
+                            title = { Text("Проверка устройства") },
+                            text = {
+                                Column {
+                                    Text("Сравните отпечаток собеседника с отпечатком его устройства по другому доверенному каналу — например, лично или по видеосвязи. Не подтверждайте ключ, если сравнить его не удалось.")
+                                    Text("Устройство собеседника", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                    Text(remoteFingerprint, color = MainText, fontWeight = FontWeight.Bold)
+                                    Text("Ваш отпечаток", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                    Text(ownFingerprint, color = MainText, fontWeight = FontWeight.Bold)
+                                    Text("Собеседник должен увидеть ваш отпечаток у себя и сравнить его с тем, что показывается на его устройстве.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    try {
+                                        client ?: throw IllegalStateException("Ключ устройства не готов")
+                                        client.trustRemoteDevice(trustPeerId!!, remote.deviceId, remote.curve25519Key, remote.ed25519Key)
+                                        notice = "Устройство подтверждено. Сообщения этому ключу будут шифроваться."
+                                        trustCandidate = null
+                                        trustPeerId = null
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось сохранить доверие" }
+                                }) { Text("Я сверил отпечаток") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { trustCandidate = null; trustPeerId = null }) { Text("Отмена") }
+                            }
+                        )
+                    }
                     Column(Modifier.fillMaxSize()) {
                         Row(
                             Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 6.dp, vertical = 8.dp),
@@ -686,9 +763,24 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
-                                Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp)
+                                Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка · E2EE", color = SecondaryText, fontSize = 12.sp)
                             }
-                            IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id) } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" } } }) {
+                            IconButton(onClick = {
+                                scope.launch {
+                                    try {
+                                        val peerId = api.directPeerUserId(chat.id)
+                                        val devices = api.activeE2eeDevices(peerId)
+                                        if (devices.size != 1) throw IllegalStateException("Найдено устройств: ${devices.size}. Пока поддерживается одно.")
+                                        trustPeerId = peerId
+                                        trustCandidate = devices.single()
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Не удалось получить ключи устройства"
+                                    }
+                                }
+                            }, enabled = chat.kind == "direct") {
+                                Icon(Icons.Default.Lock, "Проверить шифрование", tint = Accent)
+                            }
+                            IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id, e2eeClient) } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" } } }) {
                                 Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
                             }
                         }
@@ -717,6 +809,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 bottomEnd = if (mine) 5.dp else 18.dp
                                             )).background(if (mine) Color(0xFF304B83) else Surface1).padding(horizontal = 13.dp, vertical = 10.dp)
                                         ) {
+                                            if (msg.encrypted) {
+                                                Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                            } else if (msg.securityWarning) {
+                                                Text("⚠ Защита не подтверждена", color = Color(0xFFFFC56E), fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
+                                            }
                                             if (msg.replyToId != null) {
                                                 val parent = messages.firstOrNull { it.id == msg.replyToId }
                                                 Text("↪ Ответ: ${parent?.content?.take(70) ?: "сообщение"}", color = Accent, fontSize = 11.sp, modifier = Modifier.padding(bottom = 5.dp))
@@ -743,7 +840,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         onDismissRequest = { openMessageMenu = null }
                                                     ) {
                                                         DropdownMenuItem(text = { Text("Ответить") }, onClick = { replyTarget = msg; openMessageMenu = null })
-                                                        if (mine && msg.messageType == "text") {
+                                                        if (mine && msg.messageType == "text" && !msg.encrypted) {
                                                             DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
                                                             DropdownMenuItem(
                                                                 text = { Text("Удалить", color = Danger) },
@@ -803,9 +900,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         if (text.isNotEmpty() && !sendingMessage) scope.launch {
                                             sendingMessage = true
                                             error = ""
-                                            try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
-                                            catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
-                                            finally { sendingMessage = false }
+                                            sendSecureMessage(chat, text, replyTarget?.id)
                                         }
                                     })
                                 )
@@ -816,9 +911,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         if (text.isNotEmpty() && !sendingMessage) scope.launch {
                                             sendingMessage = true
                                             error = ""
-                                            try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
-                                            catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
-                                            finally { sendingMessage = false }
+                                            sendSecureMessage(chat, text, replyTarget?.id)
                                         }
                                     },
                                     enabled = draft.isNotBlank() && !sendingMessage,
