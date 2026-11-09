@@ -1,10 +1,12 @@
-name: Nexura E2EE Android storage build
+name: Nexura E2EE Android build
 
 on:
   push:
     branches: [ security/e2ee-phase-2 ]
     paths:
       - "app/**"
+      - "crypto-core/**"
+      - "crypto-jni/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle/**"
@@ -23,20 +25,30 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      - uses: actions/setup-android@v3
         with:
           cmdline-tools-version: latest
           accept-android-sdk-licenses: true
-          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+      - name: Configure Android NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.4 --locked
+      - name: Build native E2EE libraries
+        working-directory: crypto-jni
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a -o ../app/src/main/jniLibs build --release
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Build Android debug APK
+      - name: Build Android debug APK with E2EE JNI
         run: gradle --no-daemon assembleDebug
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: nexura-e2ee-storage-debug
+          name: nexura-e2ee-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
