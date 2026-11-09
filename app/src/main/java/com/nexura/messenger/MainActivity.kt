@@ -361,16 +361,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
-                // Render chats before background setup of device keys and push tokens.
-                chats = api.chats()
-                // Initialize local E2EE identity and publish public keys when the
-                // reviewed key-directory migration has been deployed.
+                // Prepare local E2EE state before chats become tappable; key publication is
+                // network work and happens after the chat list has rendered.
                 val e2eeUserId = store.userId
-                if (!e2eeUserId.isNullOrBlank()) {
-                    val client = E2eeClient(context.applicationContext, e2eeUserId)
-                    e2eeClient = client
+                val localE2eeClient = if (!e2eeUserId.isNullOrBlank()) {
+                    runCatching { E2eeClient(context.applicationContext, e2eeUserId) }
+                        .onSuccess { e2eeClient = it }
+                        .onFailure { e2eeStatus = "Не удалось подготовить E2EE: ${it.message ?: "ошибка устройства"}" }
+                        .getOrNull()
+                } else null
+                chats = api.chats()
+                if (localE2eeClient != null) {
                     try {
-                        val available = api.publishE2eeDevice(client)
+                        val available = api.publishE2eeDevice(localE2eeClient)
                         e2eeStatus = "Устройство зарегистрировано · $available ключей"
                     } catch (e: Exception) {
                         e2eeStatus = "Каталог ключей недоступен: ${e.message ?: "ожидается настройка сервера"}"
