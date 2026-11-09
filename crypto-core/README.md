@@ -34,4 +34,4 @@ The `crypto-jni/` crate exports a narrow JNI surface for:
 
 The Kotlin `E2eeClient` facade stores account and session pickles through `E2eeStateStore` (Android Keystore-backed AES-GCM). The facade is not wired into chat UI, Supabase key publication, or `NexuraApi`. Do not send normal chat messages through it until key-directory publication/consumption, device identity verification, and integration tests are complete.
 
-The Android workflow cross-compiles JNI libraries for arm64-v8a and armeabi-v7a and packages them into a debug APK. CI must pass before treating the bridge as build-verified.
+The Android workflow cross-compiles JNI libraries for arm64-v8a, armeabi-v7a, and x86_64 and packages them into a debug APK. CI must pass before treating the bridge as build-verified.
