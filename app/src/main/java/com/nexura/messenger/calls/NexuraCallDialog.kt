@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -185,6 +187,9 @@ fun NexuraCallDialog(
                 }
             } else if (ui.active) {
                 Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilledIconButton(onClick = { coordinator?.toggleSpeaker(); ui = ui.copy(speaker = !ui.speaker) }) {
+                        Icon(if (ui.speaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff, "Громкая связь")
+                    }
                     FilledIconButton(onClick = { coordinator?.toggleMute(); ui = ui.copy(muted = !ui.muted) }) {
                         Icon(if (ui.muted) Icons.Default.MicOff else Icons.Default.Mic, "Микрофон")
                     }
@@ -204,7 +209,7 @@ fun NexuraCallDialog(
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Button(onClick = { request("audio", false) }, enabled = coordinator != null && !starting) {
+                    Button(onClick = { request("audio", false) }, enabled = coordinator != null && ui.status == "Готово к звонку" && !starting) {
                         Icon(Icons.Default.Call, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Позвонить")
