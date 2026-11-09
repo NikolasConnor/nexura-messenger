@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
 import android.content.Intent
 import androidx.core.content.ContextCompat
 
@@ -39,13 +40,13 @@ class CallCoordinator(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var signaling: CallSignalingClient? = null
     private var engine: NexuraCallEngine? = null
-    private var callId: String? = null
+    @Volatile private var callId: String? = null
     private var pendingOffer: String? = null
     private var videoMode = false
     private var ready = false
     private var closed = false
-    private var remoteDescriptionSet = false
-    private var localDescriptionSignaled = false
+    @Volatile private var remoteDescriptionSet = false
+    @Volatile private var localDescriptionSignaled = false
     private var offerRetryJob: Job? = null
     private var ringTimeoutJob: Job? = null
     private var connectionTimeoutJob: Job? = null
@@ -212,7 +213,7 @@ class CallCoordinator(
         }
     }
 
-    private val queuedRemoteIce = mutableListOf<Triple<String, String?, Int>>()
+    private val queuedRemoteIce = ConcurrentLinkedQueue<Triple<String, String?, Int>>()
 
     fun sharedEglContext(): org.webrtc.EglBase.Context? = engine?.sharedEglContext()
 
@@ -239,23 +240,24 @@ class CallCoordinator(
         )
     }
 
-    private val queuedIce = mutableListOf<IceCandidate>()
+    private val queuedIce = ConcurrentLinkedQueue<IceCandidate>()
     private fun flushIce() {
         val id = callId
         if (id != null && localDescriptionSignaled) {
-            val iterator = queuedIce.iterator()
-            while (iterator.hasNext()) {
-                val candidate = iterator.next()
+            while (true) {
+                val candidate = queuedIce.peek() ?: break
                 val sent = send(JSONObject().put("type", "ice").put("call_id", id)
                     .put("from", ownUserId).put("to", peerUserId)
                     .put("candidate", JSONObject().put("candidate", candidate.sdp)
                         .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))
-                if (sent) iterator.remove()
+                if (sent) queuedIce.poll() else break
             }
         }
         if (remoteDescriptionSet) {
-            queuedRemoteIce.forEach { (sdp, mid, line) -> engine?.addRemoteIce(sdp, mid, line) }
-            queuedRemoteIce.clear()
+            while (true) {
+                val candidate = queuedRemoteIce.poll() ?: break
+                engine?.addRemoteIce(candidate.first, candidate.second, candidate.third)
+            }
         }
     }
 
