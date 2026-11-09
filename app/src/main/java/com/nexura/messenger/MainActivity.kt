@@ -875,8 +875,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
                                 Text(
-                                    if (chat.kind == "group") "Групповой чат · E2EE пока недоступно"
-                                    else "Личная переписка · требуется проверка устройства",
+                                    if (chat.kind == "group") "Групповой чат · защищённая отправка для устройств участников"
+                                    else "Личная переписка · E2EE",
                                     color = SecondaryText,
                                     fontSize = 12.sp
                                 )
@@ -884,17 +884,34 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(onClick = {
                                 scope.launch {
                                     try {
-                                        val peerId = api.directPeerUserId(chat.id)
-                                        val devices = api.activeE2eeDevices(peerId)
-                                        if (devices.size != 1) throw IllegalStateException("Найдено устройств: ${devices.size}. Пока поддерживается одно.")
-                                        trustPeerId = peerId
-                                        trustCandidate = devices.single()
+                                        val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
+                                        if (chat.kind == "direct") {
+                                            val peerId = api.directPeerUserId(chat.id)
+                                            val devices = api.activeE2eeDevices(peerId)
+                                            if (devices.size != 1) throw IllegalStateException("Найдено устройств: ${devices.size}.")
+                                            trustPeerId = peerId
+                                            trustCandidate = devices.single()
+                                        } else {
+                                            val members = api.groupMemberIds(chat.id).filter { it != store.userId }
+                                            val queue = members.flatMap { memberId ->
+                                                api.activeE2eeDevices(memberId).map { memberId to it }
+                                            }.filter { (memberId, device) ->
+                                                !client.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
+                                            }
+                                            if (queue.isEmpty()) {
+                                                notice = "Все активные устройства участников уже подтверждены"
+                                            } else {
+                                                groupTrustQueue = queue
+                                                trustPeerId = queue.first().first
+                                                trustCandidate = queue.first().second
+                                            }
+                                        }
                                     } catch (e: Exception) {
-                                        error = e.message ?: "Не удалось получить ключи устройства"
+                                        error = e.message ?: "Не удалось получить ключи устройств"
                                     }
                                 }
-                            }, enabled = chat.kind == "direct") {
-                                Icon(Icons.Default.Lock, "Проверить устройство", tint = Accent)
+                            }) {
+                                Icon(Icons.Default.Lock, if (chat.kind == "group") "Проверить устройства группы" else "Проверить устройство", tint = Accent)
                             }
                             IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id, e2eeClient) } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" } } }) {
                                 Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
@@ -1017,14 +1034,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Spacer(Modifier.height(7.dp))
                             }
                             Text(
-                                if (chat.kind == "direct") "Медиа шифруется на устройстве перед отправкой · до 24 МБ"
-                                else "E2EE-медиа для групп пока не поддерживается",
+                                "Медиа шифруется отдельно для каждого подтверждённого устройства · до 24 МБ",
                                 color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 5.dp)
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = { imagePicker.launch("image/*") },
-                                    enabled = !sendingImage && chat.kind == "direct",
+                                    enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
