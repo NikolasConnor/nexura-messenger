@@ -78,26 +78,28 @@ fun NexuraCallDialog(
             "accept" -> coordinator?.accept()
         }
     }
-    val permissionLauncher = rememberLauncherForActivityResult(
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        permissionStep = ""
+        if (granted) continueCallAfterPermissions()
+        else ui = ui.copy(error = "Без доступа к камере видеозвонок не запустится")
+    }
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!granted) {
-            ui = ui.copy(error = if (permissionStep == Manifest.permission.CAMERA)
-                "Без доступа к камере видеозвонок не запустится"
-            else "Без доступа к микрофону звонок невозможен")
             permissionStep = ""
-            return@rememberLauncherForActivityResult
-        }
-        if (permissionStep == Manifest.permission.RECORD_AUDIO &&
-            pendingAction == "video" &&
+            ui = ui.copy(error = "Без доступа к микрофону звонок невозможен")
+        } else if (pendingAction == "video" &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
         ) {
             permissionStep = Manifest.permission.CAMERA
-            permissionLauncher.launch(Manifest.permission.CAMERA)
-            return@rememberLauncherForActivityResult
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        } else {
+            permissionStep = ""
+            continueCallAfterPermissions()
         }
-        permissionStep = ""
-        continueCallAfterPermissions()
     }
 
     LaunchedEffect(chat.id) {
@@ -124,11 +126,11 @@ fun NexuraCallDialog(
         when {
             microphoneMissing -> {
                 permissionStep = Manifest.permission.RECORD_AUDIO
-                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
             cameraMissing -> {
                 permissionStep = Manifest.permission.CAMERA
-                permissionLauncher.launch(Manifest.permission.CAMERA)
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
             }
             else -> continueCallAfterPermissions()
         }
