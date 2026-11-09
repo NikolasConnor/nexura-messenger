@@ -108,6 +108,7 @@ class CallCoordinator(
                 val signal = JSONObject().put("type", "answer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
                 if (!send(signal)) publish(CallUiState(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
+                flushIce()
                 publish(CallUiState(status = "На связи", active = true, video = videoMode, speaker = videoMode))
             },
             onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
@@ -180,7 +181,7 @@ class CallCoordinator(
             },
             onRemoteVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(remoteVideoTrack = track)) } },
             onLocalVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(localVideoTrack = track)) } },
-            onState = { value -> scope.launch { publish(CallUiState(status = value, active = true, video = videoMode)) } }
+            onState = { value -> scope.launch { publish((lastState ?: CallUiState()).copy(status = value, active = true, video = videoMode)) } }
         )
     }
 
