@@ -296,6 +296,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             pendingSecureMessageText = text
         }
         sendingMessage = true
+        val optimistic = MessageItem(
+            messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
+            "text", replyToId, encrypted = true, securityWarning = false
+        )
+        messages = (messages + optimistic).distinctBy { it.id }.sortedBy { it.createdAt }
         scope.launch {
             error = ""
             try {
@@ -309,12 +314,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 replyTarget = null
                 pendingSecureMessageId = null
                 pendingSecureMessageText = null
-                val sent = MessageItem(
-                    messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
-                    "text", replyToId, encrypted = true, securityWarning = false
-                )
-                messages = (messages + sent).distinctBy { it.id }.sortedBy { it.createdAt }
+                // The message is already visible; successful persistence confirms it.
             } catch (e: Exception) {
+                messages = messages.filterNot { it.id == messageId }
                 error = e.message ?: "Не удалось отправить защищённое сообщение"
             } finally {
                 sendingMessage = false
