@@ -177,6 +177,78 @@ class E2eeClientInstrumentedTest {
     }
 
     @Test
+    fun groupEnvelopeRoundTripsAndRejectsDuplicateRecipientDevices() {
+        val envelope = E2eeGroupMessageEnvelope(
+            conversationId = UUID.randomUUID().toString(),
+            senderUserId = UUID.randomUUID().toString(),
+            senderDeviceId = UUID.randomUUID().toString(),
+            senderCurve25519 = "A".repeat(43),
+            recipients = listOf(
+                E2eeGroupRecipientEnvelope(
+                    UUID.randomUUID().toString(), UUID.randomUUID().toString(),
+                    E2eeMessageEnvelope.Kind.PRE_KEY, """{"type":0,"body":"alice-to-bob"}"""
+                ),
+                E2eeGroupRecipientEnvelope(
+                    UUID.randomUUID().toString(), UUID.randomUUID().toString(),
+                    E2eeMessageEnvelope.Kind.NORMAL, """{"type":1,"body":"alice-to-carol"}"""
+                )
+            )
+        )
+        assertEquals(envelope, E2eeGroupMessageEnvelope.decode(envelope.encode()))
+        assertEquals(true, E2eeGroupMessageEnvelope.isEnvelope(envelope.encode()))
+        val duplicate = envelope.copy(recipients = listOf(envelope.recipients.first(), envelope.recipients.first()))
+        assertEquals(false, runCatching { E2eeGroupMessageEnvelope.decode(duplicate.encode()) }.isSuccess)
+    }
+
+    @Test
+    fun groupFanoutUsesIndependentOlmSessionsPerRecipientDevice() {
+        val (_, alice) = newClient()
+        val (bobId, bob) = newClient()
+        val (carolId, carol) = newClient()
+        val aliceBundle = JSONObject(alice.ensureDevice())
+        val bobBundle = JSONObject(bob.ensureDevice())
+        val carolBundle = JSONObject(carol.ensureDevice())
+        val bobOtk = bobBundle.getJSONArray("one_time_keys").getJSONObject(0)
+        val carolOtk = carolBundle.getJSONArray("one_time_keys").getJSONObject(0)
+        val room = UUID.randomUUID().toString()
+        val message1 = UUID.randomUUID().toString()
+        val firstText = "Group photo key and metadata".toByteArray(StandardCharsets.UTF_8)
+
+        val bobCipher = alice.startGroupSession(
+            room, bobId, bobBundle.getString("device_id"),
+            bobBundle.getString("curve25519"), bobBundle.getString("ed25519"),
+            bobOtk.getString("key"), bobOtk.getString("signature"), firstText, message1
+        )
+        val carolCipher = alice.startGroupSession(
+            room, carolId, carolBundle.getString("device_id"),
+            carolBundle.getString("curve25519"), carolBundle.getString("ed25519"),
+            carolOtk.getString("key"), carolOtk.getString("signature"), firstText, message1
+        )
+        assertNotEquals(bobCipher, carolCipher)
+        assertArrayEquals(firstText, bob.acceptGroupSession(
+            room, "alice", aliceBundle.getString("device_id"),
+            aliceBundle.getString("curve25519"), bobCipher, message1
+        ))
+        assertArrayEquals(firstText, carol.acceptGroupSession(
+            room, "alice", aliceBundle.getString("device_id"),
+            aliceBundle.getString("curve25519"), carolCipher, message1
+        ))
+
+        val message2 = UUID.randomUUID().toString()
+        val secondText = "Second group message".toByteArray(StandardCharsets.UTF_8)
+        val bobNext = alice.encryptGroupMessage(room, bobId, bobBundle.getString("device_id"), secondText, message2)
+        val carolNext = alice.encryptGroupMessage(room, carolId, carolBundle.getString("device_id"), secondText, message2)
+        assertArrayEquals(secondText, bob.decryptGroupMessage(
+            room, "alice", aliceBundle.getString("device_id"), bobNext, message2
+        ))
+        assertArrayEquals(secondText, carol.decryptGroupMessage(
+            room, "alice", aliceBundle.getString("device_id"), carolNext, message2
+        ))
+        assertEquals(null, bob.pendingGroupEnvelope(room, message1, carolId, carolBundle.getString("device_id")))
+        assertEquals(bobCipher, alice.pendingGroupEnvelope(room, message1, bobId, bobBundle.getString("device_id"))?.ciphertext)
+    }
+
+    @Test
     fun encryptedMediaRoundTripsAndRejectsTampering() {
         val dir = File(context.cacheDir, "e2ee-media-test").also { it.mkdirs() }
         val plain = ByteArray(512 * 1024) { (it % 251).toByte() }
