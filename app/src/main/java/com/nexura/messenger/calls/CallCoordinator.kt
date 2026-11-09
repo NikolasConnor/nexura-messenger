@@ -3,6 +3,7 @@ package com.nexura.messenger.calls
 import android.content.Context
 import org.json.JSONObject
 import org.webrtc.IceCandidate
+import org.webrtc.PeerConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -96,50 +97,54 @@ class CallCoordinator(
         connectedAtMs = null
         callId = UUID.randomUUID().toString()
         localDescriptionSignaled = false
+        val expectedCallId = callId ?: return
         startKeepAlive(video)
-        try {
-            createEngine(video)
-        } catch (error: Exception) {
-            failCall("Не удалось запустить звонок", error.message ?: "Проверьте разрешения микрофона и камеры")
-            return
-        }
-        engine?.createOffer(
-            onReady = { sdp ->
-                val signal = JSONObject().put("type", "offer").put("call_id", callId)
-                    .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
-                if (!send(signal)) {
-                    failCall("Не удалось вызвать", "Сигнал не отправлен. Проверьте соединение и повторите попытку.")
-                } else {
-                    // The local SDP is installed; flush ICE candidates collected before this offer.
-                    localDescriptionSignaled = true
-                    publish((lastState ?: CallUiState()).copy(status = "Вызов…", incoming = false, active = true, outgoing = true, video = video, speaker = video))
-                    scope.launch {
-                        runCatching { api.notifyIncomingCall(chatId, peerUserId, callId!!, video) }
-                    }
-                    offerRetryJob?.cancel()
-                    offerRetryJob = scope.launch {
-                        repeat(10) {
-                            delay(3_000)
-                            if (callId == null || remoteDescriptionSet || closed) return@launch
-                            send(signal)
+        scope.launch {
+            try {
+                val iceServers = api.turnIceServers(expectedCallId, ownUserId, peerUserId)
+                if (closed || callId != expectedCallId) return@launch
+                createEngine(video, iceServers)
+                engine?.createOffer(
+                    onReady = { sdp ->
+                        val signal = JSONObject().put("type", "offer").put("call_id", callId)
+                            .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
+                        if (!send(signal)) {
+                            failCall("Не удалось вызвать", "Сигнал не отправлен. Проверьте соединение и повторите попытку.")
+                        } else {
+                            localDescriptionSignaled = true
+                            publish((lastState ?: CallUiState()).copy(status = "Вызов…", incoming = false, active = true, outgoing = true, video = video, speaker = video))
+                            scope.launch {
+                                runCatching { api.notifyIncomingCall(chatId, peerUserId, callId!!, video) }
+                            }
+                            offerRetryJob?.cancel()
+                            offerRetryJob = scope.launch {
+                                repeat(10) {
+                                    delay(3_000)
+                                    if (callId == null || remoteDescriptionSet || closed) return@launch
+                                    send(signal)
+                                }
+                            }
+                            ringTimeoutJob?.cancel()
+                            ringTimeoutJob = scope.launch {
+                                delay(35_000)
+                                if (callId == expectedCallId && !remoteDescriptionSet && !closed) {
+                                    send(JSONObject().put("type", "end").put("call_id", expectedCallId)
+                                        .put("from", ownUserId).put("to", peerUserId))
+                                    finish(false)
+                                    publish(CallUiState(status = "Готово к звонку", error = "Нет ответа"))
+                                }
+                            }
                         }
-                    }
-                    ringTimeoutJob?.cancel()
-                    val ringingCallId = callId
-                    ringTimeoutJob = scope.launch {
-                        delay(35_000)
-                        if (callId == ringingCallId && !remoteDescriptionSet && !closed) {
-                            send(JSONObject().put("type", "end").put("call_id", ringingCallId)
-                                .put("from", ownUserId).put("to", peerUserId))
-                            finish(false)
-                            publish(CallUiState(status = "Готово к звонку", error = "Нет ответа"))
-                        }
-                    }
+                        flushIce()
+                    },
+                    onError = { error -> failCall("Ошибка звонка", error) }
+                )
+            } catch (error: Exception) {
+                if (callId == expectedCallId && !closed) {
+                    failCall("Не удалось подготовить соединение", error.message ?: "Не удалось получить параметры TURN")
                 }
-                flushIce()
-            },
-            onError = { error -> failCall("Ошибка звонка", error) }
-        )
+            }
+        }
     }
 
     fun accept() {
@@ -150,30 +155,36 @@ class CallCoordinator(
         callHistoryWritten = false
         connectedAtMs = null
         callId = pendingCallId
+        val expectedCallId = callId ?: return
         startKeepAlive(videoMode)
-        try {
-            createEngine(videoMode)
-        } catch (error: Exception) {
-            failCall("Не удалось принять звонок", error.message ?: "Проверьте разрешения микрофона и камеры")
-            return
-        }
-        engine?.acceptOffer(
-            offer,
-            onReady = { sdp ->
-                remoteDescriptionSet = true
-                val signal = JSONObject().put("type", "answer").put("call_id", callId)
-                    .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
-                if (!send(signal)) {
-                    failCall("Ошибка звонка", "Не удалось отправить ответ собеседнику")
-                } else {
-                    localDescriptionSignaled = true
-                    flushIce()
-                    armConnectionTimeout()
-                    publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, outgoing = false, connected = false, video = videoMode, speaker = videoMode))
+        scope.launch {
+            try {
+                val iceServers = api.turnIceServers(expectedCallId, ownUserId, peerUserId)
+                if (closed || callId != expectedCallId) return@launch
+                createEngine(videoMode, iceServers)
+                engine?.acceptOffer(
+                    offer,
+                    onReady = { sdp ->
+                        remoteDescriptionSet = true
+                        val signal = JSONObject().put("type", "answer").put("call_id", callId)
+                            .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
+                        if (!send(signal)) {
+                            failCall("Ошибка звонка", "Не удалось отправить ответ собеседнику")
+                        } else {
+                            localDescriptionSignaled = true
+                            flushIce()
+                            armConnectionTimeout()
+                            publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, outgoing = false, connected = false, video = videoMode, speaker = videoMode))
+                        }
+                    },
+                    onError = { error -> failCall("Ошибка звонка", error) }
+                )
+            } catch (error: Exception) {
+                if (callId == expectedCallId && !closed) {
+                    failCall("Не удалось принять звонок", error.message ?: "Не удалось получить параметры TURN")
                 }
-            },
-            onError = { error -> failCall("Ошибка звонка", error) }
-        )
+            }
+        }
     }
 
     private var pendingVideo = false
@@ -234,10 +245,16 @@ class CallCoordinator(
 
     fun sharedEglContext(): org.webrtc.EglBase.Context? = engine?.sharedEglContext()
 
-    private fun createEngine(video: Boolean) {
+    private fun createEngine(video: Boolean, iceConfig: List<com.nexura.messenger.data.TurnIceServerConfig>) {
         engine?.close()
+        val iceServers = iceConfig.map { server ->
+            PeerConnection.IceServer.builder(server.urls).apply {
+                server.username?.let { setUsername(it) }
+                server.credential?.let { setPassword(it) }
+            }.createIceServer()
+        }
         engine = NexuraCallEngine(
-            context, video,
+            context, video, iceServers,
             onLocalIce = { candidate ->
                 val id = callId
                 if (id != null && localDescriptionSignaled && send(JSONObject().put("type", "ice").put("call_id", id)
