@@ -6,6 +6,7 @@ import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
 import java.util.UUID
+import java.io.IOException
 import org.json.JSONObject
 import android.os.Build
 import android.net.Uri
@@ -795,7 +796,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         scope.launch {
                                             try {
                                                 val id = api.createDirect(user.id)
-                                                val chat = ChatItem(id, user.displayName, "direct", null, avatar = user.avatar)
+                                                val chat = ChatItem(id, user.displayName, "direct", null, avatar = user.avatar, peerUserId = user.id)
                                                 selected = chat
                                                 messages = api.messages(id, e2eeClient)
                                                 loadChats()
