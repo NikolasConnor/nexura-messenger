@@ -48,6 +48,7 @@ class CallCoordinator(
     private var localDescriptionSignaled = false
     private var offerRetryJob: Job? = null
     private var ringTimeoutJob: Job? = null
+    private var connectionTimeoutJob: Job? = null
 
     fun connect(token: String) {
         signaling?.close()
@@ -58,8 +59,19 @@ class CallCoordinator(
             ownUserId,
             peerUserId,
             { signal -> scope.launch { receive(signal) } },
-            { scope.launch { ready = true; publish(CallUiState(status = "Готово к звонку")) } },
-            { message -> scope.launch { publish(CallUiState(status = "Ошибка связи", error = message)) } }
+            { scope.launch {
+                ready = true
+                val previous = lastState
+                if (previous?.active == true) {
+                    publish(previous.copy(status = if (previous.connected) "На связи" else "Восстанавливаем связь…", error = null))
+                } else {
+                    publish(CallUiState(status = "Готово к звонку"))
+                }
+            } },
+            { message -> scope.launch {
+                val previous = lastState ?: CallUiState()
+                publish(previous.copy(status = if (previous.active) "Восстанавливаем связь…" else "Ошибка связи", error = message))
+            } }
         )
     }
 
@@ -126,6 +138,7 @@ class CallCoordinator(
                 if (!send(signal)) publish((lastState ?: CallUiState()).copy(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
                 else localDescriptionSignaled = true
                 flushIce()
+                armConnectionTimeout()
                 publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
             },
             onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
@@ -159,6 +172,7 @@ class CallCoordinator(
                     onReady = {
                         remoteDescriptionSet = true
                         flushIce()
+                        armConnectionTimeout()
                         publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
                     },
                     onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
@@ -205,6 +219,7 @@ class CallCoordinator(
             onLocalVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(localVideoTrack = track)) } },
             onState = { value -> scope.launch {
                 val connected = value == "Подключено"
+                if (connected) { connectionTimeoutJob?.cancel(); connectionTimeoutJob = null }
                 publish((lastState ?: CallUiState()).copy(status = if (connected) "На связи" else value, connected = connected, video = videoMode))
             } }
         )
@@ -227,6 +242,18 @@ class CallCoordinator(
         if (remoteDescriptionSet) {
             queuedRemoteIce.forEach { (sdp, mid, line) -> engine?.addRemoteIce(sdp, mid, line) }
             queuedRemoteIce.clear()
+        }
+    }
+
+    private fun armConnectionTimeout() {
+        connectionTimeoutJob?.cancel()
+        val expectedCallId = callId
+        connectionTimeoutJob = scope.launch {
+            delay(40_000)
+            if (callId == expectedCallId && lastState?.connected != true && !closed) {
+                finish(false)
+                publish(CallUiState(status = "Не удалось установить соединение", error = "Проверьте интернет и настройки сети, затем попробуйте снова."))
+            }
         }
     }
 
@@ -279,6 +306,8 @@ class CallCoordinator(
         offerRetryJob = null
         ringTimeoutJob?.cancel()
         ringTimeoutJob = null
+        connectionTimeoutJob?.cancel()
+        connectionTimeoutJob = null
         runCatching { context.stopService(Intent(context, CallKeepAliveService::class.java)) }
         engine?.close()
         engine = null
