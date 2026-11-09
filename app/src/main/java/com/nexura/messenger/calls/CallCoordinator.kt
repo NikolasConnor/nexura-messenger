@@ -76,7 +76,7 @@ class CallCoordinator(
                     .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
                 if (!send(signal)) publish(CallUiState(status = "Не удалось вызвать", error = "Сигнал не отправлен"))
                 else {
-                    publish(CallUiState(status = "Вызов…", active = true, video = video))
+                    publish(CallUiState(status = "Вызов…", active = true, video = video, speaker = video))
                     scope.launch {
                         runCatching { api.notifyIncomingCall(chatId, peerUserId, callId!!, video) }
                     }
@@ -108,7 +108,7 @@ class CallCoordinator(
                 val signal = JSONObject().put("type", "answer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
                 if (!send(signal)) publish(CallUiState(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
-                publish(CallUiState(status = "На связи", active = true, video = videoMode))
+                publish(CallUiState(status = "На связи", active = true, video = videoMode, speaker = videoMode))
             },
             onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
         )
@@ -139,7 +139,7 @@ class CallCoordinator(
                     onReady = {
                         remoteDescriptionSet = true
                         flushIce()
-                        publish((lastState ?: CallUiState()).copy(status = "На связи", active = true, video = videoMode))
+                        publish((lastState ?: CallUiState()).copy(status = "На связи", active = true, video = videoMode, speaker = videoMode))
                     },
                     onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
                 )
