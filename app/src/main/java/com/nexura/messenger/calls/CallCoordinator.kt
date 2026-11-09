@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import java.util.UUID
 
 data class CallUiState(
@@ -40,6 +42,7 @@ class CallCoordinator(
     private var closed = false
     private val queuedIce = mutableListOf<IceCandidate>()
     private var remoteDescriptionSet = false
+    private var offerRetryJob: Job? = null
 
     fun connect(token: String) {
         signaling?.close()
@@ -72,6 +75,14 @@ class CallCoordinator(
                     publish(CallUiState(status = "Вызов…", active = true, video = video))
                     scope.launch {
                         runCatching { api.notifyIncomingCall(chatId, peerUserId, callId!!, video) }
+                    }
+                    offerRetryJob?.cancel()
+                    offerRetryJob = scope.launch {
+                        repeat(10) {
+                            delay(3_000)
+                            if (callId == null || remoteDescriptionSet || closed) return@launch
+                            send(signal)
+                        }
                     }
                 }
                 flushIce()
@@ -106,6 +117,7 @@ class CallCoordinator(
         val id = signal.optString("call_id")
         when (signal.optString("type")) {
             "offer" -> {
+                if (id == pendingCallId || id == callId) return
                 if (engine != null) {
                     send(JSONObject().put("type", "busy").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
                     return
@@ -116,6 +128,7 @@ class CallCoordinator(
                 publish(CallUiState(status = "Входящий видеозвонок".takeIf { pendingVideo } ?: "Входящий звонок", incoming = true, video = pendingVideo))
             }
             "answer" -> if (id == callId) {
+                offerRetryJob?.cancel()
                 engine?.acceptAnswer(
                     signal.optString("sdp"),
                     onReady = {
@@ -213,6 +226,8 @@ class CallCoordinator(
     }
 
     private fun finish(closeSignaling: Boolean = true) {
+        offerRetryJob?.cancel()
+        offerRetryJob = null
         engine?.close()
         engine = null
         publish((lastState ?: CallUiState()).copy(localVideoTrack = null, remoteVideoTrack = null))
