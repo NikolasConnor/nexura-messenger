@@ -49,6 +49,12 @@ data class E2eeRemoteDevice(
     val bundleVersion: Int
 )
 
+data class TurnIceServerConfig(
+    val urls: List<String>,
+    val username: String?,
+    val credential: String?
+)
+
 class NexuraApi(private val store: SessionStore) {
     companion object {
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
@@ -173,6 +179,36 @@ class NexuraApi(private val store: SessionStore) {
     /** Revokes every refresh-token session except the one currently used by this device. */
     suspend fun signOutOtherSessions() {
         call("/auth/v1/logout?scope=others", "POST", "{}", auth = true)
+    }
+
+    /** Requests short-lived TURN credentials from the authenticated Supabase Edge Function. */
+    suspend fun turnIceServers(callId: String, initiatorId: String, receiverId: String): List<TurnIceServerConfig> {
+        val payload = JSONObject()
+            .put("room", callId)
+            .put("initiator_client", initiatorId)
+            .put("receiver_client", receiverId)
+        val response = JSONObject(call("/functions/v1/turn-credentials", "POST", payload.toString(), auth = true))
+        val servers = response.optJSONArray("iceServers")
+            ?: throw IOException("Сервер не вернул параметры ICE для звонка")
+        val result = mutableListOf<TurnIceServerConfig>()
+        for (i in 0 until servers.length()) {
+            val item = servers.optJSONObject(i) ?: continue
+            val rawUrls = item.opt("urls")
+            val urls = when (rawUrls) {
+                is JSONArray -> (0 until rawUrls.length()).mapNotNull { rawUrls.optString(it).takeIf(String::isNotBlank) }
+                is String -> listOf(rawUrls)
+                else -> emptyList()
+            }
+            if (urls.isNotEmpty()) {
+                result += TurnIceServerConfig(
+                    urls = urls,
+                    username = item.optString("username").takeIf { it.isNotBlank() && it != "null" },
+                    credential = item.optString("credential").takeIf { it.isNotBlank() && it != "null" }
+                )
+            }
+        }
+        if (result.isEmpty()) throw IOException("Сервер не вернул действующие TURN/STUN-серверы")
+        return result
     }
 
     suspend fun signOut() {
