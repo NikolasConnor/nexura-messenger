@@ -688,6 +688,12 @@ class NexuraApi(private val store: SessionStore) {
      * before network I/O; retries with the same message ID reuse the same ratchet
      * ciphertext. No plaintext fallback is permitted.
      */
+    /**
+     * Direct-message fan-out: create a distinct Olm ciphertext for every active
+     * device belonging to the peer account. The persisted envelope is the same
+     * per-device format used by group chats, so every logged-in device can decrypt
+     * its own copy while the server only stores ciphertext.
+     */
     suspend fun sendEncryptedDirectMessage(
         conversationId: String,
         recipient: E2eeRemoteDevice,
@@ -699,59 +705,74 @@ class NexuraApi(private val store: SessionStore) {
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val chatId = normalizeUuid(conversationId)
-        if (plaintext.isBlank() || plaintext.toByteArray(Charsets.UTF_8).size > 12_000) {
+        val bytes = plaintext.toByteArray(Charsets.UTF_8)
+        if (plaintext.isBlank() || bytes.size > 12_000) {
             throw IOException("Сообщение пустое или слишком большое для защищённого конверта")
         }
         if (recipient.userId == uid) throw IOException("Нельзя отправить сообщение самому себе")
-        val actualPeerId = directPeerUserId(chatId)
-        if (actualPeerId != recipient.userId) throw IOException("Устройство не принадлежит собеседнику этого чата")
-        val activeDevices = activeE2eeDevices(actualPeerId)
-        if (activeDevices.size != 1 || activeDevices.single().deviceId != recipient.deviceId ||
-            activeDevices.single().curve25519Key != recipient.curve25519Key ||
-            activeDevices.single().ed25519Key != recipient.ed25519Key) {
-            throw IOException("Состав или ключи устройств собеседника изменились. Проверьте отпечаток повторно.")
-        }
-        e2ee.trustRemoteDeviceOnFirstUse(recipient.userId, recipient.deviceId, recipient.curve25519Key, recipient.ed25519Key)
+        val peerId = directPeerUserId(chatId)
+        if (peerId != recipient.userId) throw IOException("Устройство не принадлежит собеседнику этого чата")
 
         val ownBundle = JSONObject(e2ee.ensureDevice())
         val ownDeviceId = ownBundle.getString("device_id")
-        val pendingCiphertext = e2ee.pendingOutboundEnvelope(chatId, messageId)
-        val pendingKind = e2ee.pendingOutboundKind(chatId, messageId)
-        if ((pendingCiphertext == null) != (pendingKind == null)) {
-            throw IOException("Локальная очередь E2EE повреждена. Не отправляйте это сообщение повторно с новым ID.")
-        }
-        if (pendingCiphertext != null) {
-            val pendingPlaintext = e2ee.cachedMessage(chatId, messageId)
-                ?: throw IOException("Не найдена локальная копия сообщения из очереди E2EE")
-            if (!pendingPlaintext.contentEquals(plaintext.toByteArray(Charsets.UTF_8))) {
-                throw IOException("Текст не совпадает с ожидающим зашифрованным сообщением")
-            }
-        }
-        val kind: E2eeMessageEnvelope.Kind
-        val ciphertext: String
-        if (pendingCiphertext != null && pendingKind != null) {
-            kind = pendingKind
-            ciphertext = pendingCiphertext
-        } else if (e2ee.hasDirectSession(chatId)) {
-            kind = E2eeMessageEnvelope.Kind.NORMAL
-            ciphertext = e2ee.encryptDirectMessage(
-                chatId, plaintext.toByteArray(Charsets.UTF_8), messageId
-            )
-        } else {
-            kind = E2eeMessageEnvelope.Kind.PRE_KEY
-            ciphertext = createVerifiedE2eePreKeyEnvelope(
-                e2ee, chatId, recipient.userId, recipient.deviceId,
-                recipient.ed25519Key, plaintext.toByteArray(Charsets.UTF_8), messageId
-            )
+        val ownPublished = activeE2eeDevices(uid).singleOrNull { it.deviceId == ownDeviceId }
+            ?: throw IOException("Ваше E2EE-устройство не зарегистрировано на сервере. Повторите инициализацию защиты.")
+        if (ownPublished.curve25519Key != ownBundle.getString("curve25519") ||
+            ownPublished.ed25519Key != ownBundle.getString("ed25519")) {
+            throw IOException("Ключи вашего E2EE-устройства не совпадают с регистрацией сервера")
         }
 
-        val envelope = E2eeMessageEnvelope(
-            kind = kind,
-            conversationId = chatId,
-            senderDeviceId = ownDeviceId,
-            recipientDeviceId = recipient.deviceId,
-            senderCurve25519 = ownBundle.getString("curve25519"),
-            ciphertext = ciphertext
+        val peerDevices = activeE2eeDevices(peerId)
+        if (peerDevices.isEmpty()) throw IOException("У собеседника пока нет активных устройств Nexura")
+        if (peerDevices.size > E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
+            throw IOException("У собеседника слишком много устройств для одной защищённой отправки")
+        }
+
+        val pending = e2ee.cachedMessage(chatId, messageId)
+        if (pending != null && !pending.contentEquals(bytes)) {
+            throw IOException("Текст не совпадает с ожидающим зашифрованным сообщением")
+        }
+
+        val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
+        for (device in peerDevices) {
+            if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
+                throw IOException("Одно из устройств собеседника использует неподдерживаемый протокол")
+            }
+            e2ee.trustRemoteDeviceOnFirstUse(peerId, device.deviceId, device.curve25519Key, device.ed25519Key)
+            val saved = e2ee.pendingGroupEnvelope(chatId, messageId, peerId, device.deviceId)
+            if (saved != null) {
+                val cached = e2ee.cachedMessage(chatId, messageId)
+                    ?: throw IOException("Не найдена локальная копия ожидающего сообщения")
+                if (!cached.contentEquals(bytes)) throw IOException("Текст не совпадает с ожидающим сообщением")
+                recipients += saved
+            } else if (e2ee.hasGroupSession(chatId, peerId, device.deviceId)) {
+                val cipher = e2ee.encryptGroupMessage(chatId, peerId, device.deviceId, bytes, messageId)
+                recipients += E2eeGroupRecipientEnvelope(peerId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, cipher)
+            } else {
+                val preKey = consumeE2eePreKey(chatId, peerId, device.deviceId)
+                if (preKey.optString("ed25519_key") != device.ed25519Key ||
+                    preKey.optString("curve25519_key") != device.curve25519Key) {
+                    throw IOException("Ключ одного из устройств собеседника изменился. Отправка отменена.")
+                }
+                val otk = preKey.optString("one_time_key")
+                val signature = preKey.optString("one_time_key_signature")
+                if (!e2ee.verifyPublishedOneTimeKey(device.ed25519Key, device.curve25519Key, otk, signature)) {
+                    throw IOException("Подпись одноразового ключа одного из устройств недействительна")
+                }
+                val cipher = e2ee.startGroupSession(
+                    chatId, peerId, device.deviceId, device.curve25519Key, device.ed25519Key,
+                    otk, signature, bytes, messageId
+                )
+                recipients += E2eeGroupRecipientEnvelope(peerId, device.deviceId, E2eeMessageEnvelope.Kind.PRE_KEY, cipher)
+            }
+        }
+
+        val latestDevices = activeE2eeDevices(peerId)
+        if (latestDevices.map { it.deviceId }.toSet() != peerDevices.map { it.deviceId }.toSet()) {
+            throw IOException("Список устройств собеседника изменился во время отправки. Повторите отправку.")
+        }
+        val envelope = E2eeGroupMessageEnvelope(
+            chatId, uid, ownDeviceId, ownBundle.getString("curve25519"), recipients
         ).encode()
         val payload = JSONObject()
             .put("id", normalizeUuid(messageId))
@@ -760,21 +781,16 @@ class NexuraApi(private val store: SessionStore) {
             .put("message_type", messageType)
             .put("content", envelope)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
-        call(
-            "/rest/v1/messages?on_conflict=id",
-            "POST",
-            payload.toString(),
-            prefer = "resolution=ignore-duplicates,return=minimal"
-        )
+        call("/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
+            prefer = "resolution=ignore-duplicates,return=minimal")
         val saved = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
         ))
-        if (saved.length() != 1 ||
-            saved.getJSONObject(0).optString("sender_id") != uid ||
+        if (saved.length() != 1 || saved.getJSONObject(0).optString("sender_id") != uid ||
             saved.getJSONObject(0).optString("content") != envelope) {
             throw IOException("Сервер не подтвердил сохранение именно этого зашифрованного сообщения")
         }
-        e2ee.markOutboundDelivered(chatId, messageId)
+        e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         notifyChatPush(chatId)
     }
 
