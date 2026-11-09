@@ -6,7 +6,8 @@
 //! by Android Keystore before persistence. Never log plaintext, keys, or pickles.
 
 use serde_json;
-use vodozemac::olm::{Account, OlmMessage, Session, SessionConfig};
+use vodozemac::olm::{Account, AccountPickle, OlmMessage, Session, SessionConfig, SessionPickle};
+use vodozemac::{Ed25519PublicKey, Ed25519Signature};
 
 #[derive(Debug)]
 pub enum CryptoError {
@@ -32,10 +33,93 @@ impl std::fmt::Display for CryptoError {
 impl std::error::Error for CryptoError {}
 
 /// Public device identity material. Never contains private keys.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct SignedOneTimeKey {
+    pub key: String,
+    pub signature: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct PublicDeviceKeys {
     pub curve25519: String,
     pub ed25519: String,
-    pub one_time_keys: Vec<String>,
+    pub one_time_keys: Vec<SignedOneTimeKey>,
+}
+
+/// Canonical signed payload for each one-time key. Keep this exact encoding
+/// stable across clients and server-side validation.
+fn one_time_key_signing_payload(key: &str) -> Vec<u8> {
+    format!(r#"{{"key":"{}"}}"#, key).into_bytes()
+}
+
+/// Creates a device account, signs each published one-time key with the
+/// account's Ed25519 identity key, and returns only public key material.
+pub fn create_device_keys(one_time_key_count: usize) -> (Account, PublicDeviceKeys) {
+    let mut account = Account::new();
+    let count = one_time_key_count.min(account.max_number_of_one_time_keys());
+    account.generate_one_time_keys(count);
+
+    let identity = account.identity_keys();
+    let one_time_keys = account
+        .one_time_keys()
+        .values()
+        .map(|key| {
+            let encoded = key.to_base64();
+            let signature = account.sign(one_time_key_signing_payload(&encoded));
+            SignedOneTimeKey { key: encoded, signature: signature.to_base64() }
+        })
+        .collect();
+
+    (
+        account,
+        PublicDeviceKeys {
+            curve25519: identity.curve25519.to_base64(),
+            ed25519: identity.ed25519.to_base64(),
+            one_time_keys,
+        },
+    )
+}
+
+/// Verify a published one-time key against the device's Ed25519 identity key.
+pub fn verify_signed_one_time_key(
+    ed25519_identity_key: &str,
+    signed_key: &SignedOneTimeKey,
+) -> Result<(), CryptoError> {
+    let identity = Ed25519PublicKey::from_base64(ed25519_identity_key)
+        .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+    let signature = Ed25519Signature::from_base64(&signed_key.signature)
+        .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+    identity
+        .verify(&one_time_key_signing_payload(&signed_key.key), &signature)
+        .map_err(|e| CryptoError::Protocol(e.to_string()))
+}
+
+/// Serialize the full Olm account state. The returned string is secret
+/// material and MUST immediately be encrypted by Android Keystore storage.
+pub fn pickle_account(account: &Account) -> Result<String, CryptoError> {
+    serde_json::to_string(&account.pickle())
+        .map_err(|e| CryptoError::Protocol(e.to_string()))
+}
+
+/// Restore an Olm account from its serialized pickle. Caller must decrypt
+/// the stored bytes before passing them here.
+pub fn unpickle_account(serialized: &str) -> Result<Account, CryptoError> {
+    let pickle: AccountPickle = serde_json::from_str(serialized)
+        .map_err(|e| CryptoError::Protocol(e.to_string()))?;
+    Ok(Account::from_pickle(pickle))
+}
+
+/// Serialize an established Olm session for encrypted local persistence.
+pub fn pickle_session(session: &Session) -> Result<String, CryptoError> {
+    serde_json::to_string(&session.pickle())
+        .map_err(|e| CryptoError::Protocol(e.to_string()))
+}
+
+/// Restore an Olm session from serialized state. Caller must decrypt it first.
+pub fn unpickle_session(serialized: &str) -> Result<Session, CryptoError> {
+    let pickle: SessionPickle = serde_json::from_str(serialized)
+        .map_err(|e| CryptoError::Protocol(e.to_string()))?;
+    Ok(Session::from_pickle(pickle))
 }
 
 /// Creates a new device account and an initial batch of one-time keys.
@@ -193,6 +277,41 @@ mod tests {
         let modified_json = serde_json::to_string(&modified).expect("serialize modified");
 
         assert!(decrypt_message(&mut alice_session, &modified_json).is_err());
+    }
+
+    #[test]
+    fn published_one_time_keys_are_signed_and_verifiable() {
+        let (_account, public) = create_device_keys(3);
+        assert_eq!(public.one_time_keys.len(), 3);
+        for key in &public.one_time_keys {
+            verify_signed_one_time_key(&public.ed25519, key).expect("valid OTK signature");
+        }
+        let mut tampered = public.one_time_keys[0].clone();
+        tampered.key.push('A');
+        assert!(verify_signed_one_time_key(&public.ed25519, &tampered).is_err());
+    }
+
+    #[test]
+    fn account_and_session_pickles_restore_protocol_state() {
+        let (alice, alice_public) = create_device_keys(0);
+        let (mut bob, bob_public) = create_device_keys(1);
+        let bob_otk = &bob_public.one_time_keys[0].key;
+        let (mut alice_session, first) = start_outbound_session(
+            &alice, &bob_public.curve25519, bob_otk, b"persist me"
+        ).expect("start session");
+        let (mut bob_session, received) = accept_inbound_session(
+            &mut bob, &alice_public.curve25519, &first
+        ).expect("accept session");
+        assert_eq!(received, b"persist me");
+
+        let alice_account_restored = unpickle_account(&pickle_account(&alice).unwrap()).unwrap();
+        assert_eq!(alice_account_restored.identity_keys(), alice.identity_keys());
+        let bob_session_restored = unpickle_session(&pickle_session(&bob_session).unwrap()).unwrap();
+        let alice_session_restored = unpickle_session(&pickle_session(&alice_session).unwrap()).unwrap();
+
+        let reply = encrypt_message(&mut bob_session_restored.clone(), b"after restore").unwrap();
+        let mut alice_restored = alice_session_restored;
+        assert_eq!(decrypt_message(&mut alice_restored, &reply).unwrap(), b"after restore");
     }
 
     #[test]
