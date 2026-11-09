@@ -79,3 +79,37 @@ The wrapper must expose only high-level safe operations. It must not expose raw 
 ### Important deployment note
 
 The generic-push source in this branch is not deployed to Supabase. Production continues running the currently deployed Edge Function until an explicitly approved deployment.
+
+
+## Implementation status (2026-11-09)
+
+### Implemented in the isolated branch
+
+- Rust Olm core uses vodozemac 0.11.2.
+- Public one-time keys are signed with the device Ed25519 identity key; signature verification is exposed.
+- Account and session pickle serialization/restoration APIs are exposed. Pickles are secret and must be encrypted before persistence.
+- Android JNI crate exposes device creation, signature verification, outbound/inbound session establishment, message encrypt/decrypt, and explicit acknowledgement after public OTK upload.
+- Kotlin `E2eeClient` wraps those operations and persists every returned account/session pickle using `E2eeStateStore`.
+- E2EE local state is namespaced per authenticated user, with a separate Android Keystore AES-GCM key alias for each user.
+- A design-only SQL file proposes public device-key tables and peer-conversation RLS. It is not a Supabase migration and has not been applied.
+- Rust protocol tests and host compilation of the JNI bridge passed in GitHub Actions for commit `4c2a9fdfdb84e18932c196627c74ee2d2f873c78`.
+
+### Still blocked / not production-ready
+
+- Android cross-compilation and APK packaging of the JNI library are still being validated in CI.
+- No Supabase key publication or atomic one-time-key consumption RPC exists yet.
+- No identity fingerprint / safety-number verification UX or key-change warning exists.
+- Kotlin facade is not connected to `NexuraApi`, message persistence, or chat UI.
+- No multi-device protocol, group encryption, media encryption, or interoperability testing.
+- Existing message rows remain plaintext; historical content is not retroactively encrypted.
+- No production database, Edge Function, or deployment was changed.
+
+### Required gates before enabling E2EE in chats
+
+1. Pass Android NDK cross-compilation and APK build for supported ABIs.
+2. Run JNI methods on an Android emulator/device, including process restart and state restoration.
+3. Implement Supabase public-key publication plus atomic OTK consumption with conversation membership checks.
+4. Add user-visible device identity verification and key-change handling.
+5. Integrate encrypted envelopes into a new message format without treating legacy plaintext as ciphertext.
+6. Verify two-device round trips, replay/tamper rejection, offline delivery, duplicate/out-of-order messages, and logout/account switching.
+7. Complete an independent protocol/security review before enabling by default.
