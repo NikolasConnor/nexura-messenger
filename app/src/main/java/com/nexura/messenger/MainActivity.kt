@@ -214,9 +214,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         throw IllegalStateException("Сначала проверьте отпечаток устройства собеседника через замок вверху чата.")
                     }
                 } else {
-                    val members = api.groupMemberIds(chat.id).filter { it != store.userId }
+                    val ownDeviceId = client.deviceId()
+                    val members = api.groupMemberIds(chat.id)
                     for (memberId in members) {
-                        val devices = api.activeE2eeDevices(memberId)
+                        val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
                         if (devices.isEmpty()) throw IllegalStateException("У участника $memberId нет активного E2EE-устройства.")
                         if (devices.any { !client.isRemoteDeviceTrusted(memberId, it.deviceId, it.curve25519Key, it.ed25519Key) }) {
                             throw IllegalStateException("Сначала проверьте все устройства участников через кнопку замка.")
@@ -302,9 +303,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     api.sendEncryptedDirectMessage(chat.id, remote, client, messageId, text, replyToId)
                 } else {
-                    val members = api.groupMemberIds(chat.id).filter { it != store.userId }
+                    val ownDeviceId = client.deviceId()
+                    val members = api.groupMemberIds(chat.id)
                     for (memberId in members) {
-                        val devices = api.activeE2eeDevices(memberId)
+                        val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
                         if (devices.isEmpty()) throw IllegalStateException("У участника $memberId нет активного E2EE-устройства")
                         if (devices.any { !client.isRemoteDeviceTrusted(memberId, it.deviceId, it.curve25519Key, it.ed25519Key) }) {
                             throw IllegalStateException("Не все устройства участников подтверждены. Нажмите на замок группы.")
@@ -908,10 +910,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             trustPeerId = peerId
                                             trustCandidate = devices.single()
                                         } else {
-                                            val members = api.groupMemberIds(chat.id).filter { it != store.userId }
+                                            val ownDeviceId = client.deviceId()
+                                            val members = api.groupMemberIds(chat.id)
                                             val queue = members.flatMap { memberId ->
-                                                val devices = api.activeE2eeDevices(memberId)
-                                                if (devices.isEmpty()) throw IllegalStateException("У участника $memberId пока нет активного E2EE-устройства")
+                                                val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
+                                                if (devices.isEmpty() && memberId != store.userId) throw IllegalStateException("У участника $memberId пока нет активного E2EE-устройства")
                                                 devices.map { memberId to it }
                                             }.filter { (memberId, device) ->
                                                 !client.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
