@@ -27,6 +27,7 @@ class CallCoordinator(
     private val chatId: String,
     private val ownUserId: String,
     private val peerUserId: String,
+    private val api: com.nexura.messenger.data.NexuraApi,
     private val onState: (CallUiState) -> Unit
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -67,7 +68,12 @@ class CallCoordinator(
                 val signal = JSONObject().put("type", "offer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
                 if (!send(signal)) publish(CallUiState(status = "Не удалось вызвать", error = "Сигнал не отправлен"))
-                else publish(CallUiState(status = "Вызов…", active = true, video = video))
+                else {
+                    publish(CallUiState(status = "Вызов…", active = true, video = video))
+                    scope.launch {
+                        runCatching { api.notifyIncomingCall(chatId, peerUserId, callId!!, video) }
+                    }
+                }
                 flushIce()
             },
             onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
