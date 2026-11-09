@@ -402,10 +402,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Spacer(Modifier.height(22.dp))
                         Text("nexura", fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-1).sp)
                         Text("Твоё пространство для общения", color = SecondaryText, fontSize = 15.sp, modifier = Modifier.padding(top = 5.dp, bottom = 28.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = !phoneMode, onClick = { phoneMode = false; error = ""; notice = "" }, label = { Text("Email") })
-                            FilterChip(selected = phoneMode, onClick = { phoneMode = true; error = ""; notice = "" }, label = { Text("Телефон") })
-                        }
+                        OutlinedButton(
+                            onClick = {
+                                val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
+                                val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=google&redirect_to=$redirect"
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            },
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
+                        ) { Text("Продолжить с Google", fontWeight = FontWeight.SemiBold) }
+                        Text("или войдите по электронной почте", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 22.dp, bottom = 8.dp))
                         if (phoneMode) {
                             AuthField(phone, { phone = it; smsSent = false }, "Номер телефона", "+49 123 456789", keyboard = ImeAction.Next)
                             if (smsSent) AuthField(phoneCode, { phoneCode = it.filter(Char::isDigit).take(8) }, "Код из SMS", "Введите код")
@@ -456,15 +463,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         ) { Text(if (busy) "Подождите…" else if (phoneMode) if (smsSent) "Подтвердить код" else "Получить SMS-код" else if (register) "Создать аккаунт" else "Войти", fontWeight = FontWeight.SemiBold) }
                         if (!phoneMode) {
                             OutlinedButton(
-                                onClick = {
-                                    val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
-                                    val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=google&redirect_to=$redirect"
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(52.dp),
+                                onClick = { },
+                                enabled = false,
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(50.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
-                            ) { Text("Продолжить с Google", fontWeight = FontWeight.Medium) }
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = SecondaryText,
+                                    disabledContentColor = SecondaryText.copy(alpha = 0.8f)
+                                )
+                            ) { Text("Регистрация через Telegram · Скоро", fontWeight = FontWeight.Medium) }
+                            Text("Вход через Telegram находится в разработке", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
                             TextButton(onClick = { register = !register; error = ""; notice = "" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                                 Text(if (register) "Уже есть аккаунт? Войти" else "Создать аккаунт")
                             }
