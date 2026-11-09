@@ -25,7 +25,13 @@ class E2eeClient(context: Context, userId: String) {
         val result = E2eeNative.nativeCreateDevice(oneTimeKeyCount)
         require(result.size == 2) { "Invalid native device creation result" }
         val publicBundle = JSONObject(String(result[1], StandardCharsets.UTF_8))
+            .put("protocol", "olm-v1")
+            .put("bundle_version", 1)
             .put("device_id", UUID.randomUUID().toString())
+        val oneTimeKeys = publicBundle.getJSONArray("one_time_keys")
+        for (index in 0 until oneTimeKeys.length()) {
+            oneTimeKeys.getJSONObject(index).put("key_id", UUID.randomUUID().toString())
+        }
         val publicBundleBytes = publicBundle.toString().toByteArray(StandardCharsets.UTF_8)
         store.save(ACCOUNT_KEY, result[0])
         store.save(PUBLIC_BUNDLE_KEY, publicBundleBytes)
