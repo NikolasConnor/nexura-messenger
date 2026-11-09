@@ -52,6 +52,17 @@ fn one_time_key_signing_payload(key: &str) -> Vec<u8> {
     format!(r#"{{"key":"{}"}}"#, key).into_bytes()
 }
 
+fn sign_unpublished_one_time_keys(account: &Account) -> Vec<SignedOneTimeKey> {
+    account.one_time_keys()
+        .values()
+        .map(|key| {
+            let encoded = key.to_base64();
+            let signature = account.sign(one_time_key_signing_payload(&encoded));
+            SignedOneTimeKey { key: encoded, signature: signature.to_base64() }
+        })
+        .collect()
+}
+
 /// Creates a device account, signs each published one-time key with the
 /// account's Ed25519 identity key, and returns only public key material.
 pub fn create_device_keys(one_time_key_count: usize) -> (Account, PublicDeviceKeys) {
@@ -60,15 +71,7 @@ pub fn create_device_keys(one_time_key_count: usize) -> (Account, PublicDeviceKe
     account.generate_one_time_keys(count);
 
     let identity = account.identity_keys();
-    let one_time_keys = account
-        .one_time_keys()
-        .values()
-        .map(|key| {
-            let encoded = key.to_base64();
-            let signature = account.sign(one_time_key_signing_payload(&encoded));
-            SignedOneTimeKey { key: encoded, signature: signature.to_base64() }
-        })
-        .collect();
+    let one_time_keys = sign_unpublished_one_time_keys(&account);
 
     (
         account,
@@ -78,6 +81,19 @@ pub fn create_device_keys(one_time_key_count: usize) -> (Account, PublicDeviceKe
             one_time_keys,
         },
     )
+}
+
+/// Generate a fresh batch after the previous batch has been durably published.
+/// Returns only keys not yet acknowledged as published.
+pub fn generate_additional_one_time_keys(
+    account: &mut Account,
+    requested_count: usize,
+) -> Vec<SignedOneTimeKey> {
+    let count = requested_count.min(account.max_number_of_one_time_keys());
+    if count > 0 {
+        account.generate_one_time_keys(count);
+    }
+    sign_unpublished_one_time_keys(account)
 }
 
 /// Mark currently generated one-time keys as published after the server confirms
