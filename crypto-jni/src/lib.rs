@@ -105,15 +105,17 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeVerifyOne
     mut env: JNIEnv,
     _class: JClass,
     identity: JString,
+    curve_identity: JString,
     key: JString,
     signature: JString,
 ) -> jboolean {
     let result = (|| {
         let identity = read_string(&mut env, &identity)?;
+        let curve_identity = read_string(&mut env, &curve_identity)?;
         let key = read_string(&mut env, &key)?;
         let signature = read_string(&mut env, &signature)?;
         let signed = SignedOneTimeKey { key, signature };
-        verify_signed_one_time_key(&identity, &signed).map_err(|e| e.to_string())
+        verify_signed_one_time_key(&identity, &curve_identity, &signed).map_err(|e| e.to_string())
     })();
     match result {
         Ok(()) => JNI_TRUE,
@@ -140,7 +142,7 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeStartOutb
         let ed = read_string(&mut env, &recipient_ed)?;
         let key = read_string(&mut env, &recipient_otk)?;
         let signature = read_string(&mut env, &recipient_signature)?;
-        verify_signed_one_time_key(&ed, &SignedOneTimeKey { key: key.clone(), signature })
+        verify_signed_one_time_key(&ed, &curve, &SignedOneTimeKey { key: key.clone(), signature })
             .map_err(|_| "recipient one-time key signature is invalid".to_string())?;
         let message = read_bytes(&mut env, &plaintext)?;
         let (session, envelope) = start_outbound_session(&account, &curve, &key, &message)
