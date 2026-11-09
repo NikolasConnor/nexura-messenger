@@ -62,6 +62,7 @@ class CallCoordinator(
             { signal -> scope.launch { receive(signal) } },
             { scope.launch {
                 ready = true
+                flushIce()
                 val previous = lastState
                 if (previous?.active == true) {
                     publish(previous.copy(status = if (previous.connected) "На связи" else "Восстанавливаем связь…", error = null))
