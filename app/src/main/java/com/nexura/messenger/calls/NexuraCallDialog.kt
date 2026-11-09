@@ -148,26 +148,37 @@ fun NexuraCallDialog(
     }
 
     var autoActionHandled by remember { mutableStateOf(false) }
-    LaunchedEffect(ui.incoming, autoAction) {
-        if (ui.incoming && !autoActionHandled && autoAction != "show") {
-            autoActionHandled = true
-            when (autoAction) {
-                "accept" -> request("accept", ui.video)
-                "decline" -> {
-                    coordinator?.decline()
-                    com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
-                    onDismiss()
-                }
+    LaunchedEffect(ui.incoming, autoAction, ui.status, visible) {
+        if (!visible || autoActionHandled) return@LaunchedEffect
+        when (autoAction) {
+            "accept" -> if (ui.incoming) {
+                autoActionHandled = true
+                request("accept", ui.video)
+            }
+            "decline" -> if (ui.incoming) {
+                autoActionHandled = true
+                coordinator?.decline()
+                com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
+                onDismiss()
+            }
+            "start_audio" -> if (ui.status == "Готово к звонку") {
+                autoActionHandled = true
+                request("audio", false)
+            }
+            "start_video" -> if (ui.status == "Готово к звонку") {
+                autoActionHandled = true
+                request("video", true)
             }
         }
     }
+
     LaunchedEffect(ui.active) {
         if (ui.active) {
             com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
         }
     }
-    LaunchedEffect(ui.incoming, ui.active) {
-        if (!ui.incoming && !ui.active) autoActionHandled = false
+    LaunchedEffect(ui.incoming, ui.active, visible) {
+        if (!ui.incoming && !ui.active && !visible) autoActionHandled = false
     }
 
     if (!visible && !ui.incoming && !ui.active && ui.error.isNullOrBlank()) return
