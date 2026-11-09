@@ -739,10 +739,7 @@ class NexuraApi(private val store: SessionStore) {
         }
     }
 
-    private fun storeMediaCacheDir(): File = File(
-        java.io.File(System.getProperty("java.io.tmpdir") ?: "/data/local/tmp"),
-        "nexura-media-cache"
-    ).also { if (!it.exists()) it.mkdirs() }
+    private fun storeMediaCacheDir(): File = store.mediaCacheDir
 
     @Deprecated("Use sendEncryptedMediaMessage; plaintext media uploads are disabled.")
     suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String): Nothing {
