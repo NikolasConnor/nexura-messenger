@@ -411,8 +411,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     // The list is refreshed less often to avoid unnecessary database traffic.
     LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
+            var retryDelay = 2500L
             while (true) {
-                delay(if (selected != null) 2500L else 20000L)
+                delay(if (selected != null) retryDelay else maxOf(20_000L, retryDelay))
                 try {
                     val currentChat = selected
                     if (currentChat != null) {
@@ -428,8 +429,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     } else {
                         chats = api.chats()
                     }
+                    retryDelay = 2500L
                 } catch (_: Exception) {
-                    // A temporary network interruption should not erase the current screen.
+                    // Back off during network outages instead of hammering the API every 2.5s.
+                    retryDelay = (retryDelay * 2).coerceAtMost(30_000L)
                 }
             }
         }
