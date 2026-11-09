@@ -1110,9 +1110,21 @@ class NexuraApi(private val store: SessionStore) {
     }
 
     suspend fun createGroup(title: String, memberIds: List<String>): String {
+        val cleanTitle = title.trim()
+        if (cleanTitle.length !in 2..60) {
+            throw IOException("Название группы должно содержать от 2 до 60 символов")
+        }
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val normalizedMembers = memberIds
+            .map { normalizeUuid(it) }
+            .filterNot { it == uid }
+            .distinct()
+        if (normalizedMembers.size !in 1..49) {
+            throw IOException("Выберите от 1 до 49 других участников")
+        }
         val ids = JSONArray()
-        memberIds.distinct().forEach { ids.put(normalizeUuid(it)) }
-        val payload = JSONObject().put("p_title", title.trim()).put("p_member_ids", ids)
+        normalizedMembers.forEach { ids.put(it) }
+        val payload = JSONObject().put("p_title", cleanTitle).put("p_member_ids", ids)
         return normalizeUuid(call("/rest/v1/rpc/create_group_conversation", "POST", payload.toString()))
     }
 
