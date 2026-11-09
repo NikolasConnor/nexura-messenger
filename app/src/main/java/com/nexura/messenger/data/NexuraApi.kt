@@ -639,9 +639,13 @@ class NexuraApi(private val store: SessionStore) {
             .put("message_type", messageType)
             .put("content", envelope)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
-        call("/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
-            prefer = "resolution=ignore-duplicates,return=minimal")
-        val saved = JSONArray(call(
+        val inserted = JSONArray(call(
+            "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
+            prefer = "resolution=ignore-duplicates,return=representation"
+        ))
+        // Normal sends are verified by the INSERT response in one round trip.
+        // Only an idempotent retry that hit an existing ID needs a follow-up read.
+        val saved = if (inserted.length() == 1) inserted else JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
         ))
         if (saved.length() != 1 || saved.getJSONObject(0).optString("sender_id") != uid ||
@@ -835,9 +839,13 @@ class NexuraApi(private val store: SessionStore) {
             .put("message_type", messageType)
             .put("content", envelope)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
-        call("/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
-            prefer = "resolution=ignore-duplicates,return=minimal")
-        val saved = JSONArray(call(
+        val inserted = JSONArray(call(
+            "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
+            prefer = "resolution=ignore-duplicates,return=representation"
+        ))
+        // Normal sends are verified by the INSERT response in one round trip.
+        // Only an idempotent retry that hit an existing ID needs a follow-up read.
+        val saved = if (inserted.length() == 1) inserted else JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
         ))
         if (saved.length() != 1 || saved.getJSONObject(0).optString("sender_id") != uid ||
