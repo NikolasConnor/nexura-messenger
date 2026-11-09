@@ -208,35 +208,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             var encrypted: EncryptedMediaFile? = null
             try {
                 val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
-                if (chat.kind == "direct") {
-                    val peerId = api.directPeerUserId(chat.id)
-                    val devices = api.activeE2eeDevices(peerId)
-                    if (devices.isEmpty()) throw IllegalStateException("У собеседника пока нет активных устройств Nexura.")
-                    val peer = devices.first()
-                    client.trustRemoteDeviceOnFirstUse(peerId, peer.deviceId, peer.curve25519Key, peer.ed25519Key)
-                } else {
-                    val ownDeviceId = client.deviceId()
-                    val members = api.groupMemberIds(chat.id)
-                    for (memberId in members) {
-                        val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
-                        if (devices.isEmpty()) {
-                            if (memberId == store.userId) continue
-                            throw IllegalStateException("У участника $memberId нет активного E2EE-устройства.")
-                        }
-                        devices.forEach { device -> client.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key) }
-                    }
-                }
                 encrypted = withContext(Dispatchers.IO) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
                 if (chat.kind == "direct") {
-                    val peerId = api.directPeerUserId(chat.id)
-                    val peer = api.activeE2eeDevices(peerId).firstOrNull() ?: throw IllegalStateException("У собеседника пока нет активных устройств Nexura")
-                    api.sendEncryptedMediaMessage(chat.id, peer, client, encrypted!!)
+                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!)
                 } else {
                     api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!)
                 }
-                messages = api.messages(chat.id, client)
+                messages = messages.filterNot { it.id == messageId } + MessageItem(
+                    messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
+                    encrypted = true
+                )
                 notice = "Медиа отправлено с E2EE-шифрованием"
             } catch (e: Exception) {
                 encrypted?.file?.delete()
@@ -297,22 +280,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             try {
                 val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
                 if (chat.kind == "direct") {
-                    val peerId = api.directPeerUserId(chat.id)
-                    val devices = api.activeE2eeDevices(peerId)
-                    if (devices.isEmpty()) throw IllegalStateException("У собеседника пока нет активных устройств Nexura")
-                    // The API performs first-use trust and encryption fan-out for every active peer device.
-                    api.sendEncryptedDirectMessage(chat.id, devices.first(), client, messageId, text, replyToId)
+                    api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
                 } else {
-                    val ownDeviceId = client.deviceId()
-                    val members = api.groupMemberIds(chat.id)
-                    for (memberId in members) {
-                        val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
-                        if (devices.isEmpty()) {
-                            if (memberId == store.userId) continue
-                            throw IllegalStateException("У участника $memberId нет активного E2EE-устройства")
-                        }
-                        devices.forEach { device -> client.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key) }
-                    }
                     api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
                 }
                 draft = ""
@@ -1083,7 +1052,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     else Icon(Icons.Default.Image, "Отправить фото", tint = Accent)
                                 }
                                 IconButton(
-                                    onClick = { videoPicker.launch(arrayOf("video/*")) },
+                                    onClick = { videoPicker.launch(arrayOf("video/mp4")) },
                                     enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
