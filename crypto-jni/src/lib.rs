@@ -3,7 +3,7 @@ use jni::sys::{jboolean, jint, jobjectArray, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use nexura_crypto_core::{
     accept_inbound_session, create_device_keys, decrypt_message, encrypt_message,
-    mark_keys_as_published, pickle_account, pickle_session, start_outbound_session, unpickle_account,
+    generate_additional_one_time_keys, mark_keys_as_published, pickle_account, pickle_session, start_outbound_session, unpickle_account,
     unpickle_session, verify_signed_one_time_key, PublicDeviceKeys, SignedOneTimeKey,
 };
 
@@ -46,6 +46,31 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeCreateDev
         let pickle = pickle_account(&account).map_err(|e| e.to_string())?;
         let public_json = serde_json::to_vec(&public).map_err(|e| e.to_string())?;
         byte_array_result(&mut env, vec![pickle.into_bytes(), public_json])
+    })();
+    match result {
+        Ok(value) => value,
+        Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeGenerateOneTimeKeys(
+    mut env: JNIEnv,
+    _class: JClass,
+    account_pickle: JByteArray,
+    count: jint,
+) -> jobjectArray {
+    let result = (|| {
+        if count < 1 || count > 50 {
+            return Err("one-time-key count must be between 1 and 50".to_string());
+        }
+        let account_bytes = read_bytes(&mut env, &account_pickle)?;
+        let mut account = unpickle_account(utf8(&account_bytes, "account pickle")?)
+            .map_err(|e| e.to_string())?;
+        let keys = generate_additional_one_time_keys(&mut account, count as usize);
+        let updated = pickle_account(&account).map_err(|e| e.to_string())?;
+        let keys_json = serde_json::to_vec(&keys).map_err(|e| e.to_string())?;
+        byte_array_result(&mut env, vec![updated.into_bytes(), keys_json])
     })();
     match result {
         Ok(value) => value,
