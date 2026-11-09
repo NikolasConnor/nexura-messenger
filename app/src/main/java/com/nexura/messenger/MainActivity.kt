@@ -85,11 +85,14 @@ private val Success = Color(0xFF8DDEB0)
 private data class DeviceContact(val name: String, val phone: String, val match: ContactMatch? = null)
 
 class MainActivity : ComponentActivity() {
+    private var incomingDeepLink by mutableStateOf<Uri?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingDeepLink = intent?.data
         val store = SessionStore(this)
         val api = NexuraApi(store)
-        setContent { NexuraApp(api, store, intent?.data) }
+        setContent { NexuraApp(api, store, incomingDeepLink) }
     }
 
     override fun onStart() {
@@ -105,7 +108,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        recreate()
+        incomingDeepLink = intent.data
     }
 }
 
@@ -1086,10 +1089,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 )
                             }
                             if (chat.kind == "direct") {
-                                IconButton(onClick = { showCallDialog = true }) {
+                                IconButton(onClick = {
+                                    pendingCallAction = "start_audio"
+                                    showCallDialog = true
+                                }) {
                                     Icon(Icons.Default.Call, "Голосовой звонок", tint = Accent)
                                 }
-                                IconButton(onClick = { showCallDialog = true }) {
+                                IconButton(onClick = {
+                                    pendingCallAction = "start_video"
+                                    showCallDialog = true
+                                }) {
                                     Icon(Icons.Default.Videocam, "Видеозвонок", tint = Accent)
                                 }
                             }
