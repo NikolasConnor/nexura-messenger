@@ -50,10 +50,6 @@ jobs:
         with:
           gradle-version: "8.9"
       - name: Build Android debug APK with E2EE JNI
-        env:
-          NEXURA_TURN_URLS: ${{ secrets.NEXURA_TURN_URLS }}
-          NEXURA_TURN_USERNAME: ${{ secrets.NEXURA_TURN_USERNAME }}
-          NEXURA_TURN_CREDENTIAL: ${{ secrets.NEXURA_TURN_CREDENTIAL }}
         run: gradle --no-daemon assembleDebug
       - name: Free disk space for Android AVD
         run: |
