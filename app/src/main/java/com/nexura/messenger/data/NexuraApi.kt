@@ -774,16 +774,19 @@ class NexuraApi(private val store: SessionStore) {
 
         val ownBundle = JSONObject(e2ee.ensureDevice())
         val ownDeviceId = ownBundle.getString("device_id")
-        val ownPublished = activeE2eeDevices(uid).singleOrNull { it.deviceId == ownDeviceId }
+        val (ownDevices, peerDevices) = coroutineScope {
+            val own = async { activeE2eeDevices(uid) }
+            val peer = async { activeE2eeDevices(peerId) }
+            own.await() to peer.await()
+        }
+        val ownPublished = ownDevices.singleOrNull { it.deviceId == ownDeviceId }
             ?: throw IOException("Ваше E2EE-устройство не зарегистрировано на сервере. Повторите инициализацию защиты.")
         if (ownPublished.curve25519Key != ownBundle.getString("curve25519") ||
             ownPublished.ed25519Key != ownBundle.getString("ed25519")) {
             throw IOException("Ключи вашего E2EE-устройства не совпадают с регистрацией сервера")
         }
-
-        val peerDevices = activeE2eeDevices(peerId)
         if (peerDevices.isEmpty()) throw IOException("У собеседника пока нет активных устройств Nexura")
-        val ownOtherDevices = activeE2eeDevices(uid).filterNot { it.deviceId == ownDeviceId }
+        val ownOtherDevices = ownDevices.filterNot { it.deviceId == ownDeviceId }
         val allTargets = (peerDevices + ownOtherDevices).distinctBy { "${it.userId}:${it.deviceId}" }
         if (allTargets.size > E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
             throw IOException("Слишком много активных устройств для одной защищённой отправки")
@@ -832,8 +835,12 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
 
-        val latestPeerDevices = activeE2eeDevices(peerId)
-        val latestOwnDevices = activeE2eeDevices(uid).filterNot { it.deviceId == ownDeviceId }
+        val (latestPeerDevices, latestOwnDevicesRaw) = coroutineScope {
+            val peer = async { activeE2eeDevices(peerId) }
+            val own = async { activeE2eeDevices(uid) }
+            peer.await() to own.await()
+        }
+        val latestOwnDevices = latestOwnDevicesRaw.filterNot { it.deviceId == ownDeviceId }
         val latestTargets = (latestPeerDevices + latestOwnDevices).distinctBy { "${it.userId}:${it.deviceId}" }
         if (latestTargets.map { "${it.userId}:${it.deviceId}" }.toSet() != allTargets.map { "${it.userId}:${it.deviceId}" }.toSet()) {
             throw IOException("Список устройств одного из участников изменился во время отправки. Повторите отправку.")
