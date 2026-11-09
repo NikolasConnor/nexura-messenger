@@ -113,3 +113,16 @@ The generic-push source in this branch is not deployed to Supabase. Production c
 5. Integrate encrypted envelopes into a new message format without treating legacy plaintext as ciphertext.
 6. Verify two-device round trips, replay/tamper rejection, offline delivery, duplicate/out-of-order messages, and logout/account switching.
 7. Complete an independent protocol/security review before enabling by default.
+
+
+### Key-directory client integration added (still awaiting server schema deployment)
+
+- The Android client now registers its public device identity after sign-in when the E2EE key-directory tables are available. Registration failure is isolated and does not block normal chat access.
+- Device registration is insert-only/idempotent; the client reads the row back and refuses to silently accept an identity-key mismatch.
+- Signed one-time keys are uploaded in batches with stable IDs. The client reads them back and verifies exact key/signature equality before acknowledging publication in the local Olm account.
+- Failed uploads remain pending locally and can be retried without changing key IDs.
+- The client replenishes the server-side pool when fewer than 10 unused keys remain.
+- A membership-checked RPC atomically consumes a recipient's one-time key using row locking. The Android API wrapper is present but no message sending path uses it yet.
+- Direct updates to one-time-key rows have been removed from the design grants; clients cannot set `consumed_at` themselves.
+- The schema file remains design-only. It has not been applied to production. A Supabase development branch would cost approximately $0.01344/hour and requires cost approval before creation.
+
