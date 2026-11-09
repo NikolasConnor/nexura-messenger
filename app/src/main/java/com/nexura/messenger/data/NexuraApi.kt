@@ -242,7 +242,7 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val afterFilter = afterCreatedAt?.let {
-            "&created_at=gt.${java.net.URLEncoder.encode(it, "UTF-8")}"
+            "&created_at=gte.${java.net.URLEncoder.encode(it, "UTF-8")}"
         }.orEmpty()
         val limit = if (afterCreatedAt == null) 100 else 200
         val raw = JSONArray(call(
