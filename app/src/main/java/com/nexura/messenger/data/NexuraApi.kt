@@ -818,6 +818,20 @@ class NexuraApi(private val store: SessionStore) {
         notifyChatPush(chatId)
     }
 
+
+    suspend fun notifyIncomingCall(conversationId: String, recipientUserId: String, callId: String, video: Boolean) {
+        call(
+            "/functions/v1/send-call-push",
+            "POST",
+            JSONObject()
+                .put("conversation_id", normalizeUuid(conversationId))
+                .put("recipient_user_id", normalizeUuid(recipientUserId))
+                .put("call_id", callId)
+                .put("video", video)
+                .toString()
+        )
+    }
+
     suspend fun registerPushToken(token: String) {
         if (store.userId.isNullOrBlank()) throw IOException("Сессия истекла")
         if (token.length !in 20..4096) throw IOException("Некорректный токен уведомлений")
