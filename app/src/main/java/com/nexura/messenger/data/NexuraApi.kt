@@ -842,6 +842,54 @@ class NexuraApi(private val store: SessionStore) {
         }
     }
 
+    suspend fun sendEncryptedGroupMediaMessage(
+        chatId: String,
+        e2ee: E2eeClient,
+        encryptedMedia: EncryptedMediaFile
+    ) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) {
+            throw IOException("Зашифрованный файл превышает лимит Storage")
+        }
+        val chat = normalizeUuid(chatId)
+        val members = groupMemberIds(chat)
+        if (uid !in members) throw IOException("Вы больше не состоите в этой группе")
+        val fileId = UUID.randomUUID().toString()
+        val path = "$chat/$uid/$fileId.enc"
+        val uploadRequest = Request.Builder()
+            .url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: throw IOException("Сессия истекла")}")
+            .header("x-upsert", "false")
+            .post(encryptedMedia.file.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
+            .build()
+        val mediaClient = client.newBuilder()
+            .writeTimeout(2, TimeUnit.MINUTES)
+            .readTimeout(2, TimeUnit.MINUTES)
+            .callTimeout(3, TimeUnit.MINUTES)
+            .build()
+        val upload = withContext(Dispatchers.IO) { mediaClient.newCall(uploadRequest).execute() }
+        upload.use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить зашифрованное медиа (HTTP ${it.code})")
+        }
+        val payload = JSONObject()
+            .put("schema", "nexura-media-v1")
+            .put("path", path)
+            .put("mime", encryptedMedia.mimeType)
+            .put("media_type", if (encryptedMedia.mimeType.startsWith("video/")) "video" else "image")
+            .put("name", encryptedMedia.fileName)
+            .put("size", encryptedMedia.plainSize)
+            .put("key", encryptedMedia.keyBase64)
+            .put("iv", encryptedMedia.ivBase64)
+            .put("cipher_sha256", encryptedMedia.cipherSha256)
+            .toString()
+        try {
+            sendEncryptedGroupMessage(chat, e2ee, UUID.randomUUID().toString(), payload, "media")
+        } finally {
+            encryptedMedia.file.delete()
+        }
+    }
+
     private suspend fun downloadAndDecryptMedia(
         payload: JSONObject,
         messageId: String,
