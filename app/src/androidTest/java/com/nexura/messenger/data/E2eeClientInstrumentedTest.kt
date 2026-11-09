@@ -90,6 +90,44 @@ class E2eeClientInstrumentedTest {
     }
 
     @Test
+    fun remoteDeviceTrustIsBoundToBothIdentityKeys() {
+        val (_, client) = newClient()
+        val userId = UUID.randomUUID().toString()
+        val deviceId = UUID.randomUUID().toString()
+        val curve = "A".repeat(43)
+        val ed = "B".repeat(43)
+
+        assertEquals(false, client.isRemoteDeviceTrusted(userId, deviceId, curve, ed))
+        client.trustRemoteDevice(userId, deviceId, curve, ed)
+        assertEquals(true, client.isRemoteDeviceTrusted(userId, deviceId, curve, ed))
+        assertEquals(false, client.isRemoteDeviceTrusted(userId, deviceId, "C".repeat(43), ed))
+        assertEquals(false, client.isRemoteDeviceTrusted(userId, deviceId, curve, "D".repeat(43)))
+        assertEquals(
+            client.deviceFingerprint(curve, ed),
+            client.deviceFingerprint(curve, ed)
+        )
+        assertNotEquals(client.deviceFingerprint(curve, ed), client.deviceFingerprint("C".repeat(43), ed))
+    }
+
+    @Test
+    fun e2eeMessageEnvelopeRoundTripsAndRejectsUnknownProtocol() {
+        val envelope = E2eeMessageEnvelope(
+            kind = E2eeMessageEnvelope.Kind.PRE_KEY,
+            conversationId = UUID.randomUUID().toString(),
+            senderDeviceId = UUID.randomUUID().toString(),
+            recipientDeviceId = UUID.randomUUID().toString(),
+            senderCurve25519 = "A".repeat(43),
+            ciphertext = """{"type":0,"body":"opaque-ciphertext"}"""
+        )
+        val decoded = E2eeMessageEnvelope.decode(envelope.encode())
+        assertEquals(envelope, decoded)
+        assertEquals(true, E2eeMessageEnvelope.isEnvelope(envelope.encode()))
+        assertEquals(false, E2eeMessageEnvelope.isEnvelope("ordinary legacy text"))
+        val unknown = JSONObject(envelope.encode()).put("protocol", "future-unknown").toString()
+        assertEquals(false, runCatching { E2eeMessageEnvelope.decode(unknown) }.isSuccess)
+    }
+
+    @Test
     fun oneTimeKeySignatureTamperingIsRejected() {
         val (_, bob) = newClient()
         val bundle = JSONObject(bob.ensureDevice())
