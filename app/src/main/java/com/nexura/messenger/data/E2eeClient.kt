@@ -161,6 +161,59 @@ class E2eeClient(context: Context, userId: String) {
     }
 
     @Synchronized
+    fun hasDirectSession(conversationId: String): Boolean {
+        require(conversationId.isNotBlank()) { "conversationId must not be blank" }
+        return store.load(sessionKey(conversationId)) != null
+    }
+
+    /**
+     * A fingerprint is a full SHA-256 digest over BOTH device identity keys.
+     * Users must compare it through a separate trusted channel before trusting.
+     */
+    fun deviceFingerprint(curve25519IdentityKey: String, ed25519IdentityKey: String): String {
+        require(curve25519IdentityKey.length in 40..64 && ed25519IdentityKey.length in 40..64) {
+            "Invalid device identity keys"
+        }
+        val canonical = "nexura-device-identity:v1\\n$curve25519IdentityKey\\n$ed25519IdentityKey"
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(canonical.toByteArray(StandardCharsets.UTF_8))
+        return digest.joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
+    }
+
+    @Synchronized
+    fun trustRemoteDevice(
+        remoteUserId: String,
+        remoteDeviceId: String,
+        curve25519IdentityKey: String,
+        ed25519IdentityKey: String
+    ) {
+        require(remoteUserId.isNotBlank() && remoteDeviceId.isNotBlank()) { "Invalid remote device identity" }
+        require(curve25519IdentityKey.length in 40..64 && ed25519IdentityKey.length in 40..64) {
+            "Invalid remote device keys"
+        }
+        val trusted = JSONObject()
+            .put("curve25519", curve25519IdentityKey)
+            .put("ed25519", ed25519IdentityKey)
+            .toString()
+            .toByteArray(StandardCharsets.UTF_8)
+        store.save(trustedDeviceKey(remoteUserId, remoteDeviceId), trusted)
+    }
+
+    @Synchronized
+    fun isRemoteDeviceTrusted(
+        remoteUserId: String,
+        remoteDeviceId: String,
+        curve25519IdentityKey: String,
+        ed25519IdentityKey: String
+    ): Boolean {
+        val saved = store.load(trustedDeviceKey(remoteUserId, remoteDeviceId)) ?: return false
+        val identity = runCatching { JSONObject(String(saved, StandardCharsets.UTF_8)) }.getOrNull()
+            ?: return false
+        return identity.optString("curve25519") == curve25519IdentityKey &&
+            identity.optString("ed25519") == ed25519IdentityKey
+    }
+
+    @Synchronized
     fun encryptDirectMessage(conversationId: String, plaintext: ByteArray): String {
         val session = store.load(sessionKey(conversationId))
             ?: error("No E2EE session for this conversation")
@@ -187,6 +240,9 @@ class E2eeClient(context: Context, userId: String) {
     }
 
     private fun sessionKey(conversationId: String): String = "olm-session:$conversationId"
+
+    private fun trustedDeviceKey(userId: String, deviceId: String): String =
+        "trusted-device:$userId:$deviceId"
 
     private companion object {
         const val ACCOUNT_KEY = "olm-device-account"
