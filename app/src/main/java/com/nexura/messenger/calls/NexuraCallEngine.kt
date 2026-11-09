@@ -148,9 +148,9 @@ class NexuraCallEngine(
         }, offer)
     }
 
-    fun acceptAnswer(sdp: String, onError: (String) -> Unit) {
+    fun acceptAnswer(sdp: String, onReady: () -> Unit, onError: (String) -> Unit) {
         peer.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() {}
+            override fun onSetSuccess() { onReady() }
             override fun onSetFailure(error: String) { onError(error) }
             override fun onCreateSuccess(desc: SessionDescription) {}
             override fun onCreateFailure(error: String) { onError(error) }
