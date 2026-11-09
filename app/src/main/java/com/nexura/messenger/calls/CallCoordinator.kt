@@ -44,6 +44,7 @@ class CallCoordinator(
     private var ready = false
     private var closed = false
     private var remoteDescriptionSet = false
+    private var localDescriptionSignaled = false
     private var offerRetryJob: Job? = null
 
     fun connect(token: String) {
@@ -67,6 +68,7 @@ class CallCoordinator(
         }
         videoMode = video
         callId = UUID.randomUUID().toString()
+        localDescriptionSignaled = false
         startKeepAlive(video)
         createEngine(video)
         engine?.createOffer(
@@ -106,7 +108,8 @@ class CallCoordinator(
                 remoteDescriptionSet = true
                 val signal = JSONObject().put("type", "answer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
-                if (!send(signal)) publish(CallUiState(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
+                if (!send(signal)) publish((lastState ?: CallUiState()).copy(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
+                else localDescriptionSignaled = true
                 flushIce()
                 publish((lastState ?: CallUiState()).copy(status = "На связи", active = true, video = videoMode, speaker = videoMode))
             },
@@ -172,7 +175,7 @@ class CallCoordinator(
             context, video,
             onLocalIce = { candidate ->
                 val id = callId
-                if (id != null && send(JSONObject().put("type", "ice").put("call_id", id)
+                if (id != null && localDescriptionSignaled && send(JSONObject().put("type", "ice").put("call_id", id)
                         .put("from", ownUserId).put("to", peerUserId)
                         .put("candidate", JSONObject().put("candidate", candidate.sdp)
                             .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))) {
@@ -190,7 +193,7 @@ class CallCoordinator(
     private val queuedIce = mutableListOf<IceCandidate>()
     private fun flushIce() {
         val id = callId
-        if (id != null) {
+        if (id != null && localDescriptionSignaled) {
             val iterator = queuedIce.iterator()
             while (iterator.hasNext()) {
                 val candidate = iterator.next()
@@ -262,6 +265,7 @@ class CallCoordinator(
         pendingCallId = null
         callId = null
         remoteDescriptionSet = false
+        localDescriptionSignaled = false
         videoMode = false
         pendingVideo = false
         if (closeSignaling) ready = false
