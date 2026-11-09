@@ -565,7 +565,8 @@ class NexuraApi(private val store: SessionStore) {
         if (uid !in members) throw IOException("Вы больше не состоите в этой группе")
         val own = JSONObject(e2ee.ensureDevice())
         val ownDeviceId = own.getString("device_id")
-        val publishedOwnDevice = activeE2eeDevices(uid).singleOrNull { it.deviceId == ownDeviceId }
+        val devicesByUser = activeE2eeDevicesForUsers(members).groupBy { it.userId }
+        val publishedOwnDevice = (devicesByUser[uid] ?: emptyList()).singleOrNull { it.deviceId == ownDeviceId }
             ?: throw IOException("Ваше E2EE-устройство не зарегистрировано на сервере. Повторите инициализацию защиты.")
         if (publishedOwnDevice.curve25519Key != own.getString("curve25519") ||
             publishedOwnDevice.ed25519Key != own.getString("ed25519")) {
@@ -573,7 +574,7 @@ class NexuraApi(private val store: SessionStore) {
         }
         val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
         for (memberId in members) {
-            val devices = activeE2eeDevices(memberId).filterNot { memberId == uid && it.deviceId == ownDeviceId }
+            val devices = (devicesByUser[memberId] ?: emptyList()).filterNot { memberId == uid && it.deviceId == ownDeviceId }
             if (devices.isEmpty()) {
                 if (memberId == uid) continue
                 throw IOException("У участника $memberId нет активного E2EE-устройства. Отправка остановлена.")
@@ -623,8 +624,10 @@ class NexuraApi(private val store: SessionStore) {
         if (currentMembers.toSet() != members.toSet()) {
             throw IOException("Состав группы изменился во время отправки. Повторите отправку.")
         }
+        val currentDevicesByUser = activeE2eeDevicesForUsers(members).groupBy { it.userId }
         for (memberId in members) {
-            val currentDevices = activeE2eeDevices(memberId).filterNot { memberId == uid && it.deviceId == ownDeviceId }
+            val currentDevices = (currentDevicesByUser[memberId] ?: emptyList())
+                .filterNot { memberId == uid && it.deviceId == ownDeviceId }
             val sentDevices = recipients.filter { it.userId == memberId }
             if (currentDevices.map { it.deviceId }.toSet() != sentDevices.map { it.deviceId }.toSet() ||
                 currentDevices.any { device ->
