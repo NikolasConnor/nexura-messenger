@@ -547,23 +547,33 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 selected == null -> {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Nexura", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
-                                Text("Общение без лишнего", color = SecondaryText, fontSize = 13.sp)
+                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(23.dp))
+                                }
+                                Column(Modifier.padding(start = 11.dp)) {
+                                    Text("Nexura", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
+                                    Text("Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
+                                }
                             }
-                            IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) {
-                                Icon(Icons.Default.GroupAdd, "Создать группу", tint = MainText)
+                            Surface(shape = CircleShape, color = Surface1) {
+                                IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) {
+                                    Icon(Icons.Default.GroupAdd, "Создать группу", tint = MainText)
+                                }
                             }
-                            IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
-                                Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
+                            Spacer(Modifier.width(7.dp))
+                            Surface(shape = CircleShape, color = Surface1) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
+                                    Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
+                                }
                             }
                         }
                         if (homeTab == "chats") {
                             OutlinedTextField(
                                 value = chatFilter,
                                 onValueChange = { chatFilter = it },
-                                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp).heightIn(min = 54.dp),
                                 singleLine = true,
                                 placeholder = { Text("Поиск по чатам", fontSize = 14.sp) },
                                 leadingIcon = { Icon(Icons.Default.Search, null, tint = SecondaryText) },
