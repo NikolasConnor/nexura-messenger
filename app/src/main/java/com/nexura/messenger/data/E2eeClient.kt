@@ -67,7 +67,7 @@ class E2eeClient(context: Context, userId: String) {
         // failed upload can safely be retried with the same stable key IDs.
         store.save(ACCOUNT_KEY, generated[0])
         store.save(PUBLIC_BUNDLE_KEY, updatedBundle)
-        return String(updatedBundle, StandardCharsets.UTF_8)
+        return newKeys.toString()
     }
 
     /**
@@ -75,9 +75,43 @@ class E2eeClient(context: Context, userId: String) {
      * This prevents the same private OTKs from being republished after restart.
      */
     @Synchronized
-    fun markPublicKeysPublished() {
+    fun pendingOneTimeKeysJson(): String {
+        val bundleBytes = store.load(PUBLIC_BUNDLE_KEY)
+            ?: error("E2EE device is not initialized")
+        val bundle = JSONObject(String(bundleBytes, StandardCharsets.UTF_8))
+        val allKeys = bundle.getJSONArray("one_time_keys")
+        val publishedIds = store.load(PUBLISHED_KEY_IDS)?.let {
+            org.json.JSONArray(String(it, StandardCharsets.UTF_8))
+        } ?: org.json.JSONArray()
+        val published = (0 until publishedIds.length()).mapNotNull { publishedIds.optString(it) }.toSet()
+        val pending = org.json.JSONArray()
+        for (index in 0 until allKeys.length()) {
+            val key = allKeys.getJSONObject(index)
+            if (!published.contains(key.optString("key_id"))) pending.put(key)
+        }
+        return pending.toString()
+    }
+
+    @Synchronized
+    fun markPublicKeysPublished(keyIds: List<String>) {
+        require(keyIds.isNotEmpty()) { "No published one-time keys to acknowledge" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
-        store.save(ACCOUNT_KEY, E2eeNative.nativeMarkKeysPublished(account))
+        val bundleBytes = store.load(PUBLIC_BUNDLE_KEY)
+            ?: error("E2EE public bundle is missing")
+        val bundle = JSONObject(String(bundleBytes, StandardCharsets.UTF_8))
+        val allKeys = bundle.getJSONArray("one_time_keys")
+        val knownIds = (0 until allKeys.length()).map { allKeys.getJSONObject(it).getString("key_id") }.toSet()
+        require(keyIds.all { knownIds.contains(it) }) { "Unknown one-time key ID" }
+
+        val previous = store.load(PUBLISHED_KEY_IDS)?.let {
+            org.json.JSONArray(String(it, StandardCharsets.UTF_8))
+        } ?: org.json.JSONArray()
+        val combined = linkedSetOf<String>()
+        for (index in 0 until previous.length()) previous.optString(index).takeIf { it.isNotBlank() }?.let(combined::add)
+        keyIds.forEach(combined::add)
+        val updatedAccount = E2eeNative.nativeMarkKeysPublished(account)
+        store.save(ACCOUNT_KEY, updatedAccount)
+        store.save(PUBLISHED_KEY_IDS, org.json.JSONArray(combined.toList()).toString().toByteArray(StandardCharsets.UTF_8))
     }
 
     fun verifyPublishedOneTimeKey(
@@ -156,5 +190,6 @@ class E2eeClient(context: Context, userId: String) {
     private companion object {
         const val ACCOUNT_KEY = "olm-device-account"
         const val PUBLIC_BUNDLE_KEY = "olm-public-device-bundle"
+        const val PUBLISHED_KEY_IDS = "olm-published-one-time-key-ids"
     }
 }
