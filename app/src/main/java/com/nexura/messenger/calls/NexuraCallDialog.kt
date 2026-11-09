@@ -69,26 +69,35 @@ fun NexuraCallDialog(
         onDispose { if (track != null && renderer != null) track.removeSink(renderer) }
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        val audioGranted = grants[Manifest.permission.RECORD_AUDIO] == true ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        val cameraGranted = grants[Manifest.permission.CAMERA] == true ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        if (!audioGranted) {
-            ui = ui.copy(error = "Нужен доступ к микрофону для звонка")
-            return@rememberLauncherForActivityResult
-        }
-        if (pendingAction == "video" && !cameraGranted) {
-            ui = ui.copy(error = "Нужен доступ к камере для видеозвонка")
-            return@rememberLauncherForActivityResult
-        }
+    var permissionStep by remember { mutableStateOf("") }
+    fun continueCallAfterPermissions() {
+        ui = ui.copy(error = null)
         when (pendingAction) {
             "video" -> coordinator?.start(true)
             "audio" -> coordinator?.start(false)
             "accept" -> coordinator?.accept()
         }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            ui = ui.copy(error = if (permissionStep == Manifest.permission.CAMERA)
+                "Без доступа к камере видеозвонок не запустится"
+            else "Без доступа к микрофону звонок невозможен")
+            permissionStep = ""
+            return@rememberLauncherForActivityResult
+        }
+        if (permissionStep == Manifest.permission.RECORD_AUDIO &&
+            pendingAction == "video" &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionStep = Manifest.permission.CAMERA
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+            return@rememberLauncherForActivityResult
+        }
+        permissionStep = ""
+        continueCallAfterPermissions()
     }
 
     LaunchedEffect(chat.id) {
@@ -106,18 +115,23 @@ fun NexuraCallDialog(
 
     fun request(action: String, video: Boolean) {
         pendingAction = action
-        val permissions = if (video) arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
-            else arrayOf(Manifest.permission.RECORD_AUDIO)
-        val missing = permissions.filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isEmpty()) {
-            when (action) {
-                "video" -> coordinator?.start(true)
-                "audio" -> coordinator?.start(false)
-                "accept" -> coordinator?.accept()
+        val microphoneMissing = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECORD_AUDIO
+        ) != PackageManager.PERMISSION_GRANTED
+        val cameraMissing = video && ContextCompat.checkSelfPermission(
+            context, Manifest.permission.CAMERA
+        ) != PackageManager.PERMISSION_GRANTED
+        when {
+            microphoneMissing -> {
+                permissionStep = Manifest.permission.RECORD_AUDIO
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
-        } else permissionLauncher.launch(missing.toTypedArray())
+            cameraMissing -> {
+                permissionStep = Manifest.permission.CAMERA
+                permissionLauncher.launch(Manifest.permission.CAMERA)
+            }
+            else -> continueCallAfterPermissions()
+        }
     }
 
     if (!visible && !ui.incoming && !ui.active && ui.error.isNullOrBlank()) return
@@ -127,13 +141,15 @@ fun NexuraCallDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(18.dp).background(Color(0xFF171D27), MaterialTheme.shapes.extraLarge).padding(24.dp),
+            Modifier.fillMaxSize().background(Color(0xFF0D1118)).padding(horizontal = 24.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(if (ui.video) "Видеозвонок" else "Звонок", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(if (ui.video) "Видеозвонок" else "Аудиозвонок", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             if (ui.video && ui.active) {
-                Box(Modifier.fillMaxWidth().height(360.dp).background(Color.Black, MaterialTheme.shapes.large)) {
+                Box(
+                    Modifier.fillMaxWidth().weight(1f).background(Color.Black, MaterialTheme.shapes.extraLarge)
+                ) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { viewContext ->
@@ -146,9 +162,20 @@ fun NexuraCallDialog(
                         },
                         update = { }
                     )
-                    if (ui.localVideoTrack != null) {
+                    if (ui.remoteVideoTrack == null) {
+                        Text(
+                            "Ожидаем видео собеседника…",
+                            color = Color.White,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                    Box(
+                        Modifier.align(Alignment.TopEnd).padding(12.dp)
+                            .width(104.dp).height(148.dp)
+                            .background(Color(0xFF242D3A), MaterialTheme.shapes.medium)
+                    ) {
                         AndroidView(
-                            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).width(104.dp).height(148.dp),
+                            modifier = Modifier.fillMaxSize(),
                             factory = { viewContext ->
                                 SurfaceViewRenderer(viewContext).also { renderer ->
                                     renderer.init(eglContext.eglBaseContext, null)
@@ -159,9 +186,13 @@ fun NexuraCallDialog(
                             },
                             update = { }
                         )
+                        if (ui.localVideoTrack == null) {
+                            Text("Камера", color = Color.White, modifier = Modifier.align(Alignment.Center))
+                        }
                     }
                 }
             } else {
+                Spacer(Modifier.weight(1f))
                 Box(
                     Modifier.size(112.dp).background(Color(0xFF28364A), CircleShape),
                     contentAlignment = Alignment.Center
@@ -221,6 +252,7 @@ fun NexuraCallDialog(
                     }
                 }
             }
+            Spacer(Modifier.weight(1f, fill = false))
             TextButton(onClick = { coordinator?.end(); onDismiss() }) { Text("Закрыть", color = Color(0xFFA4AFBF)) }
         }
     }
