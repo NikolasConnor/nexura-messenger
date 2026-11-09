@@ -1,7 +1,6 @@
 package com.nexura.messenger.data
 
 import android.content.Context
-import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 
 /**
