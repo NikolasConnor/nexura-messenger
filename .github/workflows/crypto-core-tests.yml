@@ -11,6 +11,7 @@ on:
     branches: [ main ]
     paths:
       - "crypto-core/**"
+      - "crypto-jni/**"
       - ".github/workflows/crypto-core-tests.yml"
   workflow_dispatch:
 
