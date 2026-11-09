@@ -633,9 +633,10 @@ class NexuraApi(private val store: SessionStore) {
     }
     private suspend fun signedAttachmentUrl(path: String, bucket: String = "chat-attachments"): String {
         val now = System.currentTimeMillis()
-        signedUrlCache[path]?.let { cached ->
+        val cacheKey = "$bucket/$path"
+        signedUrlCache[cacheKey]?.let { cached ->
             if (cached.second > now) return cached.first
-            signedUrlCache.remove(path, cached)
+            signedUrlCache.remove(cacheKey, cached)
         }
         val payload = JSONObject().put("expiresIn", 3600)
         val result = JSONObject(call("/storage/v1/object/sign/$bucket/$path", "POST", payload.toString()))
@@ -643,7 +644,7 @@ class NexuraApi(private val store: SessionStore) {
         if (signed.isBlank()) throw IOException("Не удалось получить ссылку на медиафайл")
         val url = if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
         if (signedUrlCache.size > 500) signedUrlCache.clear()
-        signedUrlCache[path] = url to (now + 55 * 60 * 1000L)
+        signedUrlCache[cacheKey] = url to (now + 55 * 60 * 1000L)
         return url
     }
 
@@ -666,7 +667,12 @@ class NexuraApi(private val store: SessionStore) {
             .header("x-upsert", "false")
             .post(encryptedMedia.file.asRequestBody(encryptedMedia.mimeType.toMediaTypeOrNull()))
             .build()
-        val upload = withContext(Dispatchers.IO) { client.newCall(uploadRequest).execute() }
+        val mediaClient = client.newBuilder()
+            .writeTimeout(2, TimeUnit.MINUTES)
+            .readTimeout(2, TimeUnit.MINUTES)
+            .callTimeout(3, TimeUnit.MINUTES)
+            .build()
+        val upload = withContext(Dispatchers.IO) { mediaClient.newCall(uploadRequest).execute() }
         upload.use {
             if (!it.isSuccessful) throw IOException("Не удалось загрузить зашифрованное медиа (HTTP ${it.code})")
         }
@@ -708,7 +714,11 @@ class NexuraApi(private val store: SessionStore) {
         if (cached.exists() && cached.length() > 0) return android.net.Uri.fromFile(cached).toString()
         val url = signedAttachmentUrl(path, "nexura-chat-media")
         val request = Request.Builder().url(url).get().build()
-        val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+        val mediaClient = client.newBuilder()
+            .readTimeout(2, TimeUnit.MINUTES)
+            .callTimeout(3, TimeUnit.MINUTES)
+            .build()
+        val response = withContext(Dispatchers.IO) { mediaClient.newCall(request).execute() }
         val encrypted = File.createTempFile("nexura-download-", ".enc", storeMediaCacheDir())
         try {
             response.use {
