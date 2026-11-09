@@ -214,7 +214,7 @@ fun NexuraCallDialog(
                         Spacer(Modifier.width(8.dp))
                         Text("Позвонить")
                     }
-                    Button(onClick = { request("video", true) }, enabled = coordinator != null && !starting) {
+                    Button(onClick = { request("video", true) }, enabled = coordinator != null && ui.status == "Готово к звонку" && !starting) {
                         Icon(Icons.Default.Videocam, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Видео")
