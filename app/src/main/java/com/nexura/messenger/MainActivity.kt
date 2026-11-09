@@ -149,6 +149,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showChatFilter by remember { mutableStateOf(false) }
     var openMessageMenu by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showTerminateOthersDialog by remember { mutableStateOf(false) }
     var sendingMessage by remember { mutableStateOf(false) }
     var sendingImage by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
@@ -635,6 +636,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Авторизация", color = MainText, fontWeight = FontWeight.SemiBold)
                                 Text("Сессия хранится на устройстве в зашифрованном виде.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
                                 OutlinedButton(onClick = { scope.launch { busy = true; error = ""; notice = ""; try { api.refreshSession(); chats = api.chats(); notice = "Сессия успешно обновлена." } catch (e: Exception) { error = e.message ?: "Не удалось обновить сессию" } finally { busy = false } } }, enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(13.dp)) { Text(if (busy) "Проверяем…" else "Проверить и обновить сессию") }
+                                OutlinedButton(onClick = { showTerminateOthersDialog = true }, enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 9.dp), shape = RoundedCornerShape(13.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) {
+                                    Icon(Icons.Default.PhonelinkErase, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Завершить сеансы на других устройствах")
+                                }
+                                Text("Текущий вход останется активным. На других устройствах потребуется войти заново.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
                             }
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
@@ -651,6 +658,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                     if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { api.signOut(); signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; e2eeClient = null; e2eeStatus = "Шифрование не проверено"; notice = "" } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
+                    if (showTerminateOthersDialog) AlertDialog(
+                        onDismissRequest = { if (!busy) showTerminateOthersDialog = false },
+                        title = { Text("Завершить другие сеансы?") },
+                        text = { Text("Nexura завершит все остальные сеансы входа в этот аккаунт. На других телефонах и компьютерах потребуется авторизоваться заново. Это устройство останется в аккаунте.") },
+                        confirmButton = {
+                            TextButton(enabled = !busy, onClick = {
+                                showTerminateOthersDialog = false
+                                scope.launch {
+                                    busy = true; error = ""; notice = ""
+                                    try {
+                                        api.signOutOtherSessions()
+                                        notice = "Все остальные сеансы входа завершены. Это устройство осталось подключённым."
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Не удалось завершить другие сеансы"
+                                    } finally { busy = false }
+                                }
+                            }) { Text(if (busy) "Завершаем…" else "Завершить", color = Danger) }
+                        },
+                        dismissButton = { TextButton(enabled = !busy, onClick = { showTerminateOthersDialog = false }) { Text("Отмена") } }
+                    )
                 }
                 selected == null -> {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
