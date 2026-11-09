@@ -165,7 +165,10 @@ class NexuraApi(private val store: SessionStore) {
             auth = false)
     }
     suspend fun signOut() {
-        try { call("/auth/v1/logout", "POST", "{}", auth = true) } finally { store.clear() }
+        try { call("/auth/v1/logout", "POST", "{}", auth = true) } finally {
+            store.mediaCacheDir.listFiles()?.forEach { it.delete() }
+            store.clear()
+        }
     }
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
