@@ -588,12 +588,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (notice.isNotBlank()) Text(notice, color = Success, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                         OutlinedButton(onClick = { showLogoutDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 28.dp).height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) { Text("Выйти из аккаунта") }
                         }
-                        NexuraBottomBar(
-                            selected = homeTab,
-                            profileSelected = true,
-                            onSelect = { tab -> homeTab = tab; settingsOpen = false; createGroupOpen = false },
-                            onProfile = { }
-                        )
+                        Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+                            NexuraBottomBar(
+                                selected = homeTab,
+                                profileSelected = true,
+                                onSelect = { tab -> homeTab = tab; settingsOpen = false; createGroupOpen = false },
+                                onProfile = { }
+                            )
+                        }
                     }
                     if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { api.signOut(); signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; e2eeClient = null; e2eeStatus = "Шифрование не проверено"; notice = "" } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
                 }
@@ -711,6 +713,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         if (homeTab == "search") {
+                        Column(
+                            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                        ) {
                         Text("Найти людей", color = MainText, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 5.dp))
                         Text("По имени или отображаемому имени", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(bottom = 14.dp))
                         OutlinedTextField(
@@ -758,6 +763,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Text("Написать", color = Accent, fontSize = 12.sp)
                                 }
                             }
+                        }
                         }
                         }
                         if (homeTab == "chats") {
