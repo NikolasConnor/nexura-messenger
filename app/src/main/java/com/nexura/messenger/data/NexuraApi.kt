@@ -230,7 +230,7 @@ class NexuraApi(private val store: SessionStore) {
                         if (envelope.recipientDeviceId != client.deviceId()) throw IOException("Сообщение адресовано другому устройству")
                         val deviceRows = JSONArray(call(
                             "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
-                                "&user_id=eq.$senderId&device_id=eq.\${envelope.senderDeviceId}&is_active=eq.true&limit=1"
+                                "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
                         ))
                         if (deviceRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
                         val device = deviceRows.getJSONObject(0)
@@ -442,7 +442,7 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun directPeerUserId(conversationId: String): String {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val rows = JSONArray(call(
-            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.\${normalizeUuid(conversationId)}&user_id=neq.$uid"
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(conversationId)}&user_id=neq.$uid"
         ))
         if (rows.length() != 1) throw IOException("E2EE сейчас поддерживает только личные чаты с одним собеседником")
         return rows.getJSONObject(0).getString("user_id")
@@ -451,7 +451,7 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun activeE2eeDevices(userId: String): List<E2eeRemoteDevice> {
         val rows = JSONArray(call(
             "/rest/v1/e2ee_devices?select=user_id,device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
-                "&user_id=eq.\${normalizeUuid(userId)}&is_active=eq.true&order=created_at.asc"
+                "&user_id=eq.${normalizeUuid(userId)}&is_active=eq.true&order=created_at.asc"
         ))
         return (0 until rows.length()).map { index ->
             val row = rows.getJSONObject(index)
@@ -535,7 +535,7 @@ class NexuraApi(private val store: SessionStore) {
             prefer = "resolution=ignore-duplicates,return=minimal"
         )
         val saved = JSONArray(call(
-            "/rest/v1/messages?select=id,sender_id,content&id=eq.\${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
+            "/rest/v1/messages?select=id,sender_id,content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
         ))
         if (saved.length() != 1 ||
             saved.getJSONObject(0).optString("sender_id") != uid ||
