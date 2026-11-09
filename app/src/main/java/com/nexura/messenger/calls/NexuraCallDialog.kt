@@ -215,7 +215,7 @@ fun NexuraCallDialog(
                             modifier = Modifier.fillMaxSize(),
                             factory = { viewContext ->
                                 SurfaceViewRenderer(viewContext).also { renderer ->
-                                    renderer.init(eglContext.eglBaseContext, null)
+                                    renderer.init(coordinator?.sharedEglContext() ?: eglContext.eglBaseContext, null)
                                     renderer.setEnableHardwareScaler(true)
                                     renderer.setMirror(true)
                                 renderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
