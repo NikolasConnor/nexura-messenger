@@ -126,3 +126,31 @@ The generic-push source in this branch is not deployed to Supabase. Production c
 - Direct updates to one-time-key rows have been removed from the design grants; clients cannot set `consumed_at` themselves.
 - The schema file remains design-only. It has not been applied to production. A Supabase development branch would cost approximately $0.01344/hour and requires cost approval before creation.
 
+## Direct-message integration work (2026-11-09, branch only)
+
+### Added in the current development branch
+
+- A versioned `nexura-olm-v1` envelope binds conversation ID, sender device ID, recipient device ID, sender Curve25519 identity, message kind, and Olm ciphertext.
+- Incoming envelopes are rejected/kept locked if the conversation, recipient device, sender device identity, protocol version, or local trust record does not match.
+- The UI now exposes both local and peer SHA-256 device fingerprints and requires an explicit user action after out-of-band comparison before trusting a peer device.
+- Direct-message sending is wired to the Olm session path in the branch. It refuses plaintext fallback, unknown peers, multiple active recipient devices, and untrusted/changed identities.
+- Message text is cached locally only inside the AES-GCM-protected E2EE state store so a sender can render its own sent messages and a receiver does not replay an already-consumed pre-key message.
+- Related ratchet state, plaintext cache, and encrypted outbox ciphertext are committed through a single encrypted SharedPreferences batch.
+- The same message ID reuses the pending ciphertext after a network failure during the current app session.
+- Plaintext send API and image upload API are disabled in this development branch. Image/file sharing and group sends are intentionally blocked until their own encryption paths exist.
+- Legacy messages remain readable but are explicitly marked as not verified as E2EE. No historical plaintext is silently relabelled as encrypted.
+- A hardened Supabase migration artifact is present under `supabase/migrations/`. Device identity rows are immutable to clients; only the membership-checked RPC can consume a one-time key.
+
+### Known limitations / rollout gates
+
+- The migration artifact has NOT been applied to the production Supabase project. The current production database has no E2EE key-directory tables.
+- Android workflow results for the latest Kotlin/API/UI changes are pending; do not treat the branch as build-verified until the latest run completes successfully.
+- Current client path intentionally supports only one active device per user in a direct chat. Multi-device fan-out and session management are not implemented.
+- Group encryption (Megolm or MLS), client-side media encryption, secure attachment-key distribution, encrypted backups, and device revocation UX are not implemented.
+- The current protocol is Matrix Olm v1 via vodozemac, not Signal PQXDH and not post-quantum secure.
+- Pending outbox retry survives network errors while the app process remains active; durable recovery of pending sends after process death/reinstall is still required before broad rollout.
+- Independent protocol review, replay/out-of-order tests, multi-device tests, and server-side RLS/RPC integration tests remain mandatory.
+
+### Production safety rule
+
+Do not merge or deploy this branch as a complete secure messenger until the latest Android instrumentation tests pass, the migration has been reviewed and applied to a staging project, two real accounts have completed a fingerprint-verified encrypted exchange, and media/group/multi-device limitations are clearly surfaced to users. Production rollout must be a separately approved action.
