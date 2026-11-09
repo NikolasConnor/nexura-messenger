@@ -1,6 +1,7 @@
 package com.nexura.messenger.calls
 
 import android.content.Context
+import android.media.AudioManager
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
@@ -27,6 +28,9 @@ class NexuraCallEngine(
     private val onLocalVideo: (VideoTrack?) -> Unit,
     private val onState: (String) -> Unit
 ) {
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val previousAudioMode = audioManager.mode
+    private val previousSpeakerState = audioManager.isSpeakerphoneOn
     private val egl = EglBase.create()
     private val factory: PeerConnectionFactory
     private val peer: PeerConnection
@@ -39,6 +43,8 @@ class NexuraCallEngine(
     private val closed = AtomicBoolean(false)
 
     init {
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        audioManager.isSpeakerphoneOn = videoEnabled
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions()
         )
@@ -162,6 +168,7 @@ class NexuraCallEngine(
     }
 
     fun setMuted(muted: Boolean) { audioTrack.setEnabled(!muted) }
+    fun setSpeakerEnabled(enabled: Boolean) { audioManager.isSpeakerphoneOn = enabled }
     fun setCameraEnabled(enabled: Boolean) { videoTrack?.setEnabled(enabled) }
     fun switchCamera() { capturer?.switchCamera(null) }
     fun localVideoTrack(): VideoTrack? = videoTrack
@@ -174,6 +181,7 @@ class NexuraCallEngine(
         runCatching { peer.close(); peer.dispose() }
         runCatching { audioTrack.dispose(); audioSource.dispose() }
         runCatching { videoTrack?.dispose(); videoSource?.dispose() }
+        runCatching { audioManager.isSpeakerphoneOn = previousSpeakerState; audioManager.mode = previousAudioMode }
         runCatching { factory.dispose(); egl.release() }
     }
 }
