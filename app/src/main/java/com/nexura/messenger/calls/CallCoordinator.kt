@@ -11,6 +11,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import java.util.UUID
+import android.content.Intent
+import androidx.core.content.ContextCompat
 
 data class CallUiState(
     val status: String = "Подключение…",
@@ -65,6 +67,7 @@ class CallCoordinator(
         }
         videoMode = video
         callId = UUID.randomUUID().toString()
+        startKeepAlive(video)
         createEngine(video)
         engine?.createOffer(
             onReady = { sdp ->
@@ -95,6 +98,7 @@ class CallCoordinator(
         val offer = pendingOffer ?: return
         videoMode = pendingVideo
         callId = pendingCallId
+        startKeepAlive(videoMode)
         createEngine(videoMode)
         engine?.acceptOffer(
             offer,
@@ -194,6 +198,12 @@ class CallCoordinator(
         }
     }
 
+    private fun startKeepAlive(video: Boolean) {
+        val intent = Intent(context, CallKeepAliveService::class.java)
+            .putExtra(CallKeepAliveService.EXTRA_VIDEO, video)
+        runCatching { ContextCompat.startForegroundService(context, intent) }
+    }
+
     private fun send(signal: JSONObject): Boolean = signaling?.sendSignal(signal) == true
 
     fun toggleMute(): Boolean {
@@ -228,6 +238,7 @@ class CallCoordinator(
     private fun finish(closeSignaling: Boolean = true) {
         offerRetryJob?.cancel()
         offerRetryJob = null
+        runCatching { context.stopService(Intent(context, CallKeepAliveService::class.java)) }
         engine?.close()
         engine = null
         publish((lastState ?: CallUiState()).copy(localVideoTrack = null, remoteVideoTrack = null))
