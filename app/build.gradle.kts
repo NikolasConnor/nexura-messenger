@@ -19,18 +19,6 @@ android {
         compose = true
         buildConfig = true
     }
-    val turnUrls = providers.gradleProperty("NEXURA_TURN_URLS")
-        .orElse(providers.environmentVariable("NEXURA_TURN_URLS")).getOrElse("")
-    val turnUsername = providers.gradleProperty("NEXURA_TURN_USERNAME")
-        .orElse(providers.environmentVariable("NEXURA_TURN_USERNAME")).getOrElse("")
-    val turnCredential = providers.gradleProperty("NEXURA_TURN_CREDENTIAL")
-        .orElse(providers.environmentVariable("NEXURA_TURN_CREDENTIAL")).getOrElse("")
-    fun buildConfigString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-    defaultConfig {
-        buildConfigField("String", "WEBRTC_TURN_URLS", buildConfigString(turnUrls))
-        buildConfigField("String", "WEBRTC_TURN_USERNAME", buildConfigString(turnUsername))
-        buildConfigField("String", "WEBRTC_TURN_CREDENTIAL", buildConfigString(turnCredential))
-    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
