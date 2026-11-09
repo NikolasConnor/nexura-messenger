@@ -1,0 +1,204 @@
+//! Isolated Olm 1:1 protocol proof of concept for Nexura.
+//!
+//! This crate is not wired into the Android app or production message flow.
+//! Callers must verify peer identity keys out-of-band before creating a session.
+//! Pickles contain secret state and MUST be encrypted with a unique key protected
+//! by Android Keystore before persistence. Never log plaintext, keys, or pickles.
+
+use serde_json;
+use vodozemac::olm::{Account, OlmMessage, Session, SessionConfig};
+
+#[derive(Debug)]
+pub enum CryptoError {
+    InvalidKey(String),
+    InvalidEnvelope(String),
+    UnexpectedPreKey,
+    UnexpectedNormalMessage,
+    Protocol(String),
+}
+
+impl std::fmt::Display for CryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidKey(e) => write!(f, "invalid public key: {e}"),
+            Self::InvalidEnvelope(e) => write!(f, "invalid encrypted envelope: {e}"),
+            Self::UnexpectedPreKey => write!(f, "expected an Olm pre-key message"),
+            Self::UnexpectedNormalMessage => write!(f, "expected a normal Olm message"),
+            Self::Protocol(e) => write!(f, "Olm protocol error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for CryptoError {}
+
+/// Public device identity material. Never contains private keys.
+pub struct PublicDeviceKeys {
+    pub curve25519: String,
+    pub ed25519: String,
+    pub one_time_keys: Vec<String>,
+}
+
+/// Creates a new device account and an initial batch of one-time keys.
+/// The caller may upload ONLY the returned public material.
+pub fn create_device_keys(one_time_key_count: usize) -> (Account, PublicDeviceKeys) {
+    let mut account = Account::new();
+    let count = one_time_key_count.min(account.max_number_of_one_time_keys());
+    account.generate_one_time_keys(count);
+
+    let identity = account.identity_keys();
+    let one_time_keys = account
+        .one_time_keys()
+        .values()
+        .map(|key| key.to_base64())
+        .collect();
+
+    (
+        account,
+        PublicDeviceKeys {
+            curve25519: identity.curve25519.to_base64(),
+            ed25519: identity.ed25519.to_base64(),
+            one_time_keys,
+        },
+    )
+}
+
+/// Creates an outbound Olm session and encrypts its first pre-key message.
+/// Peer identity verification and signed-pre-key validation belong to the
+/// higher-level key-directory protocol and are intentionally not implied here.
+pub fn start_outbound_session(
+    sender: &Account,
+    recipient_curve25519: &str,
+    recipient_one_time_key: &str,
+    plaintext: &[u8],
+) -> Result<(Session, String), CryptoError> {
+    let identity = vodozemac::Curve25519PublicKey::from_base64(recipient_curve25519)
+        .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+    let one_time = vodozemac::Curve25519PublicKey::from_base64(recipient_one_time_key)
+        .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+
+    let mut session = sender
+        .create_outbound_session(SessionConfig::version_1(), identity, one_time)
+        .map_err(|e| CryptoError::Protocol(e.to_string()))?;
+    let message = session
+        .encrypt(plaintext)
+        .map_err(|e| CryptoError::Protocol(e.to_string()))?;
+    let envelope = serde_json::to_string(&message)
+        .map_err(|e| CryptoError::InvalidEnvelope(e.to_string()))?;
+
+    Ok((session, envelope))
+}
+
+/// Establishes the matching inbound session from a received pre-key envelope.
+pub fn accept_inbound_session(
+    receiver: &mut Account,
+    sender_curve25519: &str,
+    envelope_json: &str,
+) -> Result<(Session, Vec<u8>), CryptoError> {
+    let sender_identity = vodozemac::Curve25519PublicKey::from_base64(sender_curve25519)
+        .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+    let message: OlmMessage = serde_json::from_str(envelope_json)
+        .map_err(|e| CryptoError::InvalidEnvelope(e.to_string()))?;
+
+    let OlmMessage::PreKey(pre_key) = message else {
+        return Err(CryptoError::UnexpectedNormalMessage);
+    };
+
+    let result = receiver
+        .create_inbound_session(SessionConfig::version_1(), sender_identity, &pre_key)
+        .map_err(|e| CryptoError::Protocol(e.to_string()))?;
+
+    Ok((result.session, result.plaintext))
+}
+
+/// Encrypts a subsequent message in an established Olm session.
+pub fn encrypt_message(session: &mut Session, plaintext: &[u8]) -> Result<String, CryptoError> {
+    let message = session
+        .encrypt(plaintext)
+        .map_err(|e| CryptoError::Protocol(e.to_string()))?;
+    serde_json::to_string(&message).map_err(|e| CryptoError::InvalidEnvelope(e.to_string()))
+}
+
+/// Decrypts a subsequent normal Olm message in an established session.
+pub fn decrypt_message(session: &mut Session, envelope_json: &str) -> Result<Vec<u8>, CryptoError> {
+    let message: OlmMessage = serde_json::from_str(envelope_json)
+        .map_err(|e| CryptoError::InvalidEnvelope(e.to_string()))?;
+    let OlmMessage::Normal(normal) = message else {
+        return Err(CryptoError::UnexpectedPreKey);
+    };
+
+    session
+        .decrypt(&OlmMessage::Normal(normal))
+        .map_err(|e| CryptoError::Protocol(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_independent_devices_establish_and_exchange_messages() {
+        let (alice, alice_public) = create_device_keys(0);
+        let (mut bob, bob_public) = create_device_keys(1);
+        let bob_otk = bob_public.one_time_keys.first().expect("Bob OTK");
+
+        let (mut alice_session, first_envelope) = start_outbound_session(
+            &alice,
+            &bob_public.curve25519,
+            bob_otk,
+            b"hello from Alice",
+        )
+        .expect("outbound session");
+
+        let (mut bob_session, first_plaintext) = accept_inbound_session(
+            &mut bob,
+            &alice_public.curve25519,
+            &first_envelope,
+        )
+        .expect("inbound session");
+
+        assert_eq!(first_plaintext, b"hello from Alice");
+        assert_eq!(alice_session.session_id(), bob_session.session_id());
+
+        let reply = encrypt_message(&mut bob_session, b"hello from Bob").expect("encrypt reply");
+        let reply_plaintext = decrypt_message(&mut alice_session, &reply).expect("decrypt reply");
+        assert_eq!(reply_plaintext, b"hello from Bob");
+    }
+
+    #[test]
+    fn tampered_ciphertext_is_rejected() {
+        let (alice, alice_public) = create_device_keys(0);
+        let (mut bob, bob_public) = create_device_keys(1);
+        let bob_otk = bob_public.one_time_keys.first().expect("Bob OTK");
+
+        let (mut alice_session, first_envelope) = start_outbound_session(
+            &alice,
+            &bob_public.curve25519,
+            bob_otk,
+            b"initial message",
+        )
+        .expect("outbound session");
+        let (mut bob_session, _) = accept_inbound_session(
+            &mut bob,
+            &alice_public.curve25519,
+            &first_envelope,
+        )
+        .expect("inbound session");
+
+        let reply = encrypt_message(&mut bob_session, b"authentic reply").expect("encrypt");
+        let parsed: OlmMessage = serde_json::from_str(&reply).expect("parse envelope");
+        let (kind, mut bytes) = parsed.to_parts();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x01;
+        let modified = OlmMessage::from_parts(kind, &bytes).expect("valid framing");
+        let modified_json = serde_json::to_string(&modified).expect("serialize modified");
+
+        assert!(decrypt_message(&mut alice_session, &modified_json).is_err());
+    }
+
+    #[test]
+    fn malformed_public_keys_are_rejected() {
+        let (alice, _) = create_device_keys(0);
+        let result = start_outbound_session(&alice, "not-a-key", "not-a-key", b"hello");
+        assert!(result.is_err());
+    }
+}
