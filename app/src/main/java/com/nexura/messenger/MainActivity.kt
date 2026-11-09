@@ -784,7 +784,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 setOnPreparedListener { player -> player.isLooping = false; start() }
                                             }
                                         },
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                 } else {
                                     AsyncImage(
