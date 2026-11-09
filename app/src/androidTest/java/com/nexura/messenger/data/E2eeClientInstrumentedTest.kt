@@ -1,0 +1,99 @@
+package com.nexura.messenger.data
+
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.nio.charset.StandardCharsets
+import java.util.UUID
+
+@RunWith(AndroidJUnit4::class)
+class E2eeClientInstrumentedTest {
+    private val context: Context = ApplicationProvider.getApplicationContext()
+    private val clients = mutableListOf<Pair<String, E2eeClient>>()
+
+    @After
+    fun cleanUp() {
+        clients.forEach { (_, client) ->
+            runCatching { client.clearLocalIdentity() }
+        }
+    }
+
+    private fun newClient(): Pair<String, E2eeClient> {
+        val userNamespace = "e2ee-test-${UUID.randomUUID()}"
+        val client = E2eeClient(context, userNamespace)
+        clients += userNamespace to client
+        return userNamespace to client
+    }
+
+    @Test
+    fun twoAndroidDevicesExchangeAndRestoreOlmSession() {
+        val (aliceId, alice) = newClient()
+        val (_, bob) = newClient()
+
+        val aliceBundle = JSONObject(alice.ensureDevice())
+        val bobBundle = JSONObject(bob.ensureDevice())
+        val bobKeys = bobBundle.getJSONArray("one_time_keys")
+        val bobOneTimeKey = bobKeys.getJSONObject(0)
+
+        val conversationId = UUID.randomUUID().toString()
+        val initialText = "Nexura E2EE test".toByteArray(StandardCharsets.UTF_8)
+        val preKeyEnvelope = alice.startDirectSession(
+            conversationId = conversationId,
+            recipientCurve25519 = bobBundle.getString("curve25519"),
+            recipientEd25519 = bobBundle.getString("ed25519"),
+            recipientOneTimeKey = bobOneTimeKey.getString("key"),
+            recipientOneTimeKeySignature = bobOneTimeKey.getString("signature"),
+            firstPlaintext = initialText
+        )
+
+        assertArrayEquals(
+            initialText,
+            bob.acceptDirectSession(
+                conversationId,
+                aliceBundle.getString("curve25519"),
+                preKeyEnvelope
+            )
+        )
+
+        val replyText = "Reply after session setup".toByteArray(StandardCharsets.UTF_8)
+        val replyEnvelope = bob.encryptDirectMessage(conversationId, replyText)
+
+        // A new facade instance simulates process restart; persisted session state
+        // must be decrypted from Android Keystore-backed storage.
+        val aliceAfterRestart = E2eeClient(context, aliceId)
+        assertArrayEquals(replyText, aliceAfterRestart.decryptDirectMessage(conversationId, replyEnvelope))
+    }
+
+    @Test
+    fun oneTimeKeySignatureTamperingIsRejected() {
+        val (_, bob) = newClient()
+        val bundle = JSONObject(bob.ensureDevice())
+        val keys = bundle.getJSONArray("one_time_keys")
+        val first = keys.getJSONObject(0)
+
+        assertEquals(
+            true,
+            bob.verifyPublishedOneTimeKey(
+                bundle.getString("ed25519"),
+                first.getString("key"),
+                first.getString("signature")
+            )
+        )
+        assertEquals(
+            false,
+            runCatching {
+                bob.verifyPublishedOneTimeKey(
+                    bundle.getString("ed25519"),
+                    first.getString("key") + "A",
+                    first.getString("signature")
+                )
+            }.getOrDefault(false)
+        )
+    }
+}
