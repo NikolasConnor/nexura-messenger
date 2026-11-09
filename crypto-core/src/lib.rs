@@ -80,6 +80,12 @@ pub fn create_device_keys(one_time_key_count: usize) -> (Account, PublicDeviceKe
     )
 }
 
+/// Mark currently generated one-time keys as published after the server confirms
+/// their durable storage. Never call this before the upload transaction succeeds.
+pub fn mark_keys_as_published(account: &mut Account) {
+    account.mark_keys_as_published();
+}
+
 /// Verify a published one-time key against the device's Ed25519 identity key.
 pub fn verify_signed_one_time_key(
     ed25519_identity_key: &str,
