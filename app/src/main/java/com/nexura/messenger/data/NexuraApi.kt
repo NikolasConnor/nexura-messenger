@@ -23,8 +23,8 @@ import java.util.concurrent.TimeUnit
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂")
-data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
+data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null)
+data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class ContactMatch(val phone: String, val userId: String, val displayName: String, val avatar: String)
 data class MessageItem(
@@ -229,19 +229,20 @@ class NexuraApi(private val store: SessionStore) {
         return base.map { chat ->
             if (chat.kind != "direct") chat else {
                 val profile = profiles[peerByChat[chat.id]]
-                chat.copy(title = profile?.first ?: "Пользователь", avatar = profile?.second ?: "🙂")
+                chat.copy(title = profile?.first ?: "Пользователь", avatar = profile?.second ?: "🙂", peerUserId = peerByChat[chat.id])
             }
         }
     }
-    suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null): List<MessageItem> {
+    suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null, mediaOnly: Boolean = false): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val afterFilter = afterCreatedAt?.let {
             "&created_at=gte.${java.net.URLEncoder.encode(it, "UTF-8")}"
         }.orEmpty()
         val limit = if (afterCreatedAt == null) 50 else 100
+        val mediaFilter = if (mediaOnly) "&message_type=in.(media,image)" else ""
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
-                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter"
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$mediaFilter"
         ))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
@@ -1130,7 +1131,7 @@ class NexuraApi(private val store: SessionStore) {
 
     suspend fun myProfile(): UserProfile {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=eq.$uid&limit=1"))
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$uid&limit=1"))
         if (raw.length() == 0) {
             val authUser = JSONObject(call("/auth/v1/user", auth = true))
             val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
@@ -1139,16 +1140,59 @@ class NexuraApi(private val store: SessionStore) {
             call("/rest/v1/profiles", "POST",
                 JSONObject().put("id", uid).put("display_name", display).put("avatar_url", "🙂").toString(),
                 prefer = "return=minimal")
-            return UserProfile(uid, display, "", "🙂")
+            return UserProfile(uid, display, "", "🙂", "", null)
         }
         val p = raw.getJSONObject(0)
-        return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"))
+        return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
     }
 
-    suspend fun updateMyProfile(displayName: String, avatar: String) {
+    suspend fun updateMyProfile(displayName: String, avatar: String, bio: String = "", age: Int? = null) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val payload = JSONObject().put("display_name", displayName.trim()).put("avatar_url", avatar)
+        if (age != null && age !in 13..120) throw IOException("Возраст должен быть от 13 до 120 лет")
+        val payload = JSONObject()
+            .put("display_name", displayName.trim())
+            .put("avatar_url", avatar)
+            .put("bio", bio.trim().take(160))
+            .put("age", age ?: JSONObject.NULL)
         call("/rest/v1/profiles?id=eq.$uid", "PATCH", payload.toString(), prefer = "return=minimal")
+    }
+
+    suspend fun userProfile(userId: String): UserProfile {
+        val id = normalizeUuid(userId)
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$id&limit=1"))
+        if (raw.length() == 0) throw IOException("Профиль пользователя не найден")
+        val p = raw.getJSONObject(0)
+        return UserProfile(
+            p.optString("id"),
+            p.optString("display_name").ifBlank { p.optString("username").ifBlank { "Пользователь" } },
+            p.optString("username"),
+            p.optString("avatar_url").ifBlank { "🙂" },
+            p.optString("bio"),
+            if (p.isNull("age")) null else p.optInt("age")
+        )
+    }
+
+    suspend fun uploadAvatar(bytes: ByteArray, mimeType: String): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) throw IOException("Фото должно быть не больше 5 МБ")
+        val ext = when (mimeType.lowercase()) {
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            else -> "jpg"
+        }
+        val path = "$uid/avatar-${UUID.randomUUID()}.$ext"
+        val request = Request.Builder()
+            .url("$BASE_URL/storage/v1/object/nexura-avatars/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
+            .header("Content-Type", mimeType)
+            .header("x-upsert", "true")
+            .post(bytes.toRequestBody(mimeType.toMediaType()))
+            .build()
+        client.newCall(request).execute().use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить фото профиля (HTTP ${it.code})")
+        }
+        return "$BASE_URL/storage/v1/object/public/nexura-avatars/$path"
     }
 
     suspend fun matchContacts(phoneNumbers: List<String>): List<ContactMatch> {
