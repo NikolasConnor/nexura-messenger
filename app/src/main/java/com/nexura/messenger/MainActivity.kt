@@ -216,10 +216,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 } else {
                     api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!)
                 }
-                messages = messages.filterNot { it.id == messageId } + MessageItem(
-                    messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
-                    encrypted = true
-                )
+                messages = api.messages(chat.id, client)
                 notice = "Медиа отправлено с E2EE-шифрованием"
             } catch (e: Exception) {
                 encrypted?.file?.delete()
