@@ -615,7 +615,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         if (homeTab == "contacts") {
-                            Column(Modifier.fillMaxSize().padding(top = 12.dp)) {
+                            Column(Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp)) {
                                 Text("Контакты", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold)
                                 Text("Найдём знакомых, которые уже используют Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
                                 Card(colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
@@ -765,76 +765,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         }
-                        NavigationBar(
-                            modifier = Modifier.fillMaxWidth(),
-                            containerColor = Surface1,
-                            tonalElevation = 0.dp
-                        ) {
-                            NavigationBarItem(
-                                selected = homeTab == "chats",
-                                onClick = { homeTab = "chats"; createGroupOpen = false },
-                                icon = { Icon(Icons.Default.ChatBubbleOutline, contentDescription = null) },
-                                label = { Text("Чаты") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Accent,
-                                    selectedTextColor = Accent,
-                                    indicatorColor = Accent.copy(alpha = 0.14f),
-                                    unselectedIconColor = SecondaryText,
-                                    unselectedTextColor = SecondaryText
-                                )
-                            )
-                            NavigationBarItem(
-                                selected = homeTab == "contacts",
-                                onClick = { homeTab = "contacts"; createGroupOpen = false },
-                                icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
-                                label = { Text("Контакты") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Accent,
-                                    selectedTextColor = Accent,
-                                    indicatorColor = Accent.copy(alpha = 0.14f),
-                                    unselectedIconColor = SecondaryText,
-                                    unselectedTextColor = SecondaryText
-                                )
-                            )
-                            NavigationBarItem(
-                                selected = homeTab == "search",
-                                onClick = { homeTab = "search"; createGroupOpen = false },
-                                icon = { Icon(Icons.Default.Search, contentDescription = null) },
-                                label = { Text("Поиск") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Accent,
-                                    selectedTextColor = Accent,
-                                    indicatorColor = Accent.copy(alpha = 0.14f),
-                                    unselectedIconColor = SecondaryText,
-                                    unselectedTextColor = SecondaryText
-                                )
-                            )
-                            NavigationBarItem(
-                                selected = settingsOpen,
-                                onClick = {
-                                    settingsOpen = true
-                                    error = ""; notice = ""
-                                    scope.launch {
-                                        try {
-                                            val p = api.myProfile()
-                                            profileName = p.displayName
-                                            profileAvatar = p.avatar.ifBlank { "🙂" }
-                                        } catch (e: Exception) {
-                                            error = e.message ?: "Не удалось загрузить профиль"
-                                        }
-                                    }
-                                },
-                                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                label = { Text("Профиль") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Accent,
-                                    selectedTextColor = Accent,
-                                    indicatorColor = Accent.copy(alpha = 0.14f),
-                                    unselectedIconColor = SecondaryText,
-                                    unselectedTextColor = SecondaryText
-                                )
-                            )
-                        }
+                        NexuraBottomBar(
+                            selected = homeTab,
+                            profileSelected = false,
+                            onSelect = { tab -> homeTab = tab; settingsOpen = false; createGroupOpen = false },
+                            onProfile = {
+                                settingsOpen = true
+                                error = ""; notice = ""
+                                scope.launch {
+                                    try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } }
+                                    catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" }
+                                }
+                            }
+                        )
                     }
                 }
                 else -> {
@@ -1170,6 +1113,60 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun NexuraBottomBar(
+    selected: String,
+    profileSelected: Boolean,
+    onSelect: (String) -> Unit,
+    onProfile: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+        color = Color(0xFF171F2D),
+        shape = RoundedCornerShape(24.dp),
+        shadowElevation = 12.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.07f))
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            val items = listOf(
+                Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline),
+                Triple("contacts", "Контакты", Icons.Default.GroupAdd),
+                Triple("search", "Поиск", Icons.Default.Search)
+            )
+            items.forEach { (key, label, icon) ->
+                val active = selected == key && !profileSelected
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                        .clip(RoundedCornerShape(17.dp))
+                        .background(if (active) Accent.copy(alpha = 0.16f) else Color.Transparent)
+                        .clickable { onSelect(key) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp))
+                    Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight()
+                    .clip(RoundedCornerShape(17.dp))
+                    .background(if (profileSelected) Accent.copy(alpha = 0.16f) else Color.Transparent)
+                    .clickable { onProfile() },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
+                Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }
