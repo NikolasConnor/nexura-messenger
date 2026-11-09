@@ -583,6 +583,11 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Сначала проверьте отпечаток отправителя группы")
         }
         val myDeviceId = e2ee.deviceId()
+        if (senderId == uid) {
+            if (envelope.senderDeviceId != myDeviceId) throw IOException("Сообщение отправлено с другого устройства")
+            return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
+                ?: throw IOException("Локальная копия группового сообщения недоступна")
+        }
         val recipient = envelope.recipients.singleOrNull {
             it.userId == uid && it.deviceId == myDeviceId
         } ?: throw IOException("Это групповое сообщение не адресовано данному устройству")
