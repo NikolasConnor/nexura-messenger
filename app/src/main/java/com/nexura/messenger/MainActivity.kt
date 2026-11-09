@@ -788,7 +788,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
-                                Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка · E2EE", color = SecondaryText, fontSize = 12.sp)
+                                Text(
+                                    if (chat.kind == "group") "Групповой чат · E2EE пока недоступно"
+                                    else "Личная переписка · требуется проверка устройства",
+                                    color = SecondaryText,
+                                    fontSize = 12.sp
+                                )
                             }
                             IconButton(onClick = {
                                 scope.launch {
@@ -803,7 +808,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 }
                             }, enabled = chat.kind == "direct") {
-                                Icon(Icons.Default.Lock, "Проверить шифрование", tint = Accent)
+                                Icon(Icons.Default.Lock, "Проверить устройство", tint = Accent)
                             }
                             IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id, e2eeClient) } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" } } }) {
                                 Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
