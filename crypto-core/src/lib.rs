@@ -199,7 +199,7 @@ mod tests {
     fn two_independent_devices_establish_and_exchange_messages() {
         let (alice, alice_public) = create_device_keys(0);
         let (mut bob, bob_public) = create_device_keys(1);
-        let bob_otk = bob_public.one_time_keys.first().expect("Bob OTK");
+        let bob_otk = &bob_public.one_time_keys.first().expect("Bob OTK").key;
 
         let (mut alice_session, first_envelope) = start_outbound_session(
             &alice,
@@ -282,10 +282,10 @@ mod tests {
 
         let alice_account_restored = unpickle_account(&pickle_account(&alice).unwrap()).unwrap();
         assert_eq!(alice_account_restored.identity_keys(), alice.identity_keys());
-        let bob_session_restored = unpickle_session(&pickle_session(&bob_session).unwrap()).unwrap();
+        let mut bob_session_restored = unpickle_session(&pickle_session(&bob_session).unwrap()).unwrap();
         let alice_session_restored = unpickle_session(&pickle_session(&alice_session).unwrap()).unwrap();
 
-        let reply = encrypt_message(&mut bob_session_restored.clone(), b"after restore").unwrap();
+        let reply = encrypt_message(&mut bob_session_restored, b"after restore").unwrap();
         let mut alice_restored = alice_session_restored;
         assert_eq!(decrypt_message(&mut alice_restored, &reply).unwrap(), b"after restore");
     }
