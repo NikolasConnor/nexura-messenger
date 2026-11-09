@@ -154,3 +154,5 @@ The generic-push source in this branch is not deployed to Supabase. Production c
 ### Production safety rule
 
 Do not merge or deploy this branch as a complete secure messenger until the latest Android instrumentation tests pass, the migration has been reviewed and applied to a staging project, two real accounts have completed a fingerprint-verified encrypted exchange, and media/group/multi-device limitations are clearly surfaced to users. Production rollout must be a separately approved action.
+
+- Production push-function note: the currently deployed Supabase `send-chat-push` version 4 still accepts an optional `preview` field and forwards it to FCM. The current E2EE branch client sends only `conversation_id`, so this client does not provide message text; the branch Edge Function source ignores previews and always sends generic notification text. The safe Edge Function source is not yet deployed. Before E2EE rollout, deploy the generic-only function and verify old clients cannot supply previews.
