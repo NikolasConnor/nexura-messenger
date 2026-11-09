@@ -498,7 +498,10 @@ class NexuraApi(private val store: SessionStore) {
         val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
         for (memberId in members) {
             val devices = activeE2eeDevices(memberId).filterNot { memberId == uid && it.deviceId == ownDeviceId }
-            if (devices.isEmpty()) throw IOException("У участника $memberId нет активного E2EE-устройства. Отправка остановлена.")
+            if (devices.isEmpty()) {
+                if (memberId == uid) continue
+                throw IOException("У участника $memberId нет активного E2EE-устройства. Отправка остановлена.")
+            }
             for (device in devices) {
                 if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
                     throw IOException("Устройство участника использует неподдерживаемый протокол")
