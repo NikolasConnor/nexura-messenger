@@ -496,8 +496,8 @@ class NexuraApi(private val store: SessionStore) {
         val own = JSONObject(e2ee.ensureDevice())
         val ownDeviceId = own.getString("device_id")
         val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
-        for (memberId in members.filter { it != uid }) {
-            val devices = activeE2eeDevices(memberId)
+        for (memberId in members) {
+            val devices = activeE2eeDevices(memberId).filterNot { memberId == uid && it.deviceId == ownDeviceId }
             if (devices.isEmpty()) throw IOException("У участника $memberId нет активного E2EE-устройства. Отправка остановлена.")
             for (device in devices) {
                 if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
@@ -546,8 +546,8 @@ class NexuraApi(private val store: SessionStore) {
         if (currentMembers.toSet() != members.toSet()) {
             throw IOException("Состав группы изменился во время отправки. Повторите отправку.")
         }
-        for (memberId in members.filter { it != uid }) {
-            val currentDevices = activeE2eeDevices(memberId)
+        for (memberId in members) {
+            val currentDevices = activeE2eeDevices(memberId).filterNot { memberId == uid && it.deviceId == ownDeviceId }
             val sentDevices = recipients.filter { it.userId == memberId }
             if (currentDevices.map { it.deviceId }.toSet() != sentDevices.map { it.deviceId }.toSet() ||
                 currentDevices.any { device ->
@@ -603,10 +603,9 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Идентичность отправителя группы не подтверждена")
         }
         val myDeviceId = e2ee.deviceId()
-        if (senderId == uid) {
+        if (senderId == uid && envelope.senderDeviceId == myDeviceId) {
             val own = JSONObject(e2ee.ensureDevice())
-            if (envelope.senderDeviceId != myDeviceId ||
-                sender.optString("curve25519_key") != own.optString("curve25519") ||
+            if (sender.optString("curve25519_key") != own.optString("curve25519") ||
                 sender.optString("ed25519_key") != own.optString("ed25519")) {
                 throw IOException("Идентичность отправляющего устройства не совпадает")
             }
