@@ -506,13 +506,21 @@ class NexuraApi(private val store: SessionStore) {
                 if (!e2ee.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)) {
                     throw IOException("Не подтверждён отпечаток устройства участника $memberId. Отправка остановлена.")
                 }
-                val ciphertext: String
-                val kind: E2eeMessageEnvelope.Kind
-                if (e2ee.hasGroupSession(chatId, memberId, device.deviceId)) {
-                    ciphertext = e2ee.encryptGroupMessage(
+                val pending = e2ee.pendingGroupEnvelope(chatId, messageId, memberId, device.deviceId)
+                if (pending != null) {
+                    val cached = e2ee.cachedMessage(chatId, messageId)
+                        ?: throw IOException("Не найдена локальная копия ожидающего группового сообщения")
+                    if (!cached.contentEquals(plaintext.toByteArray(Charsets.UTF_8))) {
+                        throw IOException("Текст не совпадает с ожидающим групповым E2EE-сообщением")
+                    }
+                    recipients += pending
+                } else if (e2ee.hasGroupSession(chatId, memberId, device.deviceId)) {
+                    val ciphertext = e2ee.encryptGroupMessage(
                         chatId, memberId, device.deviceId, plaintext.toByteArray(Charsets.UTF_8), messageId
                     )
-                    kind = E2eeMessageEnvelope.Kind.NORMAL
+                    recipients += E2eeGroupRecipientEnvelope(
+                        memberId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, ciphertext
+                    )
                 } else {
                     val preKey = consumeE2eePreKey(chatId, memberId, device.deviceId)
                     if (preKey.optString("ed25519_key") != device.ed25519Key ||
@@ -524,13 +532,14 @@ class NexuraApi(private val store: SessionStore) {
                     if (!e2ee.verifyPublishedOneTimeKey(device.ed25519Key, device.curve25519Key, otk, signature)) {
                         throw IOException("Подпись одноразового ключа участника недействительна")
                     }
-                    ciphertext = e2ee.startGroupSession(
+                    val ciphertext = e2ee.startGroupSession(
                         chatId, memberId, device.deviceId, device.curve25519Key, device.ed25519Key,
                         otk, signature, plaintext.toByteArray(Charsets.UTF_8), messageId
                     )
-                    kind = E2eeMessageEnvelope.Kind.PRE_KEY
+                    recipients += E2eeGroupRecipientEnvelope(
+                        memberId, device.deviceId, E2eeMessageEnvelope.Kind.PRE_KEY, ciphertext
+                    )
                 }
-                recipients += E2eeGroupRecipientEnvelope(memberId, device.deviceId, kind, ciphertext)
             }
         }
         val envelope = E2eeGroupMessageEnvelope(
@@ -551,6 +560,7 @@ class NexuraApi(private val store: SessionStore) {
             saved.getJSONObject(0).optString("content") != envelope) {
             throw IOException("Сервер не подтвердил сохранение группового E2EE-сообщения")
         }
+        e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         notifyChatPush(chatId)
     }
 
