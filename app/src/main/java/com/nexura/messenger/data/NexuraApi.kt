@@ -216,6 +216,8 @@ class NexuraApi(private val store: SessionStore) {
             .put("device_id", deviceId)
             .put("curve25519_key", curveKey)
             .put("ed25519_key", edKey)
+            .put("protocol", bundle.optString("protocol", "olm-v1"))
+            .put("bundle_version", bundle.optInt("bundle_version", 1))
             .put("is_active", true)
         call(
             "/rest/v1/e2ee_devices?on_conflict=user_id,device_id",
@@ -225,13 +227,15 @@ class NexuraApi(private val store: SessionStore) {
         )
 
         val existingDevice = JSONArray(call(
-            "/rest/v1/e2ee_devices?select=curve25519_key,ed25519_key,is_active" +
+            "/rest/v1/e2ee_devices?select=curve25519_key,ed25519_key,protocol,bundle_version,is_active" +
                 "&user_id=eq.$uid&device_id=eq.$deviceId&limit=1"
         ))
         if (existingDevice.length() != 1) throw IOException("Не удалось подтвердить регистрацию E2EE-устройства")
         val storedDevice = existingDevice.getJSONObject(0)
         if (storedDevice.optString("curve25519_key") != curveKey ||
             storedDevice.optString("ed25519_key") != edKey ||
+            storedDevice.optString("protocol") != bundle.optString("protocol", "olm-v1") ||
+            storedDevice.optInt("bundle_version") != bundle.optInt("bundle_version", 1) ||
             !storedDevice.optBoolean("is_active")) {
             throw IOException("Ключи E2EE-устройства не совпадают с сохранённой регистрацией")
         }
