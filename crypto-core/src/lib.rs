@@ -292,6 +292,20 @@ mod tests {
     }
 
     #[test]
+    fn one_time_key_signature_is_bound_to_curve25519_device_identity() {
+        let (_account, public) = create_device_keys(1);
+        let key = public.one_time_keys.first().expect("one-time key");
+        verify_signed_one_time_key(&public.ed25519, &public.curve25519, key)
+            .expect("signature must verify for the original Curve25519 identity");
+
+        let (_other_account, other_public) = create_device_keys(0);
+        assert!(
+            verify_signed_one_time_key(&public.ed25519, &other_public.curve25519, key).is_err(),
+            "a valid Ed25519 signature must not authorize substituting another Curve25519 identity"
+        );
+    }
+
+    #[test]
     fn one_time_key_batches_can_be_replenished_after_publication() {
         let (mut account, public) = create_device_keys(2);
         assert_eq!(public.one_time_keys.len(), 2);
