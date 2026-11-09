@@ -22,11 +22,22 @@ import javax.crypto.spec.GCMParameterSpec
  * This class is deliberately not wired into message sending yet. Integration must
  * wait until the Rust/Kotlin protocol bridge and restore/replay tests are complete.
  */
-class E2eeStateStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PREFS_NAME,
-        Context.MODE_PRIVATE
-    )
+class E2eeStateStore(context: Context, userNamespace: String) {
+    private val keyAlias: String
+    private val preferences: android.content.SharedPreferences
+
+    init {
+        require(userNamespace.isNotBlank()) { "userNamespace must not be blank" }
+        val suffix = MessageDigest.getInstance("SHA-256")
+            .digest(userNamespace.toByteArray(Charsets.UTF_8))
+            .take(8)
+            .joinToString("") { "%02x".format(it) }
+        keyAlias = "$KEY_ALIAS_PREFIX$suffix"
+        preferences = context.applicationContext.getSharedPreferences(
+            "$PREFS_PREFIX$suffix",
+            Context.MODE_PRIVATE
+        )
+    }
 
     @Synchronized
     @Throws(GeneralSecurityException::class)
@@ -91,17 +102,17 @@ class E2eeStateStore(context: Context) {
     fun clearAll() {
         check(preferences.edit().clear().commit()) { "Unable to clear encrypted E2EE states" }
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-        if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)
+        if (keyStore.containsAlias(keyAlias)) keyStore.deleteEntry(keyAlias)
     }
 
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (keyStore.getKey(keyAlias, null) as? SecretKey)?.let { return it }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
         generator.init(
             KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
+                keyAlias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
                 .setKeySize(256)
@@ -123,9 +134,9 @@ class E2eeStateStore(context: Context) {
     }
 
     private companion object {
-        const val PREFS_NAME = "nexura_e2ee_state_v1"
+        const val PREFS_PREFIX = "nexura_e2ee_state_v1_"
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
-        const val KEY_ALIAS = "nexura_e2ee_state_aes_v1"
+        const val KEY_ALIAS_PREFIX = "nexura_e2ee_state_aes_v1_"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val VERSION = "v1"
         const val AAD_PREFIX = "nexura-e2ee-state:v1:"
