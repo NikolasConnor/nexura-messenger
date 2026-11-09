@@ -101,9 +101,8 @@ class CallCoordinator(
         startKeepAlive(video)
         scope.launch {
             try {
-                val iceServers = api.turnIceServers(expectedCallId, ownUserId, peerUserId)
                 if (closed || callId != expectedCallId) return@launch
-                createEngine(video, iceServers)
+                createEngine(video)
                 engine?.createOffer(
                     onReady = { sdp ->
                         val signal = JSONObject().put("type", "offer").put("call_id", callId)
@@ -159,9 +158,8 @@ class CallCoordinator(
         startKeepAlive(videoMode)
         scope.launch {
             try {
-                val iceServers = api.turnIceServers(expectedCallId, ownUserId, peerUserId)
                 if (closed || callId != expectedCallId) return@launch
-                createEngine(videoMode, iceServers)
+                createEngine(videoMode)
                 engine?.acceptOffer(
                     offer,
                     onReady = { sdp ->
@@ -245,14 +243,15 @@ class CallCoordinator(
 
     fun sharedEglContext(): org.webrtc.EglBase.Context? = engine?.sharedEglContext()
 
-    private fun createEngine(video: Boolean, iceConfig: List<com.nexura.messenger.data.TurnIceServerConfig>) {
+    // STUN-only configuration: no external TURN provider is used.
+    // This preserves direct connectivity where NAT permits it; restrictive networks
+    // may require a self-hosted TURN relay in a later, separately tested change.
+    private fun createEngine(video: Boolean) {
         engine?.close()
-        val iceServers = iceConfig.map { server ->
-            PeerConnection.IceServer.builder(server.urls).apply {
-                server.username?.let { setUsername(it) }
-                server.credential?.let { setPassword(it) }
-            }.createIceServer()
-        }
+        val iceServers = listOf(
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+        )
         engine = NexuraCallEngine(
             context, video, iceServers,
             onLocalIce = { candidate ->
