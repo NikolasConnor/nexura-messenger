@@ -290,6 +290,23 @@ mod tests {
     }
 
     #[test]
+    fn one_time_key_batches_can_be_replenished_after_publication() {
+        let (mut account, public) = create_device_keys(2);
+        assert_eq!(public.one_time_keys.len(), 2);
+        mark_keys_as_published(&mut account);
+
+        let next_batch = generate_additional_one_time_keys(&mut account, 3);
+        assert_eq!(next_batch.len(), 3);
+        for key in &next_batch {
+            verify_signed_one_time_key(&public.ed25519, key)
+                .expect("replenished OTK must use the same device identity");
+        }
+
+        mark_keys_as_published(&mut account);
+        assert!(generate_additional_one_time_keys(&mut account, 0).is_empty());
+    }
+
+    #[test]
     fn account_and_session_pickles_restore_protocol_state() {
         let (alice, alice_public) = create_device_keys(0);
         let (mut bob, bob_public) = create_device_keys(1);
