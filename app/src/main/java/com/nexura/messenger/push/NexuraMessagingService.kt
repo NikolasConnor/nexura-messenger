@@ -120,21 +120,21 @@ class NexuraMessagingService : FirebaseMessagingService() {
 
         try {
             NotificationManagerCompat.from(this).notify(notificationId, builder.build())
-            if (incomingCall && conversationId != null && callId != null &&
-                getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE).let { prefs ->
-                    prefs.getBoolean("activity_visible", false) &&
-                        prefs.getString("active_chat_id", null) != conversationId
-                }
-            ) {
-                val launch = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    action = "com.nexura.messenger.INCOMING_CALL"
-                    data = Uri.parse("nexura://chat/$conversationId?call=1&action=show")
-                }
-                startActivity(launch)
-            }
         } catch (_: SecurityException) {
-            // Notifications are disabled by the user; call signaling remains available in-app.
+            // Notifications may be disabled; foreground presentation can still open the call UI.
+        }
+        if (incomingCall && conversationId != null && callId != null &&
+            getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE).let { prefs ->
+                prefs.getBoolean("activity_visible", false) &&
+                    prefs.getString("active_chat_id", null) != conversationId
+            }
+        ) {
+            val launch = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                action = "com.nexura.messenger.INCOMING_CALL"
+                data = Uri.parse("nexura://chat/$conversationId?call=1&action=show")
+            }
+            runCatching { startActivity(launch) }
         }
     }
 
