@@ -66,7 +66,7 @@ data class E2eeMessageEnvelope(
         }
 
         fun isEnvelope(raw: String): Boolean =
-            runCatching { JSONObject(raw).optString("protocol") == PROTOCOL }.getOrDefault(false)
+            runCatching { JSONObject(raw).optString("protocol").startsWith("nexura-") }.getOrDefault(false)
 
         private fun requireUuid(value: String, field: String): String {
             require(value.isNotBlank()) { "Missing $field" }
