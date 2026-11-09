@@ -46,6 +46,7 @@ class CallCoordinator(
     private var remoteDescriptionSet = false
     private var localDescriptionSignaled = false
     private var offerRetryJob: Job? = null
+    private var ringTimeoutJob: Job? = null
 
     fun connect(token: String) {
         signaling?.close()
@@ -87,6 +88,17 @@ class CallCoordinator(
                             delay(3_000)
                             if (callId == null || remoteDescriptionSet || closed) return@launch
                             send(signal)
+                        }
+                    }
+                    ringTimeoutJob?.cancel()
+                    val ringingCallId = callId
+                    ringTimeoutJob = scope.launch {
+                        delay(35_000)
+                        if (callId == ringingCallId && !remoteDescriptionSet && !closed) {
+                            send(JSONObject().put("type", "end").put("call_id", ringingCallId)
+                                .put("from", ownUserId).put("to", peerUserId))
+                            finish(false)
+                            publish(CallUiState(status = "Нет ответа"))
                         }
                     }
                 }
@@ -136,6 +148,8 @@ class CallCoordinator(
                 publish(CallUiState(status = "Входящий видеозвонок".takeIf { pendingVideo } ?: "Входящий звонок", incoming = true, video = pendingVideo))
             }
             "answer" -> if (id == callId) {
+                ringTimeoutJob?.cancel()
+                ringTimeoutJob = null
                 offerRetryJob?.cancel()
                 engine?.acceptAnswer(
                     signal.optString("sdp"),
@@ -257,6 +271,8 @@ class CallCoordinator(
     private fun finish(closeSignaling: Boolean = true) {
         offerRetryJob?.cancel()
         offerRetryJob = null
+        ringTimeoutJob?.cancel()
+        ringTimeoutJob = null
         runCatching { context.stopService(Intent(context, CallKeepAliveService::class.java)) }
         engine?.close()
         engine = null
