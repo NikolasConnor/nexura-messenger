@@ -256,9 +256,7 @@ class NexuraApi(private val store: SessionStore) {
                             throw IOException("Версия протокола устройства не поддерживается")
                         }
                         if (curve != envelope.senderCurve25519) throw IOException("Идентичность отправителя не совпадает")
-                        if (!client.isRemoteDeviceTrusted(senderId, envelope.senderDeviceId, curve, ed)) {
-                            throw IOException("Сначала проверьте отпечаток устройства отправителя")
-                        }
+                        client.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, curve, ed)
                         val cached = client.cachedMessage(chatId, id)
                         val plaintext = cached ?: when (envelope.kind) {
                             E2eeMessageEnvelope.Kind.PRE_KEY -> client.acceptDirectSession(
@@ -532,9 +530,7 @@ class NexuraApi(private val store: SessionStore) {
                 if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
                     throw IOException("Устройство участника использует неподдерживаемый протокол")
                 }
-                if (!e2ee.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)) {
-                    throw IOException("Не подтверждён отпечаток устройства участника $memberId. Отправка остановлена.")
-                }
+                e2ee.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
                 val pending = e2ee.pendingGroupEnvelope(chatId, messageId, memberId, device.deviceId)
                 if (pending != null) {
                     val cached = e2ee.cachedMessage(chatId, messageId)
@@ -580,7 +576,7 @@ class NexuraApi(private val store: SessionStore) {
             val sentDevices = recipients.filter { it.userId == memberId }
             if (currentDevices.map { it.deviceId }.toSet() != sentDevices.map { it.deviceId }.toSet() ||
                 currentDevices.any { device ->
-                    !e2ee.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
+                    runCatching { e2ee.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key) }.isFailure
                 }) {
                 throw IOException("Список устройств или ключи участника изменились во время отправки. Повторите отправку.")
             }
@@ -642,10 +638,7 @@ class NexuraApi(private val store: SessionStore) {
             return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
                 ?: throw IOException("Локальная копия группового сообщения недоступна")
         }
-        if (!e2ee.isRemoteDeviceTrusted(senderId, envelope.senderDeviceId,
-                sender.optString("curve25519_key"), sender.optString("ed25519_key"))) {
-            throw IOException("Сначала проверьте отпечаток отправителя группы")
-        }
+        e2ee.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, sender.optString("curve25519_key"), sender.optString("ed25519_key"))
         val recipient = envelope.recipients.singleOrNull {
             it.userId == uid && it.deviceId == myDeviceId
         } ?: throw IOException("Это групповое сообщение не адресовано данному устройству")
@@ -718,11 +711,7 @@ class NexuraApi(private val store: SessionStore) {
             activeDevices.single().ed25519Key != recipient.ed25519Key) {
             throw IOException("Состав или ключи устройств собеседника изменились. Проверьте отпечаток повторно.")
         }
-        if (!e2ee.isRemoteDeviceTrusted(
-                recipient.userId, recipient.deviceId, recipient.curve25519Key, recipient.ed25519Key
-            )) {
-            throw IOException("Сначала сверьте и подтвердите отпечаток устройства собеседника")
-        }
+        e2ee.trustRemoteDeviceOnFirstUse(recipient.userId, recipient.deviceId, recipient.curve25519Key, recipient.ed25519Key)
 
         val ownBundle = JSONObject(e2ee.ensureDevice())
         val ownDeviceId = ownBundle.getString("device_id")
