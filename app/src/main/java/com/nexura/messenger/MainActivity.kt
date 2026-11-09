@@ -304,7 +304,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 replyTarget = null
                 pendingSecureMessageId = null
                 pendingSecureMessageText = null
-                messages = api.messages(chat.id, client)
+                val sent = MessageItem(
+                    messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
+                    "text", replyToId, encrypted = true, securityWarning = false
+                )
+                messages = (messages + sent).distinctBy { it.id }.sortedBy { it.createdAt }
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось отправить защищённое сообщение"
             } finally {
