@@ -819,9 +819,13 @@ class NexuraApi(private val store: SessionStore) {
     }
 
     suspend fun registerPushToken(token: String) {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        val payload = JSONObject().put("user_id", uid).put("token", token).put("platform", "android").put("updated_at", java.time.Instant.now().toString())
-        call("/rest/v1/device_tokens?on_conflict=token", "POST", payload.toString(), prefer = "resolution=merge-duplicates,return=minimal")
+        if (store.userId.isNullOrBlank()) throw IOException("Сессия истекла")
+        if (token.length !in 20..4096) throw IOException("Некорректный токен уведомлений")
+        call(
+            "/rest/v1/rpc/register_own_device_token",
+            "POST",
+            JSONObject().put("p_token", token).toString()
+        )
     }
 
     // Push notifications must never contain message text, sender names, or media details.
