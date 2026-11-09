@@ -92,7 +92,7 @@ fun NexuraCallDialog(
     LaunchedEffect(chat.id) {
         try {
             val peerId = api.directPeerUserId(chat.id)
-            coordinator = CallCoordinator(context, chat.id, ownUserId, peerId) { ui = it }
+            coordinator = CallCoordinator(context, chat.id, ownUserId, peerId, api) { ui = it }
             coordinator?.connect(accessToken)
         } catch (e: Exception) {
             ui = ui.copy(status = "Не удалось подготовить звонок", error = e.message)
