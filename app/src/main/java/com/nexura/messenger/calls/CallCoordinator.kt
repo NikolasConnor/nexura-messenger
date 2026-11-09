@@ -85,8 +85,7 @@ class CallCoordinator(
                 remoteDescriptionSet = true
                 val signal = JSONObject().put("type", "answer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
-                send(signal)
-                flushIce()
+                if (!send(signal)) publish(CallUiState(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
                 publish(CallUiState(status = "На связи", active = true, video = videoMode))
             },
             onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
@@ -148,7 +147,7 @@ class CallCoordinator(
         engine = NexuraCallEngine(
             context, video,
             onLocalIce = { candidate ->
-                if (callId != null) {
+                if (callId != null && remoteDescriptionSet) {
                     send(JSONObject().put("type", "ice").put("call_id", callId)
                         .put("from", ownUserId).put("to", peerUserId)
                         .put("candidate", JSONObject().put("candidate", candidate.sdp)
@@ -215,6 +214,8 @@ class CallCoordinator(
         pendingCallId = null
         callId = null
         remoteDescriptionSet = false
+        videoMode = false
+        ready = false
         queuedIce.clear()
         queuedRemoteIce.clear()
         if (closeSignaling) signaling?.close()
