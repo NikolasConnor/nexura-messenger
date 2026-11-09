@@ -100,6 +100,7 @@ class E2eeClientInstrumentedTest {
             true,
             bob.verifyPublishedOneTimeKey(
                 bundle.getString("ed25519"),
+                bundle.getString("curve25519"),
                 first.getString("key"),
                 first.getString("signature")
             )
@@ -109,6 +110,7 @@ class E2eeClientInstrumentedTest {
             runCatching {
                 bob.verifyPublishedOneTimeKey(
                     bundle.getString("ed25519"),
+                    bundle.getString("curve25519"),
                     first.getString("key") + "A",
                     first.getString("signature")
                 )
