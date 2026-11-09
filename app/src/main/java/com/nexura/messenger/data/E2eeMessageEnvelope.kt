@@ -78,3 +78,86 @@ data class E2eeMessageEnvelope(
         }
     }
 }
+
+
+/**
+ * Group Olm fan-out: a separate ciphertext is created for every active,
+ * verified recipient device. No shared plaintext/group key is stored server-side.
+ */
+data class E2eeGroupRecipientEnvelope(
+    val userId: String,
+    val deviceId: String,
+    val kind: E2eeMessageEnvelope.Kind,
+    val ciphertext: String
+)
+
+data class E2eeGroupMessageEnvelope(
+    val conversationId: String,
+    val senderUserId: String,
+    val senderDeviceId: String,
+    val senderCurve25519: String,
+    val recipients: List<E2eeGroupRecipientEnvelope>
+) {
+    fun encode(): String {
+        require(recipients.isNotEmpty() && recipients.size <= MAX_RECIPIENTS)
+        val entries = org.json.JSONArray()
+        recipients.forEach { recipient ->
+            entries.put(JSONObject()
+                .put("user_id", recipient.userId)
+                .put("device_id", recipient.deviceId)
+                .put("kind", recipient.kind.wireValue)
+                .put("ciphertext", recipient.ciphertext))
+        }
+        return JSONObject()
+            .put("protocol", PROTOCOL)
+            .put("conversation_id", conversationId)
+            .put("sender_user_id", senderUserId)
+            .put("sender_device_id", senderDeviceId)
+            .put("sender_curve25519", senderCurve25519)
+            .put("recipients", entries)
+            .toString()
+    }
+
+    companion object {
+        const val PROTOCOL = "nexura-olm-group-v1"
+        const val MAX_RECIPIENTS = 64
+        private const val MAX_TOTAL_CHARS = 2 * 1024 * 1024
+
+        fun isEnvelope(raw: String): Boolean =
+            runCatching { JSONObject(raw).optString("protocol") == PROTOCOL }.getOrDefault(false)
+
+        fun decode(raw: String): E2eeGroupMessageEnvelope {
+            require(raw.length in 1..MAX_TOTAL_CHARS) { "Group E2EE envelope is too large" }
+            val json = JSONObject(raw)
+            require(json.optString("protocol") == PROTOCOL) { "Unsupported group E2EE protocol" }
+            val conversationId = requireUuid(json.optString("conversation_id"), "conversation_id")
+            val senderUserId = requireUuid(json.optString("sender_user_id"), "sender_user_id")
+            val senderDeviceId = requireUuid(json.optString("sender_device_id"), "sender_device_id")
+            val senderCurve = json.optString("sender_curve25519")
+            require(senderCurve.length in 40..64 && senderCurve.matches(Regex("^[A-Za-z0-9+/]+={0,2}$"))) {
+                "Invalid group sender identity key"
+            }
+            val rows = json.optJSONArray("recipients") ?: throw IllegalArgumentException("Missing recipients")
+            require(rows.length() in 1..MAX_RECIPIENTS) { "Invalid group recipient count" }
+            val seen = mutableSetOf<String>()
+            val recipients = (0 until rows.length()).map { index ->
+                val row = rows.getJSONObject(index)
+                val userId = requireUuid(row.optString("user_id"), "recipient user_id")
+                val deviceId = requireUuid(row.optString("device_id"), "recipient device_id")
+                require(seen.add("$userId:$deviceId")) { "Duplicate group recipient device" }
+                val ciphertext = row.optString("ciphertext")
+                require(ciphertext.isNotBlank() && ciphertext.length <= 64 * 1024) { "Invalid recipient ciphertext" }
+                E2eeGroupRecipientEnvelope(
+                    userId, deviceId, E2eeMessageEnvelope.Kind.fromWire(row.optString("kind")), ciphertext
+                )
+            }
+            return E2eeGroupMessageEnvelope(
+                conversationId, senderUserId, senderDeviceId, senderCurve, recipients
+            )
+        }
+
+        private fun requireUuid(value: String, field: String): String =
+            try { UUID.fromString(value).toString() }
+            catch (error: Exception) { throw IllegalArgumentException("Invalid $field", error) }
+    }
+}
