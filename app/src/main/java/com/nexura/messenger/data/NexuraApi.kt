@@ -747,8 +747,8 @@ class NexuraApi(private val store: SessionStore) {
                     ?: throw IOException("Не найдена локальная копия ожидающего сообщения")
                 if (!cached.contentEquals(bytes)) throw IOException("Текст не совпадает с ожидающим сообщением")
                 recipients += saved
-            } else if (e2ee.hasGroupSession(chatId, peerId, device.deviceId)) {
-                val cipher = e2ee.encryptGroupMessage(chatId, peerId, device.deviceId, bytes, messageId)
+            } else if (e2ee.hasGroupSession(chatId, device.userId, device.deviceId)) {
+                val cipher = e2ee.encryptGroupMessage(chatId, device.userId, device.deviceId, bytes, messageId)
                 recipients += E2eeGroupRecipientEnvelope(device.userId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, cipher)
             } else {
                 val preKey = consumeE2eePreKey(chatId, device.userId, device.deviceId)
