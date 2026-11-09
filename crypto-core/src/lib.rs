@@ -1,9 +1,10 @@
-//! Isolated Olm 1:1 protocol proof of concept for Nexura.
+//! Olm protocol implementation used by Nexura's Android E2EE client.
 //!
-//! This crate is bridged into Android through JNI but is not wired into production message flow.
-//! Callers must verify peer identity keys out-of-band before creating a session.
-//! Pickles contain secret state and MUST be encrypted with a unique key protected
-//! by Android Keystore before persistence. Never log plaintext, keys, or pickles.
+//! This crate is bridged into Android through JNI and is used by the direct- and
+//! group-message encryption flows. Callers must verify peer identity keys
+//! out-of-band before creating a session. Pickles contain secret state and MUST
+//! be encrypted with a unique key protected by Android Keystore before
+//! persistence. Never log plaintext, keys, or pickles.
 
 use serde_json;
 use vodozemac::olm::{Account, AccountPickle, OlmMessage, Session, SessionConfig, SessionPickle};

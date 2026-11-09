@@ -545,7 +545,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Text("Отпечаток этого устройства", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp))
                                     Text(client.deviceFingerprint(bundle.getString("curve25519"), bundle.getString("ed25519")), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
-                                Text("Для защиты переписки сравните отпечатки устройств лично или по другому доверенному каналу. Группы и вложения пока не поддерживают E2EE.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
+                                Text("Сравните отпечатки устройств лично или по другому доверенному каналу. Текст, фото и видео шифруются до отправки. В личном чате пока поддерживается одно активное устройство собеседника.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
                             }
                         }
                         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {

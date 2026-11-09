@@ -6,9 +6,9 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 /**
- * Experimental 1:1 Olm facade. Not connected to NexuraApi or chat UI yet.
+ * Olm E2EE client used by NexuraApi for direct and group conversations.
  *
- * All account/session pickles are encrypted at rest by E2eeStateStore before
+ * Account/session pickles are encrypted at rest by E2eeStateStore before
  * persistence. The server-facing public bundle contains no private material.
  */
 class E2eeClient(context: Context, userId: String) {
