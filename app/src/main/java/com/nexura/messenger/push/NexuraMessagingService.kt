@@ -10,6 +10,7 @@ import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -99,7 +100,9 @@ class NexuraMessagingService : FirebaseMessagingService() {
             val fullScreenIntent = callPendingIntent(baseUri, "show", notificationId + 1)
             val acceptIntent = callPendingIntent(baseUri, "accept", notificationId + 2)
             val declineIntent = callPendingIntent(baseUri, "decline", notificationId + 3)
+            val caller = Person.Builder().setName("Входящий звонок").setImportant(true).build()
             builder
+                .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declineIntent, acceptIntent))
                 .setFullScreenIntent(fullScreenIntent, true)
                 .setOngoing(true)
                 .setTimeoutAfter(CALL_RING_TIMEOUT_MS)
@@ -117,6 +120,17 @@ class NexuraMessagingService : FirebaseMessagingService() {
 
         try {
             NotificationManagerCompat.from(this).notify(notificationId, builder.build())
+            if (incomingCall && conversationId != null && callId != null &&
+                getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE)
+                    .getBoolean("activity_visible", false)
+            ) {
+                val launch = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    action = "com.nexura.messenger.INCOMING_CALL"
+                    data = Uri.parse("nexura://chat/$conversationId?call=1&action=show")
+                }
+                startActivity(launch)
+            }
         } catch (_: SecurityException) {
             // Notifications are disabled by the user; call signaling remains available in-app.
         }
@@ -166,6 +180,11 @@ class NexuraMessagingService : FirebaseMessagingService() {
     }
 
     companion object {
+        fun cancelIncomingCall(context: Context, conversationId: String) {
+            val id = runCatching { UUID.fromString(conversationId).toString().hashCode() }.getOrNull() ?: return
+            NotificationManagerCompat.from(context).cancel(id)
+        }
+
         const val CALL_CHANNEL_ID = "nexura_incoming_calls_v2"
         private const val MESSAGE_CHANNEL_ID = "nexura_messages"
         private const val CALL_RING_TIMEOUT_MS = 35_000L
