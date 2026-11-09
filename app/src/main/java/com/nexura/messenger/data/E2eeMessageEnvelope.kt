@@ -1,0 +1,81 @@
+package com.nexura.messenger.data
+
+import org.json.JSONObject
+import java.util.UUID
+
+/**
+ * Strict transport wrapper for a direct Olm message.
+ * The wrapper is metadata only; the ciphertext is produced by vodozemac.
+ * Unknown versions and malformed envelopes are rejected (never treated as plaintext).
+ */
+data class E2eeMessageEnvelope(
+    val kind: Kind,
+    val conversationId: String,
+    val senderDeviceId: String,
+    val recipientDeviceId: String,
+    val senderCurve25519: String,
+    val ciphertext: String
+) {
+    enum class Kind(val wireValue: String) {
+        PRE_KEY("prekey"),
+        NORMAL("normal");
+
+        companion object {
+            fun fromWire(value: String): Kind =
+                entries.firstOrNull { it.wireValue == value }
+                    ?: throw IllegalArgumentException("Unsupported E2EE message kind")
+        }
+    }
+
+    fun encode(): String = JSONObject()
+        .put("protocol", PROTOCOL)
+        .put("kind", kind.wireValue)
+        .put("conversation_id", conversationId)
+        .put("sender_device_id", senderDeviceId)
+        .put("recipient_device_id", recipientDeviceId)
+        .put("sender_curve25519", senderCurve25519)
+        .put("ciphertext", ciphertext)
+        .toString()
+
+    companion object {
+        const val PROTOCOL = "nexura-olm-v1"
+        private const val MAX_CIPHERTEXT_CHARS = 64 * 1024
+
+        fun decode(raw: String): E2eeMessageEnvelope {
+            require(raw.length <= MAX_CIPHERTEXT_CHARS + 2048) { "E2EE envelope is too large" }
+            val json = JSONObject(raw)
+            require(json.optString("protocol") == PROTOCOL) { "Unsupported E2EE protocol version" }
+            val conversationId = requireUuid(json.optString("conversation_id"), "conversation_id")
+            val senderDeviceId = requireUuid(json.optString("sender_device_id"), "sender_device_id")
+            val recipientDeviceId = requireUuid(json.optString("recipient_device_id"), "recipient_device_id")
+            val senderCurve = json.optString("sender_curve25519")
+            require(senderCurve.length in 40..64 && senderCurve.matches(Regex("^[A-Za-z0-9+/]+={0,2}$"))) {
+                "Invalid sender identity key"
+            }
+            val ciphertext = json.optString("ciphertext")
+            require(ciphertext.isNotBlank() && ciphertext.length <= MAX_CIPHERTEXT_CHARS) {
+                "Invalid E2EE ciphertext length"
+            }
+            return E2eeMessageEnvelope(
+                kind = Kind.fromWire(json.optString("kind")),
+                conversationId = conversationId,
+                senderDeviceId = senderDeviceId,
+                recipientDeviceId = recipientDeviceId,
+                senderCurve25519 = senderCurve,
+                ciphertext = ciphertext
+            )
+        }
+
+        fun isEnvelope(raw: String): Boolean =
+            runCatching { JSONObject(raw).optString("protocol") == PROTOCOL }.getOrDefault(false)
+
+        private fun requireUuid(value: String, field: String): String {
+            require(value.isNotBlank()) { "Missing $field" }
+            return try {
+                UUID.fromString(value).toString()
+            } catch (error: IllegalArgumentException) {
+                throw IllegalArgumentException("Invalid $field", error)
+            }
+        }
+    }
+}
