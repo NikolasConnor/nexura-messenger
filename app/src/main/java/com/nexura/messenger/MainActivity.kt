@@ -904,6 +904,28 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             accessToken = store.accessToken!!,
                             visible = showCallDialog,
                             autoAction = pendingCallAction,
+                            onCallFinished = { duration, outgoing, video, result ->
+                                scope.launch {
+                                    try {
+                                        val client = e2eeClient ?: throw IllegalStateException("Не удалось сохранить историю звонка: E2EE не готово")
+                                        val record = org.json.JSONObject()
+                                            .put("kind", if (video) "video" else "audio")
+                                            .put("duration_seconds", duration)
+                                            .put("direction", if (outgoing) "outgoing" else "incoming")
+                                            .put("result", result)
+                                            .toString()
+                                        api.sendEncryptedDirectMessage(
+                                            chat.id, client, UUID.randomUUID().toString(), record,
+                                            messageType = "call"
+                                        )
+                                        if (selected?.id == chat.id) {
+                                            messages = api.messages(chat.id, client)
+                                        }
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Не удалось сохранить запись о звонке"
+                                    }
+                                }
+                            },
                             onDismiss = { showCallDialog = false; pendingCallAction = "show" }
                         )
                     }
