@@ -333,7 +333,7 @@ class NexuraApi(private val store: SessionStore) {
         val oneTimeKey = preKey.optString("one_time_key")
         val signature = preKey.optString("one_time_key_signature")
         if (oneTimeKey.isBlank() || signature.isBlank() ||
-            !e2ee.verifyPublishedOneTimeKey(identityKey, oneTimeKey, signature)) {
+            !e2ee.verifyPublishedOneTimeKey(identityKey, preKey.optString("curve25519_key"), oneTimeKey, signature)) {
             throw IOException("Подпись одноразового E2EE-ключа недействительна")
         }
         return e2ee.startDirectSession(
