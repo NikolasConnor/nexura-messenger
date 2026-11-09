@@ -129,6 +129,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chats by remember { mutableStateOf(emptyList<ChatItem>()) }
     var selected by remember { mutableStateOf<ChatItem?>(null) }
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var lastSyncedMessageTimestamp by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
@@ -269,10 +270,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     fun openChat(chat: ChatItem) {
         selected = chat
         messages = emptyList()
+        lastSyncedMessageTimestamp = null
         replyTarget = null
         scope.launch {
             try {
-                messages = api.messages(chat.id, e2eeClient)
+                val loadedMessages = api.messages(chat.id, e2eeClient)
+                if (selected?.id == chat.id) {
+                    messages = loadedMessages
+                    lastSyncedMessageTimestamp = loadedMessages.maxOfOrNull { it.createdAt }
+                }
                 api.markChatRead(chat.id)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
             } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
@@ -386,10 +392,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 try {
                     val currentChat = selected
                     if (currentChat != null) {
-                        val lastTimestamp = messages.maxOfOrNull { it.createdAt }
+                        val lastTimestamp = lastSyncedMessageTimestamp
                         val latest = api.messages(currentChat.id, e2eeClient, lastTimestamp)
                         if (selected?.id == currentChat.id && latest.isNotEmpty()) {
                             messages = (messages + latest).distinctBy { it.id }.sortedBy { it.createdAt }
+                            lastSyncedMessageTimestamp = maxOf(
+                                lastSyncedMessageTimestamp ?: latest.first().createdAt,
+                                latest.maxOf { it.createdAt }
+                            )
                         }
                     } else {
                         chats = api.chats()
