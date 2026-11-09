@@ -10,6 +10,7 @@ import org.json.JSONObject
 import android.os.Build
 import android.net.Uri
 import android.widget.VideoView
+import android.widget.MediaController
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -773,7 +774,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                                 if (mediaViewerType == "video") {
                                     AndroidView(
-                                        factory = { ctx -> VideoView(ctx).apply { setVideoURI(mediaViewerUri); setOnPreparedListener { player -> player.isLooping = false; start() } } },
+                                        factory = { ctx ->
+                                            VideoView(ctx).apply {
+                                                val playerControls = MediaController(ctx)
+                                                playerControls.setAnchorView(this)
+                                                setMediaController(playerControls)
+                                                setVideoURI(mediaViewerUri)
+                                                setOnPreparedListener { player -> player.isLooping = false; start() }
+                                            }
+                                        },
                                         modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                                     )
                                 } else {
