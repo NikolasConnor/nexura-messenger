@@ -276,7 +276,7 @@ fun NexuraCallDialog(
                         Text("Ответить", color = Color.White, fontSize = 12.sp)
                     }
                 }
-            } else if (ui.active) {
+            } else if (ui.active && ui.connected) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     CallControlButton(label = if (ui.muted) "Звук выкл." else "Микрофон", icon = if (ui.muted) Icons.Default.MicOff else Icons.Default.Mic, selected = ui.muted, onClick = { ui = ui.copy(muted = coordinator?.toggleMute() ?: !ui.muted) })
                     CallControlButton(label = if (ui.speaker) "Динамик вкл." else "Динамик", icon = if (ui.speaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff, selected = ui.speaker, onClick = { ui = ui.copy(speaker = coordinator?.toggleSpeaker() ?: !ui.speaker) })
@@ -297,7 +297,16 @@ fun NexuraCallDialog(
                         Text("Завершить", color = Color.White, fontSize = 11.sp)
                     }
                 }
-            }            } else {
+            }            } else if (ui.active) {
+                Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Соединяем звонок…", color = Color.White, fontSize = 14.sp)
+                    FilledIconButton(
+                        onClick = { coordinator?.end(); onDismiss() },
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFB83E4A)),
+                        modifier = Modifier.size(58.dp)
+                    ) { Icon(Icons.Default.CallEnd, "Отменить вызов", tint = Color.White) }
+                }
+            } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Button(onClick = { request("audio", false) }, enabled = coordinator != null && ui.status == "Готово к звонку" && !starting) {
                         Icon(Icons.Default.Call, null)
