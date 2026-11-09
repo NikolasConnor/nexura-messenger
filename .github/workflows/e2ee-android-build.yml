@@ -92,3 +92,5 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: warn
           retention-days: 7
+
+# Build verification includes native E2EE libraries and Android Kotlin compilation.
