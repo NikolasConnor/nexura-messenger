@@ -157,6 +157,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingSecureMessageId by remember { mutableStateOf<String?>(null) }
     var pendingSecureMessageText by remember { mutableStateOf<String?>(null) }
     var showCallDialog by remember { mutableStateOf(false) }
+    var pendingCallAction by remember { mutableStateOf(authCallback?.getQueryParameter("action") ?: "show") }
 
     fun syncContacts() {
         scope.launch {
@@ -324,6 +325,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 openChat(targetChat)
             }
             if (targetChat != null && authCallback?.getQueryParameter("call") == "1") {
+                pendingCallAction = authCallback.getQueryParameter("action") ?: "show"
                 showCallDialog = true
             }
         }
@@ -806,7 +808,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             ownUserId = store.userId!!,
                             accessToken = store.accessToken!!,
                             visible = showCallDialog,
-                            onDismiss = { showCallDialog = false }
+                            autoAction = pendingCallAction,
+                            onDismiss = { showCallDialog = false; pendingCallAction = "show" }
                         )
                     }
                     if (mediaViewerUri != null) {
