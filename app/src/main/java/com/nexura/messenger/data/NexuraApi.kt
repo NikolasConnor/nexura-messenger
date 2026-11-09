@@ -684,18 +684,9 @@ class NexuraApi(private val store: SessionStore) {
             .toString()
         val messageId = UUID.randomUUID().toString()
         try {
+            // If the POST committed but its read-back confirmation was interrupted,
+            // keep the ciphertext object: deleting it could break a valid message.
             sendEncryptedDirectMessage(chat, recipient, e2ee, messageId, payload, null, "media")
-        } catch (error: Exception) {
-            // Keep the encrypted object private; without a committed E2EE envelope
-            // it is an unreachable orphan and is removed best-effort.
-            withContext(Dispatchers.IO) {
-                val delete = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
-                    .header("apikey", PUBLIC_KEY)
-                    .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
-                    .delete().build()
-                runCatching { client.newCall(delete).execute().close() }
-            }
-            throw error
         } finally {
             encryptedMedia.file.delete()
         }
