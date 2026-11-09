@@ -38,6 +38,38 @@ class E2eeClient(context: Context, userId: String) {
         return String(publicBundleBytes, StandardCharsets.UTF_8)
     }
 
+    @Synchronized
+    fun deviceId(): String {
+        val bundle = store.load(PUBLIC_BUNDLE_KEY)
+            ?: error("E2EE device is not initialized")
+        return JSONObject(String(bundle, StandardCharsets.UTF_8)).getString("device_id")
+    }
+
+    @Synchronized
+    fun replenishOneTimeKeys(count: Int): String {
+        require(count in 1..50) { "count must be between 1 and 50" }
+        val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
+        val savedBundle = store.load(PUBLIC_BUNDLE_KEY)
+            ?: error("E2EE public bundle is missing")
+        val bundle = JSONObject(String(savedBundle, StandardCharsets.UTF_8))
+        val generated = E2eeNative.nativeGenerateOneTimeKeys(account, count)
+        require(generated.size == 2) { "Invalid native one-time-key result" }
+
+        val newKeys = org.json.JSONArray(String(generated[1], StandardCharsets.UTF_8))
+        for (index in 0 until newKeys.length()) {
+            newKeys.getJSONObject(index).put("key_id", UUID.randomUUID().toString())
+        }
+        val allKeys = bundle.getJSONArray("one_time_keys")
+        for (index in 0 until newKeys.length()) allKeys.put(newKeys.getJSONObject(index))
+        val updatedBundle = bundle.toString().toByteArray(StandardCharsets.UTF_8)
+
+        // Persist the account and public bundle before any network request. A
+        // failed upload can safely be retried with the same stable key IDs.
+        store.save(ACCOUNT_KEY, generated[0])
+        store.save(PUBLIC_BUNDLE_KEY, updatedBundle)
+        return String(updatedBundle, StandardCharsets.UTF_8)
+    }
+
     /**
      * Call only after Supabase confirms the public one-time-key bundle was saved.
      * This prevents the same private OTKs from being republished after restart.
