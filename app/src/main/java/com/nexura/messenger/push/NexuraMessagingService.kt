@@ -16,6 +16,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.nexura.messenger.MainActivity
 import java.util.UUID
+import kotlinx.coroutines.launch
 
 class NexuraMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
@@ -36,8 +37,8 @@ class NexuraMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val data = message.data
-        val incomingCall = data["type"] == "incoming_call"
+        val payload = message.data
+        val incomingCall = payload["type"] == "incoming_call"
         val conversationId = data["conversation_id"]?.let { raw ->
             runCatching { UUID.fromString(raw).toString() }.getOrNull()
         }
