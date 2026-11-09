@@ -12,6 +12,8 @@ internal object E2eeNative {
 
     external fun nativeCreateDevice(oneTimeKeyCount: Int): Array<ByteArray>
 
+    external fun nativeGenerateOneTimeKeys(accountPickle: ByteArray, count: Int): Array<ByteArray>
+
     external fun nativeMarkKeysPublished(accountPickle: ByteArray): ByteArray
 
     external fun nativeVerifyOneTimeKey(
