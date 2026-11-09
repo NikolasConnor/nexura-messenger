@@ -1200,7 +1200,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 val parent = messages.firstOrNull { it.id == msg.replyToId }
                                                 Text("↪ Ответ: ${parent?.content?.take(70) ?: "сообщение"}", color = Accent, fontSize = 11.sp, modifier = Modifier.padding(bottom = 5.dp))
                                             }
-                                            if (msg.messageType == "media" && msg.encrypted) {
+                                            if (msg.messageType == "call" && msg.encrypted) {
+                                                val call = runCatching { org.json.JSONObject(msg.content) }.getOrNull()
+                                                val video = call?.optString("kind") == "video"
+                                                val outgoing = call?.optString("direction") == "outgoing"
+                                                val duration = call?.optLong("duration_seconds", 0L) ?: 0L
+                                                val minutes = duration / 60L
+                                                val seconds = duration % 60L
+                                                val result = call?.optString("result").orEmpty()
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                    Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF253C56)), contentAlignment = Alignment.Center) {
+                                                        Icon(if (video) Icons.Default.Videocam else Icons.Default.Call, null, tint = Color.White)
+                                                    }
+                                                    Column {
+                                                        Text(
+                                                            (if (outgoing) "Исходящий " else "Входящий ") + if (video) "видеозвонок" else "аудиозвонок",
+                                                            color = MainText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+                                                        )
+                                                        Text(
+                                                            (if (result == "completed") "Разговор · " else "Без соединения · ") + String.format("%02d:%02d", minutes, seconds),
+                                                            color = SecondaryText, fontSize = 12.sp
+                                                        )
+                                                    }
+                                                }
+                                            } else if (msg.messageType == "media" && msg.encrypted) {
                                                 val mediaUri = Uri.parse(msg.content)
                                                 if (msg.mediaKind == "video") {
                                                     Box(
