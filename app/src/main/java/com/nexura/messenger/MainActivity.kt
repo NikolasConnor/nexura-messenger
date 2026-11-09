@@ -847,12 +847,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
-                    if (showCallDialog && chat.kind == "direct" && !store.userId.isNullOrBlank() && !store.accessToken.isNullOrBlank()) {
+                    if (chat.kind == "direct" && !store.userId.isNullOrBlank() && !store.accessToken.isNullOrBlank()) {
                         NexuraCallDialog(
                             api = api,
                             chat = chat,
                             ownUserId = store.userId!!,
                             accessToken = store.accessToken!!,
+                            visible = showCallDialog,
                             onDismiss = { showCallDialog = false }
                         )
                     }
