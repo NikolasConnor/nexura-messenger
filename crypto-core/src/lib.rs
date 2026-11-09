@@ -228,7 +228,7 @@ mod tests {
     fn tampered_ciphertext_is_rejected() {
         let (alice, alice_public) = create_device_keys(0);
         let (mut bob, bob_public) = create_device_keys(1);
-        let bob_otk = bob_public.one_time_keys.first().expect("Bob OTK");
+        let bob_otk = &bob_public.one_time_keys.first().expect("Bob OTK").key;
 
         let (mut alice_session, first_envelope) = start_outbound_session(
             &alice,
