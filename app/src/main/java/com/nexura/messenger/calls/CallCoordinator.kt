@@ -38,29 +38,6 @@ class CallCoordinator(
     private val queuedIce = mutableListOf<IceCandidate>()
     private var remoteDescriptionSet = false
 
-    fun connect() {
-        signaling = CallSignalingClient(
-            projectRef = "lyhzawblxcvpgpjrkspc",
-            apiKey = com.nexura.messenger.data.NexuraApi.PUBLIC_KEY,
-            accessToken = "", // replaced immediately by the authenticated session token below
-            ownUserId = ownUserId,
-            peerUserId = peerUserId,
-            onSignal = { signal -> scope.launch { receive(signal) } },
-            onReady = {
-                scope.launch {
-                    ready = true
-                    publish(CallUiState(status = "Готово к звонку"))
-                }
-            },
-            onError = { message -> scope.launch { publish(CallUiState(status = "Ошибка связи", error = message)) } }
-        )
-    }
-
-    fun setAccessToken(token: String) {
-        // The Realtime socket authenticates at channel join; it must be created with
-        // the current Supabase access token, so callers should use connect(token).
-    }
-
     fun connect(token: String) {
         signaling?.close()
         signaling = CallSignalingClient(
