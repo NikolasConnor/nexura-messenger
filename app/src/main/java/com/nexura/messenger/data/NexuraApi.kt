@@ -7,6 +7,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import java.io.File
+import java.io.FileOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -218,7 +222,7 @@ class NexuraApi(private val store: SessionStore) {
             val replyTo = m.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }
             val edited = m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" }
 
-            if (type == "text" && E2eeMessageEnvelope.isEnvelope(content)) {
+            if (type in setOf("text", "media") && E2eeMessageEnvelope.isEnvelope(content)) {
                 val decrypted = try {
                     val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
                     val envelope = E2eeMessageEnvelope.decode(content)
@@ -258,12 +262,21 @@ class NexuraApi(private val store: SessionStore) {
                 } catch (error: Exception) {
                     null
                 }
+                val mediaJson = if (type == "media" && decrypted != null) E2eeMediaCrypto.parsePayload(decrypted) else null
+                val mediaUri = if (mediaJson != null) {
+                    runCatching { downloadAndDecryptMedia(mediaJson, id) }.getOrNull()
+                } else null
                 MessageItem(
                     id, senderId,
-                    decrypted ?: "🔒 Сообщение зашифровано. Проверьте устройство или восстановите защищённую сессию.",
+                    when {
+                        decrypted == null -> "🔒 Сообщение зашифровано. Проверьте устройство или восстановите защищённую сессию."
+                        type == "media" && mediaUri == null -> "⚠ Не удалось проверить или открыть медиафайл"
+                        type == "media" -> mediaUri!!
+                        else -> decrypted
+                    },
                     m.optString("created_at"), type, replyTo, edited,
-                    encrypted = decrypted != null,
-                    securityWarning = decrypted == null
+                    encrypted = decrypted != null && (type != "media" || mediaUri != null),
+                    securityWarning = decrypted == null || (type == "media" && mediaUri == null)
                 )
             } else {
                 val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
@@ -481,7 +494,8 @@ class NexuraApi(private val store: SessionStore) {
         e2ee: E2eeClient,
         messageId: String,
         plaintext: String,
-        replyToId: String? = null
+        replyToId: String? = null,
+        messageType: String = "text"
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val chatId = normalizeUuid(conversationId)
@@ -547,7 +561,7 @@ class NexuraApi(private val store: SessionStore) {
             .put("id", normalizeUuid(messageId))
             .put("conversation_id", chatId)
             .put("sender_id", uid)
-            .put("message_type", "text")
+            .put("message_type", messageType)
             .put("content", envelope)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         call(
@@ -612,24 +626,127 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("deleted_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
     }
-    private suspend fun signedAttachmentUrl(path: String): String {
+    private suspend fun signedAttachmentUrl(path: String, bucket: String = "chat-attachments"): String {
         val now = System.currentTimeMillis()
         signedUrlCache[path]?.let { cached ->
             if (cached.second > now) return cached.first
             signedUrlCache.remove(path, cached)
         }
         val payload = JSONObject().put("expiresIn", 3600)
-        val result = JSONObject(call("/storage/v1/object/sign/chat-attachments/$path", "POST", payload.toString()))
+        val result = JSONObject(call("/storage/v1/object/sign/$bucket/$path", "POST", payload.toString()))
         val signed = result.optString("signedURL").ifBlank { result.optString("signedUrl") }
-        if (signed.isBlank()) throw IOException("Не удалось получить ссылку на изображение")
+        if (signed.isBlank()) throw IOException("Не удалось получить ссылку на медиафайл")
         val url = if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
         if (signedUrlCache.size > 500) signedUrlCache.clear()
         signedUrlCache[path] = url to (now + 55 * 60 * 1000L)
         return url
     }
 
+    suspend fun sendEncryptedMediaMessage(
+        chatId: String,
+        recipient: E2eeRemoteDevice,
+        e2ee: E2eeClient,
+        encryptedMedia: EncryptedMediaFile
+    ) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) throw IOException("Зашифрованный файл превышает лимит Storage")
+        val chat = normalizeUuid(chatId)
+        val fileId = UUID.randomUUID().toString()
+        val path = "$chat/$uid/$fileId.enc"
+        val mediaType = if (encryptedMedia.mimeType.startsWith("video/")) "video" else "image"
+        val uploadRequest = Request.Builder()
+            .url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: throw IOException("Сессия истекла")}")
+            .header("x-upsert", "false")
+            .post(encryptedMedia.file.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
+            .build()
+        val upload = withContext(Dispatchers.IO) { client.newCall(uploadRequest).execute() }
+        upload.use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить зашифрованное медиа (HTTP ${it.code})")
+        }
+
+        val payload = JSONObject()
+            .put("schema", "nexura-media-v1")
+            .put("path", path)
+            .put("mime", encryptedMedia.mimeType)
+            .put("media_type", mediaType)
+            .put("name", encryptedMedia.fileName)
+            .put("size", encryptedMedia.plainSize)
+            .put("key", encryptedMedia.keyBase64)
+            .put("iv", encryptedMedia.ivBase64)
+            .put("cipher_sha256", encryptedMedia.cipherSha256)
+            .toString()
+        val messageId = UUID.randomUUID().toString()
+        try {
+            sendEncryptedDirectMessage(chat, recipient, e2ee, messageId, payload, null, "media")
+        } catch (error: Exception) {
+            // Keep the encrypted object private; without a committed E2EE envelope
+            // it is an unreachable orphan and is removed best-effort.
+            withContext(Dispatchers.IO) {
+                val delete = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
+                    .header("apikey", PUBLIC_KEY)
+                    .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
+                    .delete().build()
+                runCatching { client.newCall(delete).execute().close() }
+            }
+            throw error
+        } finally {
+            encryptedMedia.file.delete()
+        }
+    }
+
+    private suspend fun downloadAndDecryptMedia(payload: JSONObject, messageId: String): String {
+        val path = payload.getString("path")
+        val cached = File(storeMediaCacheDir(), "$messageId.dec")
+        if (cached.exists() && cached.length() > 0) return android.net.Uri.fromFile(cached).toString()
+        val url = signedAttachmentUrl(path, "nexura-chat-media")
+        val request = Request.Builder().url(url).get().build()
+        val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+        val encrypted = File.createTempFile("nexura-download-", ".enc", storeMediaCacheDir())
+        try {
+            response.use {
+                if (!it.isSuccessful) throw IOException("Не удалось скачать медиа (HTTP ${it.code})")
+                val body = it.body ?: throw IOException("Пустой ответ Storage")
+                withContext(Dispatchers.IO) {
+                    body.byteStream().use { input ->
+                        FileOutputStream(encrypted).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            var total = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                total += read
+                                if (total > 25L * 1024L * 1024L) throw IOException("Зашифрованный файл слишком большой")
+                                output.write(buffer, 0, read)
+                            }
+                        }
+                    }
+                }
+            }
+            withContext(Dispatchers.IO) {
+                E2eeMediaCrypto.decryptFile(
+                    encrypted, cached, payload.getString("key"), payload.getString("iv"),
+                    payload.getString("cipher_sha256")
+                )
+            }
+            return android.net.Uri.fromFile(cached).toString()
+        } catch (error: Exception) {
+            cached.delete()
+            throw error
+        } finally {
+            encrypted.delete()
+        }
+    }
+
+    private fun storeMediaCacheDir(): File = File(
+        java.io.File(System.getProperty("java.io.tmpdir") ?: "/data/local/tmp"),
+        "nexura-media-cache"
+    ).also { if (!it.exists()) it.mkdirs() }
+
+    @Deprecated("Use sendEncryptedMediaMessage; plaintext media uploads are disabled.")
     suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String): Nothing {
-        throw IOException("Отправка вложений временно отключена: клиентское E2EE-шифрование файлов ещё не готово.")
+        throw IOException("Открытая загрузка медиа отключена. Используйте E2EE.")
     }
 
     suspend fun myProfile(): UserProfile {
