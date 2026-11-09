@@ -449,6 +449,25 @@ class NexuraApi(private val store: SessionStore) {
         )
     }
 
+    /** Atomically consumes a group member device OTK after verifying both users belong to the group. */
+    suspend fun consumeGroupE2eePreKey(
+        conversationId: String,
+        recipientUserId: String,
+        recipientDeviceId: String
+    ): JSONObject {
+        val rows = JSONArray(call(
+            "/rest/v1/rpc/consume_group_e2ee_one_time_key",
+            "POST",
+            JSONObject()
+                .put("p_conversation_id", normalizeUuid(conversationId))
+                .put("p_recipient_user_id", normalizeUuid(recipientUserId))
+                .put("p_device_id", normalizeUuid(recipientDeviceId))
+                .toString()
+        ))
+        if (rows.length() != 1) throw IOException("Не удалось получить одноразовый групповой E2EE-ключ")
+        return rows.getJSONObject(0)
+    }
+
     /** Atomically consumes one recipient OTK only when both users share this chat. */
     suspend fun consumeE2eePreKey(
         conversationId: String,
@@ -532,7 +551,7 @@ class NexuraApi(private val store: SessionStore) {
                         memberId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, ciphertext
                     )
                 } else {
-                    val preKey = consumeE2eePreKey(chatId, memberId, device.deviceId)
+                    val preKey = consumeGroupE2eePreKey(chatId, memberId, device.deviceId)
                     if (preKey.optString("ed25519_key") != device.ed25519Key ||
                         preKey.optString("curve25519_key") != device.curve25519Key) {
                         throw IOException("Ключ устройства участника изменился. Отправка отменена.")
