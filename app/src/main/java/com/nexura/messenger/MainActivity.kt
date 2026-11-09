@@ -67,13 +67,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
-private val Bg = Color(0xFF0B1220)
-private val Surface1 = Color(0xFF151F30)
-private val Surface2 = Color(0xFF202D42)
-private val Accent = Color(0xFF75B7FF)
-private val Accent2 = Color(0xFF8C9EFF)
-private val MainText = Color(0xFFF4F6FC)
-private val SecondaryText = Color(0xFFA7B4C8)
+private val Bg = Color(0xFF0D1118)
+private val Surface1 = Color(0xFF171D27)
+private val Surface2 = Color(0xFF242D3A)
+private val Accent = Color(0xFF78AFFF)
+private val Accent2 = Color(0xFF8E9DDA)
+private val MainText = Color(0xFFF5F7FB)
+private val SecondaryText = Color(0xFFA4AFBF)
 private val Danger = Color(0xFFFF858D)
 private val Success = Color(0xFF8DDEB0)
 
@@ -541,29 +541,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("Nexura", fontSize = 29.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.5).sp)
-                                Text("Всегда на связи", color = SecondaryText, fontSize = 13.sp)
+                                Text("Nexura", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
+                                Text("Общение без лишнего", color = SecondaryText, fontSize = 13.sp)
                             }
-                            IconButton(onClick = { showChatFilter = !showChatFilter; if (!showChatFilter) chatFilter = "" }) {
-                                Icon(Icons.Default.Search, "Поиск по чатам", tint = MainText)
+                            IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) {
+                                Icon(Icons.Default.GroupAdd, "Создать группу", tint = MainText)
                             }
-                            IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) { Icon(Icons.Default.GroupAdd, "Создать группу", tint = Accent) }
                             IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                 Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                             }
                         }
-                        if (homeTab == "chats" && showChatFilter) {
+                        if (homeTab == "chats") {
                             OutlinedTextField(
                                 value = chatFilter,
                                 onValueChange = { chatFilter = it },
-                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 8.dp),
                                 singleLine = true,
-                                placeholder = { Text("Поиск по вашим чатам") },
+                                placeholder = { Text("Поиск по чатам", fontSize = 14.sp) },
                                 leadingIcon = { Icon(Icons.Default.Search, null, tint = SecondaryText) },
                                 trailingIcon = {
-                                    if (chatFilter.isNotBlank()) TextButton(onClick = { chatFilter = "" }) { Text("Очистить") }
+                                    if (chatFilter.isNotBlank()) IconButton(onClick = { chatFilter = "" }) {
+                                        Text("×", color = SecondaryText, fontSize = 22.sp)
+                                    }
                                 },
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 colors = authFieldColors()
                             )
                         }
@@ -636,12 +637,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         if (homeTab == "search") {
+                        Text("Найти людей", color = MainText, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 5.dp))
+                        Text("По имени или отображаемому имени", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(bottom = 14.dp))
                         OutlinedTextField(
                             value = search, onValueChange = { search = it; users = emptyList() },
-                            modifier = Modifier.fillMaxWidth(), placeholder = { Text("Найти человека по имени") },
+                            modifier = Modifier.fillMaxWidth(), placeholder = { Text("Например, Алексей") },
                             leadingIcon = { Icon(Icons.Default.Search, null, tint = SecondaryText) },
-                            trailingIcon = { if (search.isNotBlank()) TextButton(onClick = { search = ""; users = emptyList() }) { Text("Сбросить") } },
-                            singleLine = true, shape = RoundedCornerShape(16.dp), colors = authFieldColors(),
+                            trailingIcon = { if (search.isNotBlank()) IconButton(onClick = { search = ""; users = emptyList() }) { Text("×", color = SecondaryText, fontSize = 22.sp) } },
+                            singleLine = true, shape = RoundedCornerShape(18.dp), colors = authFieldColors(),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = {
                                 if (search.length >= 2) scope.launch { searching = true; try { users = api.findUsers(search) } catch (e: Exception) { error = e.message ?: "Поиск недоступен" }; searching = false }
@@ -650,14 +653,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Button(
                             onClick = { scope.launch { searching = true; error = ""; try { users = api.findUsers(search) } catch (e: Exception) { error = e.message ?: "Поиск недоступен" }; searching = false } },
                             enabled = search.length >= 2 && !searching,
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(44.dp),
-                            shape = RoundedCornerShape(14.dp)
-                        ) { Text(if (searching) "Ищем…" else "Найти пользователя") }
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(48.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) { Text(if (searching) "Ищем…" else "Найти человека") }
                         if (users.isNotEmpty()) {
                             Text("Результаты поиска", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
                             users.forEach { user ->
                                 Row(
-                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surface1).clickable {
                                         scope.launch {
                                             try {
                                                 val id = api.createDirect(user.id)
@@ -678,9 +681,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         }
                         if (homeTab == "chats") {
-                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Недавние", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            Text("${visibleChats.size} чатов", color = SecondaryText, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Сообщения", color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("${visibleChats.size}", color = SecondaryText, fontSize = 12.sp)
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         if (visibleChats.isEmpty()) {
@@ -700,21 +703,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
                                 items(visibleChats, key = { it.id }) { chat ->
                                     Row(
-                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable { openChat(chat) }.padding(vertical = 13.dp, horizontal = 9.dp),
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { openChat(chat) }.padding(horizontal = 6.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
-                                        Column(Modifier.weight(1f).padding(start = 13.dp)) {
-                                            Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
-                                            Text(if (chat.kind == "group") "Групповой чат · Открыть переписку" else "Личный чат · Открыть переписку", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
+                                        Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
+                                            Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1)
+                                            Text(if (chat.kind == "group") "Группа" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
                                         }
                                         if (chat.unreadCount > 0) {
                                             Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 4.dp)) {
                                                 Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                             }
-                                        } else Text("›", color = SecondaryText, fontSize = 24.sp)
+                                        } else Icon(Icons.Default.ArrowBack, null, tint = SecondaryText.copy(alpha = 0.55f), modifier = Modifier.size(16.dp))
                                     }
-                                    HorizontalDivider(color = Surface1)
+                                    HorizontalDivider(color = Surface1.copy(alpha = 0.9f), modifier = Modifier.padding(start = 70.dp))
                                 }
                             }
                         }
@@ -1121,7 +1124,7 @@ private fun Avatar(name: String, avatar: String? = null) {
     val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
     val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
         ?: name.takeIf { it in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙") }
-    Box(Modifier.size(54.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(50.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
         when {
             imageUrl != null -> AsyncImage(model = imageUrl, contentDescription = "Аватар $name", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             !emoji.isNullOrBlank() -> Text(emoji, fontSize = 23.sp)
