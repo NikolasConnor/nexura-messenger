@@ -71,6 +71,25 @@ class E2eeClientInstrumentedTest {
     }
 
     @Test
+    fun encryptedStateIsIsolatedBetweenUsersAndConversationKeys() {
+        val firstUser = "state-test-${UUID.randomUUID()}"
+        val secondUser = "state-test-${UUID.randomUUID()}"
+        val firstStore = E2eeStateStore(context, firstUser)
+        val secondStore = E2eeStateStore(context, secondUser)
+        val secretState = "opaque Olm pickle".toByteArray(StandardCharsets.UTF_8)
+
+        try {
+            firstStore.save("conversation-a", secretState)
+            assertArrayEquals(secretState, firstStore.load("conversation-a"))
+            assertEquals(null, secondStore.load("conversation-a"))
+            assertEquals(null, firstStore.load("conversation-b"))
+        } finally {
+            firstStore.clearAll()
+            secondStore.clearAll()
+        }
+    }
+
+    @Test
     fun oneTimeKeySignatureTamperingIsRejected() {
         val (_, bob) = newClient()
         val bundle = JSONObject(bob.ensureDevice())
