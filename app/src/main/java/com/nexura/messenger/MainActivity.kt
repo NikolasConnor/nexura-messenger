@@ -197,7 +197,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalStateException("Не удалось прочитать изображение")
                     api.sendImageMessage(selected!!.id, bytes, mime)
-                    messages = api.messages(selected!!.id)
+                    messages = api.messages(selected!!.id, e2eeClient)
                 } catch (e: Exception) {
                     error = e.message ?: "Не удалось отправить изображение"
                 } finally {
