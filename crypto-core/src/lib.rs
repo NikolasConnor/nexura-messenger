@@ -1,6 +1,6 @@
 //! Isolated Olm 1:1 protocol proof of concept for Nexura.
 //!
-//! This crate is not wired into the Android app or production message flow.
+//! This crate is bridged into Android through JNI but is not wired into production message flow.
 //! Callers must verify peer identity keys out-of-band before creating a session.
 //! Pickles contain secret state and MUST be encrypted with a unique key protected
 //! by Android Keystore before persistence. Never log plaintext, keys, or pickles.
