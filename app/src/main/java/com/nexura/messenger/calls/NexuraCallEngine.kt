@@ -2,6 +2,7 @@ package com.nexura.messenger.calls
 
 import android.content.Context
 import android.media.AudioManager
+import android.media.AudioDeviceInfo
 import android.os.Build
 import com.nexura.messenger.BuildConfig
 import org.webrtc.AudioSource
@@ -33,6 +34,7 @@ class NexuraCallEngine(
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val previousAudioMode = audioManager.mode
     private val previousSpeakerState = audioManager.isSpeakerphoneOn
+    private val previousCommunicationDevice = if (Build.VERSION.SDK_INT >= 31) audioManager.communicationDevice else null
     private val egl = EglBase.create()
     fun sharedEglContext(): EglBase.Context = egl.eglBaseContext
     private val factory: PeerConnectionFactory
@@ -47,7 +49,7 @@ class NexuraCallEngine(
 
     init {
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.isSpeakerphoneOn = videoEnabled
+        setSpeakerEnabled(videoEnabled)
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions()
         )
@@ -179,7 +181,23 @@ class NexuraCallEngine(
     }
 
     fun setMuted(muted: Boolean) { audioTrack.setEnabled(!muted) }
-    fun setSpeakerEnabled(enabled: Boolean) { audioManager.isSpeakerphoneOn = enabled }
+    fun setSpeakerEnabled(enabled: Boolean) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val devices = audioManager.availableCommunicationDevices
+            val bluetooth = devices.firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+            }
+            val target = if (enabled) {
+                devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            } else {
+                bluetooth ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+            }
+            if (target != null) audioManager.setCommunicationDevice(target)
+        } else {
+            @Suppress("DEPRECATION")
+            run { audioManager.isSpeakerphoneOn = enabled }
+        }
+    }
     fun setCameraEnabled(enabled: Boolean) { videoTrack?.setEnabled(enabled) }
     fun switchCamera() { capturer?.switchCamera(null) }
     fun localVideoTrack(): VideoTrack? = videoTrack
@@ -192,7 +210,16 @@ class NexuraCallEngine(
         runCatching { peer.close(); peer.dispose() }
         runCatching { audioTrack.dispose(); audioSource.dispose() }
         runCatching { videoTrack?.dispose(); videoSource?.dispose() }
-        runCatching { audioManager.isSpeakerphoneOn = previousSpeakerState; audioManager.mode = previousAudioMode }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 31) {
+                audioManager.clearCommunicationDevice()
+                previousCommunicationDevice?.let { audioManager.setCommunicationDevice(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                run { audioManager.isSpeakerphoneOn = previousSpeakerState }
+            }
+            audioManager.mode = previousAudioMode
+        }
         runCatching { factory.dispose(); egl.release() }
     }
 }
