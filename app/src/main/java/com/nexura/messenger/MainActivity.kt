@@ -711,21 +711,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
                                 items(visibleChats, key = { it.id }) { chat ->
                                     Row(
-                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { openChat(chat) }.padding(horizontal = 6.dp, vertical = 10.dp),
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                                            .clickable { openChat(chat) }
+                                            .padding(horizontal = 8.dp, vertical = 11.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
-                                        Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
-                                            Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1)
-                                            Text(if (chat.kind == "group") "Группа" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 1)
-                                        }
-                                        if (chat.unreadCount > 0) {
-                                            Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                                                Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Column(Modifier.weight(1f).padding(start = 13.dp, end = 8.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                                                Text(chatTimeLabel(chat.updated), color = if (chat.unreadCount > 0) Accent else SecondaryText, fontSize = 11.sp)
                                             }
-                                        } else Text("›", color = SecondaryText.copy(alpha = 0.7f), fontSize = 24.sp)
+                                            Row(Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
+                                                Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp), maxLines = 1)
+                                                Spacer(Modifier.weight(1f))
+                                                if (chat.unreadCount > 0) {
+                                                    Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 21.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
+                                                        Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                    HorizontalDivider(color = Surface1.copy(alpha = 0.9f), modifier = Modifier.padding(start = 70.dp))
+                                    HorizontalDivider(color = Surface1.copy(alpha = 0.9f), modifier = Modifier.padding(start = 72.dp))
                                 }
                             }
                         }
@@ -1096,6 +1105,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         }
     }
+}
+
+private fun chatTimeLabel(value: String?): String {
+    if (value.isNullOrBlank()) return ""
+    val time = value.substringAfter("T", "").take(5)
+    return if (time.length == 5) time else value.take(10)
 }
 
 @Composable
