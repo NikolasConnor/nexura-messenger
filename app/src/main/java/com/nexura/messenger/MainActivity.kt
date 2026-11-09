@@ -631,11 +631,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Text("В Nexura: $registered · Не зарегистрированы: ${deviceContacts.size - registered}", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
                                     LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
                                         items(deviceContacts, key = { it.phone }) { person ->
-                                            Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                                    .clip(RoundedCornerShape(16.dp)).background(Surface1)
+                                                    .padding(horizontal = 11.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
                                                 if (person.match != null) Avatar(person.match.displayName, person.match.avatar) else Avatar(person.name, "👤")
-                                                Column(Modifier.weight(1f).padding(start = 11.dp)) {
-                                                    Text(person.match?.displayName ?: person.name, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                                    Text(if (person.match != null) "Уже в Nexura" else "Пока не зарегистрирован", color = if (person.match != null) Success else SecondaryText, fontSize = 11.sp)
+                                                Column(Modifier.weight(1f).padding(start = 11.dp, end = 4.dp)) {
+                                                    Text(person.match?.displayName ?: person.name, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                                                    Text(if (person.match != null) "Уже в Nexura" else "Можно пригласить", color = if (person.match != null) Success else SecondaryText, fontSize = 11.sp)
                                                 }
                                                 if (person.match != null) {
                                                     TextButton(onClick = {
@@ -646,10 +651,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 homeTab = "chats"
                                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
                                                         }
-                                                    }) { Text("Написать") }
-                                                } else TextButton(onClick = { inviteContact(person) }) { Text("Пригласить") }
+                                                    }) { Text("Написать", maxLines = 1) }
+                                                } else TextButton(onClick = { inviteContact(person) }) { Text("Пригласить", maxLines = 1) }
                                             }
-                                            HorizontalDivider(color = Surface1)
                                         }
                                     }
                                 } else Spacer(Modifier.weight(1f))
@@ -695,7 +699,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 loadChats()
                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
                                         }
-                                    }.padding(vertical = 9.dp, horizontal = 8.dp),
+                                    }.padding(vertical = 11.dp, horizontal = 11.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Avatar(user.displayName, user.avatar)
