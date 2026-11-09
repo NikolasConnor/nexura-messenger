@@ -268,7 +268,7 @@ class NexuraApi(private val store: SessionStore) {
                 }
                 val mediaJson = if (type == "media" && decrypted != null) E2eeMediaCrypto.parsePayload(decrypted) else null
                 val mediaUri = if (mediaJson != null) {
-                    runCatching { downloadAndDecryptMedia(mediaJson, id) }.getOrNull()
+                    runCatching { downloadAndDecryptMedia(mediaJson, id, chatId, senderId) }.getOrNull()
                 } else null
                 MessageItem(
                     id, senderId,
@@ -701,8 +701,18 @@ class NexuraApi(private val store: SessionStore) {
         }
     }
 
-    private suspend fun downloadAndDecryptMedia(payload: JSONObject, messageId: String): String {
+    private suspend fun downloadAndDecryptMedia(
+        payload: JSONObject,
+        messageId: String,
+        conversationId: String,
+        senderId: String
+    ): String {
         val path = payload.getString("path")
+        val pathParts = path.split("/")
+        if (pathParts.size != 3 || pathParts[0] != normalizeUuid(conversationId) ||
+            pathParts[1] != normalizeUuid(senderId)) {
+            throw IOException("Медиафайл не привязан к отправителю и этому чату")
+        }
         val cached = File(storeMediaCacheDir(), "$messageId.dec")
         if (cached.exists() && cached.length() > 0) return android.net.Uri.fromFile(cached).toString()
         val url = signedAttachmentUrl(path, "nexura-chat-media")
@@ -734,6 +744,10 @@ class NexuraApi(private val store: SessionStore) {
                     encrypted, cached, payload.getString("key"), payload.getString("iv"),
                     payload.getString("cipher_sha256")
                 )
+                if (cached.length() != payload.optLong("size", -1L)) {
+                    cached.delete()
+                    throw IOException("Размер расшифрованного медиа не совпадает с метаданными")
+                }
             }
             return android.net.Uri.fromFile(cached).toString()
         } catch (error: Exception) {
