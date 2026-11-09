@@ -27,6 +27,16 @@ class E2eeClient(context: Context) {
         return String(result[1], StandardCharsets.UTF_8)
     }
 
+    /**
+     * Call only after Supabase confirms the public one-time-key bundle was saved.
+     * This prevents the same private OTKs from being republished after restart.
+     */
+    @Synchronized
+    fun markPublicKeysPublished() {
+        val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
+        store.save(ACCOUNT_KEY, E2eeNative.nativeMarkKeysPublished(account))
+    }
+
     fun verifyPublishedOneTimeKey(
         ed25519IdentityKey: String,
         oneTimeKey: String,
