@@ -145,10 +145,15 @@ object E2eeMediaCrypto {
         val key = json.optString("key")
         val iv = json.optString("iv")
         val hash = json.optString("cipher_sha256")
-        require(path.matches(Regex("^[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}\\.enc$")))
+        val uuid = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        require(path.matches(Regex("^$uuid/$uuid/$uuid\\.enc$")))
         require(mime in setOf("image/jpeg", "image/png", "image/webp", "video/mp4"))
         require(kind == if (mime.startsWith("video/")) "video" else "image")
         require(key.isNotBlank() && iv.isNotBlank() && hash.matches(Regex("^[0-9a-f]{64}$")))
+        require(Base64.decode(key, Base64.NO_WRAP).size == 32)
+        require(Base64.decode(iv, Base64.NO_WRAP).size == 12)
+        require(json.optLong("size", -1L) in 1..MAX_PLAINTEXT_BYTES)
+        require(json.optString("name").isNotBlank() && json.optString("name").length <= 100)
         json
     }.getOrNull()
 
