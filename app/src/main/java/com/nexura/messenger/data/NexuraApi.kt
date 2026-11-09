@@ -485,6 +485,22 @@ class NexuraApi(private val store: SessionStore) {
         return rows.getJSONObject(0)
     }
 
+    /** Atomically consumes a pre-key only from another active device owned by the authenticated account. */
+    suspend fun consumeOwnE2eePreKey(
+        conversationId: String,
+        deviceId: String
+    ): JSONObject {
+        val rows = JSONArray(call(
+            "/rest/v1/rpc/consume_own_e2ee_one_time_key",
+            "POST",
+            JSONObject()
+                .put("p_conversation_id", normalizeUuid(conversationId))
+                .put("p_device_id", normalizeUuid(deviceId))
+                .toString()
+        ))
+        if (rows.length() != 1) throw IOException("Не удалось получить одноразовый ключ собственного устройства")
+        return rows.getJSONObject(0)
+    }
     suspend fun groupMemberIds(conversationId: String): List<String> {
         val rows = JSONArray(call(
             "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(conversationId)}&order=joined_at.asc"
@@ -751,7 +767,11 @@ class NexuraApi(private val store: SessionStore) {
                 val cipher = e2ee.encryptGroupMessage(chatId, device.userId, device.deviceId, bytes, messageId)
                 recipients += E2eeGroupRecipientEnvelope(device.userId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, cipher)
             } else {
-                val preKey = consumeE2eePreKey(chatId, device.userId, device.deviceId)
+                val preKey = if (device.userId == uid) {
+                    consumeOwnE2eePreKey(chatId, device.deviceId)
+                } else {
+                    consumeE2eePreKey(chatId, device.userId, device.deviceId)
+                }
                 if (preKey.optString("ed25519_key") != device.ed25519Key ||
                     preKey.optString("curve25519_key") != device.curve25519Key) {
                     throw IOException("Ключ одного из устройств собеседника изменился. Отправка отменена.")
