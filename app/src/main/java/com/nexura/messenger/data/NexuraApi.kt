@@ -239,9 +239,16 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
     }
-    suspend fun messages(chatId: String, e2ee: E2eeClient? = null): List<MessageItem> {
+    suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=150"))
+        val afterFilter = afterCreatedAt?.let {
+            "&created_at=gt.${java.net.URLEncoder.encode(it, "UTF-8")}"
+        }.orEmpty()
+        val limit = if (afterCreatedAt == null) 100 else 200
+        val raw = JSONArray(call(
+            "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter"
+        ))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
             val id = m.getString("id")
@@ -322,7 +329,7 @@ class NexuraApi(private val store: SessionStore) {
                     securityWarning = type == "text" || type == "image" || type == "file"
                 )
             }
-        }
+        }.sortedBy { it.createdAt }
     }
     /**
      * Publishes only public E2EE material. Idempotent inserts let the client
