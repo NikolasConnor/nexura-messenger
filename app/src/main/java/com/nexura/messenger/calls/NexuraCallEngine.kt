@@ -2,6 +2,8 @@ package com.nexura.messenger.calls
 
 import android.content.Context
 import android.media.AudioManager
+import android.os.Build
+import com.nexura.messenger.BuildConfig
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
@@ -54,10 +56,21 @@ class NexuraCallEngine(
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
             .createPeerConnectionFactory()
 
-        val iceServers = listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-        )
+        val iceServers = buildList {
+            add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
+            add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer())
+            val turnUrls = BuildConfig.WEBRTC_TURN_URLS.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val turnUser = BuildConfig.WEBRTC_TURN_USERNAME
+            val turnCredential = BuildConfig.WEBRTC_TURN_CREDENTIAL
+            if (turnUrls.isNotEmpty() && turnUser.isNotBlank() && turnCredential.isNotBlank()) {
+                add(
+                    PeerConnection.IceServer.builder(turnUrls)
+                        .setUsername(turnUser)
+                        .setPassword(turnCredential)
+                        .createIceServer()
+                )
+            }
+        }
         peer = factory.createPeerConnection(
             PeerConnection.RTCConfiguration(iceServers).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -83,10 +96,7 @@ class NexuraCallEngine(
                 override fun onRemoveStream(stream: org.webrtc.MediaStream) {}
                 override fun onDataChannel(channel: org.webrtc.DataChannel) {}
                 override fun onRenegotiationNeeded() {}
-                override fun onAddTrack(receiver: org.webrtc.RtpReceiver, streams: Array<out org.webrtc.MediaStream>) {
-                    val track = receiver.track()
-                    if (track is VideoTrack) { track.setEnabled(true); onRemoteVideo(track) }
-                }
+                override fun onAddTrack(receiver: org.webrtc.RtpReceiver, streams: Array<out org.webrtc.MediaStream>) {}
                 override fun onTrack(transceiver: org.webrtc.RtpTransceiver) {
                     val track = transceiver.receiver.track()
                     if (track is VideoTrack) { track.setEnabled(true); onRemoteVideo(track) }
@@ -108,7 +118,7 @@ class NexuraCallEngine(
             textureHelper = SurfaceTextureHelper.create("NexuraCamera", egl.eglBaseContext)
             videoSource = factory.createVideoSource(false)
             capturer!!.initialize(textureHelper, context, videoSource!!.capturerObserver)
-            capturer!!.startCapture(1280, 720, 30)
+            capturer!!.startCapture(960, 540, 24)
             videoTrack = factory.createVideoTrack("nexura_video", videoSource)
             onLocalVideo(videoTrack)
             peer.addTrack(videoTrack, listOf("nexura_stream"))
