@@ -151,8 +151,17 @@ fun NexuraCallDialog(
             autoActionHandled = true
             when (autoAction) {
                 "accept" -> request("accept", ui.video)
-                "decline" -> { coordinator?.decline(); onDismiss() }
+                "decline" -> {
+                    coordinator?.decline()
+                    com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
+                    onDismiss()
+                }
             }
+        }
+    }
+    LaunchedEffect(ui.active) {
+        if (ui.active) {
+            com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
         }
     }
 
@@ -228,7 +237,11 @@ fun NexuraCallDialog(
             if (ui.incoming) {
                 Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
                     FilledIconButton(
-                        onClick = { coordinator?.decline(); onDismiss() },
+                        onClick = {
+                            coordinator?.decline()
+                            com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
+                            onDismiss()
+                        },
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFB83E4A)),
                         modifier = Modifier.size(60.dp)
                     ) { Icon(Icons.Default.CallEnd, "Отклонить", tint = Color.White) }
