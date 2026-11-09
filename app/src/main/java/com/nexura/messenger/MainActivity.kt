@@ -235,7 +235,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 } else {
                     api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!)
                 }
-                messages = api.messages(chat.id, client)
                 notice = "Медиа отправлено с E2EE-шифрованием"
             } catch (e: Exception) {
                 encrypted?.file?.delete()
@@ -354,6 +353,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                // Render chats before background setup of device keys and push tokens.
+                chats = api.chats()
                 // Initialize local E2EE identity and publish public keys when the
                 // reviewed key-directory migration has been deployed.
                 val e2eeUserId = store.userId
@@ -369,7 +370,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 val pushToken = FirebaseMessaging.getInstance().token.await()
                 if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
-                chats = api.chats()
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось восстановить сессию"
                 if (store.accessToken.isNullOrBlank()) signedIn = false
@@ -382,12 +382,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
             while (true) {
-                delay(if (selected != null) 5000L else 20000L)
+                delay(if (selected != null) 2500L else 20000L)
                 try {
                     val currentChat = selected
                     if (currentChat != null) {
-                        val latest = api.messages(currentChat.id, e2eeClient)
-                        if (selected?.id == currentChat.id) messages = latest
+                        val lastTimestamp = messages.maxOfOrNull { it.createdAt }
+                        val latest = api.messages(currentChat.id, e2eeClient, lastTimestamp)
+                        if (selected?.id == currentChat.id && latest.isNotEmpty()) {
+                            messages = (messages + latest).distinctBy { it.id }.sortedBy { it.createdAt }
+                        }
                     } else {
                         chats = api.chats()
                     }
