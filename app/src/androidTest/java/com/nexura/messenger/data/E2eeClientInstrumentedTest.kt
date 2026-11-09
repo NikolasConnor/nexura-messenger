@@ -43,6 +43,7 @@ class E2eeClientInstrumentedTest {
         val bobOneTimeKey = bobKeys.getJSONObject(0)
 
         val conversationId = UUID.randomUUID().toString()
+        val firstMessageId = UUID.randomUUID().toString()
         val initialText = "Nexura E2EE test".toByteArray(StandardCharsets.UTF_8)
         val preKeyEnvelope = alice.startDirectSession(
             conversationId = conversationId,
@@ -50,25 +51,35 @@ class E2eeClientInstrumentedTest {
             recipientEd25519 = bobBundle.getString("ed25519"),
             recipientOneTimeKey = bobOneTimeKey.getString("key"),
             recipientOneTimeKeySignature = bobOneTimeKey.getString("signature"),
-            firstPlaintext = initialText
+            firstPlaintext = initialText,
+            messageId = firstMessageId
         )
+        assertEquals(preKeyEnvelope, alice.pendingOutboundEnvelope(conversationId, firstMessageId))
+        assertArrayEquals(initialText, alice.cachedMessage(conversationId, firstMessageId))
+        alice.markOutboundDelivered(conversationId, firstMessageId)
+        assertEquals(null, alice.pendingOutboundEnvelope(conversationId, firstMessageId))
 
         assertArrayEquals(
             initialText,
             bob.acceptDirectSession(
                 conversationId,
                 aliceBundle.getString("curve25519"),
-                preKeyEnvelope
+                preKeyEnvelope,
+                firstMessageId
             )
         )
+        assertArrayEquals(initialText, bob.cachedMessage(conversationId, firstMessageId))
 
+        val replyMessageId = UUID.randomUUID().toString()
         val replyText = "Reply after session setup".toByteArray(StandardCharsets.UTF_8)
-        val replyEnvelope = bob.encryptDirectMessage(conversationId, replyText)
+        val replyEnvelope = bob.encryptDirectMessage(conversationId, replyText, replyMessageId)
+        assertEquals(replyEnvelope, bob.pendingOutboundEnvelope(conversationId, replyMessageId))
 
-        // A new facade instance simulates process restart; persisted session state
-        // must be decrypted from Android Keystore-backed storage.
+        // A new facade instance simulates process restart; persisted session and
+        // local message cache must be decrypted from Android Keystore-backed storage.
         val aliceAfterRestart = E2eeClient(context, aliceId)
-        assertArrayEquals(replyText, aliceAfterRestart.decryptDirectMessage(conversationId, replyEnvelope))
+        assertArrayEquals(replyText, aliceAfterRestart.decryptDirectMessage(conversationId, replyEnvelope, replyMessageId))
+        assertArrayEquals(replyText, aliceAfterRestart.cachedMessage(conversationId, replyMessageId))
     }
 
     @Test
@@ -87,6 +98,20 @@ class E2eeClientInstrumentedTest {
         } finally {
             firstStore.clearAll()
             secondStore.clearAll()
+        }
+    }
+
+    @Test
+    fun stateStoreBatchPersistsRelatedValuesTogether() {
+        val store = E2eeStateStore(context, "batch-${UUID.randomUUID()}")
+        val first = "ratchet-state".toByteArray(StandardCharsets.UTF_8)
+        val second = "cached-plaintext".toByteArray(StandardCharsets.UTF_8)
+        try {
+            store.saveBatch(mapOf("session" to first, "message-cache" to second))
+            assertArrayEquals(first, store.load("session"))
+            assertArrayEquals(second, store.load("message-cache"))
+        } finally {
+            store.clearAll()
         }
     }
 
