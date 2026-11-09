@@ -542,6 +542,21 @@ class NexuraApi(private val store: SessionStore) {
                 }
             }
         }
+        val currentMembers = groupMemberIds(chatId)
+        if (currentMembers.toSet() != members.toSet()) {
+            throw IOException("Состав группы изменился во время отправки. Повторите отправку.")
+        }
+        for (memberId in members.filter { it != uid }) {
+            val currentDevices = activeE2eeDevices(memberId)
+            val sentDevices = recipients.filter { it.userId == memberId }
+            if (currentDevices.map { Triple(it.deviceId, it.curve25519Key, it.ed25519Key) }.toSet() !=
+                sentDevices.map { Triple(it.deviceId, it.ciphertext, it.kind.wireValue) }.let { sent ->
+                    // Compare device IDs here; identity keys were checked before encryption.
+                    sent.map { it.first }.toSet()
+                }) {
+                throw IOException("Список устройств участника изменился во время отправки. Повторите отправку.")
+            }
+        }
         val envelope = E2eeGroupMessageEnvelope(
             chatId, uid, ownDeviceId, own.getString("curve25519"), recipients
         ).encode()
