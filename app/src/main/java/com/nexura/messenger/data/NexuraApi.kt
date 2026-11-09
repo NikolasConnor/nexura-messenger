@@ -60,6 +60,7 @@ class NexuraApi(private val store: SessionStore) {
         .retryOnConnectionFailure(true)
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
+    private val remoteDeviceCache = ConcurrentHashMap<String, Pair<E2eeRemoteDevice, Long>>()
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
@@ -244,7 +245,7 @@ class NexuraApi(private val store: SessionStore) {
         val afterFilter = afterCreatedAt?.let {
             "&created_at=gte.${java.net.URLEncoder.encode(it, "UTF-8")}"
         }.orEmpty()
-        val limit = if (afterCreatedAt == null) 100 else 200
+        val limit = if (afterCreatedAt == null) 50 else 100
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
                 "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter"
@@ -276,15 +277,26 @@ class NexuraApi(private val store: SessionStore) {
                             ?: throw IOException("Локальная копия сообщения недоступна")
                     } else {
                         if (envelope.recipientDeviceId != client.deviceId()) throw IOException("Сообщение адресовано другому устройству")
-                        val deviceRows = JSONArray(call(
-                            "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
-                                "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
-                        ))
-                        if (deviceRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
-                        val device = deviceRows.getJSONObject(0)
-                        val curve = device.optString("curve25519_key")
-                        val ed = device.optString("ed25519_key")
-                        if (device.optString("protocol") != "olm-v1" || device.optInt("bundle_version") != 1) {
+                        val deviceCacheKey = "$senderId:${envelope.senderDeviceId}"
+                        val now = System.currentTimeMillis()
+                        val cachedDevice = remoteDeviceCache[deviceCacheKey]
+                        val device = if (cachedDevice != null && cachedDevice.second > now) {
+                            cachedDevice.first
+                        } else {
+                            val deviceRows = JSONArray(call(
+                                "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
+                                    "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
+                            ))
+                            if (deviceRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
+                            val row = deviceRows.getJSONObject(0)
+                            E2eeRemoteDevice(
+                                senderId, envelope.senderDeviceId, row.optString("curve25519_key"),
+                                row.optString("ed25519_key"), row.optString("protocol"), row.optInt("bundle_version")
+                            ).also { remoteDeviceCache[deviceCacheKey] = it to (now + 60_000L) }
+                        }
+                        val curve = device.curve25519Key
+                        val ed = device.ed25519Key
+                        if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
                             throw IOException("Версия протокола устройства не поддерживается")
                         }
                         if (curve != envelope.senderCurve25519) throw IOException("Идентичность отправителя не совпадает")
