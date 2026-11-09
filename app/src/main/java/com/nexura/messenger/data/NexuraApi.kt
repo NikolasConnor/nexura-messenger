@@ -200,6 +200,127 @@ class NexuraApi(private val store: SessionStore) {
                 m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" })
         }
     }
+    /**
+     * Publishes only public E2EE material. Idempotent inserts let the client
+     * retry after network failures without replacing an established identity.
+     */
+    suspend fun publishE2eeDevice(e2ee: E2eeClient): Int {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val bundle = JSONObject(e2ee.ensureDevice())
+        val deviceId = bundle.getString("device_id")
+        val curveKey = bundle.getString("curve25519")
+        val edKey = bundle.getString("ed25519")
+
+        val devicePayload = JSONObject()
+            .put("user_id", uid)
+            .put("device_id", deviceId)
+            .put("curve25519_key", curveKey)
+            .put("ed25519_key", edKey)
+            .put("is_active", true)
+        call(
+            "/rest/v1/e2ee_devices?on_conflict=user_id,device_id",
+            "POST",
+            devicePayload.toString(),
+            prefer = "resolution=ignore-duplicates,return=minimal"
+        )
+
+        val existingDevice = JSONArray(call(
+            "/rest/v1/e2ee_devices?select=curve25519_key,ed25519_key,is_active" +
+                "&user_id=eq.$uid&device_id=eq.$deviceId&limit=1"
+        ))
+        if (existingDevice.length() != 1) throw IOException("Не удалось подтвердить регистрацию E2EE-устройства")
+        val storedDevice = existingDevice.getJSONObject(0)
+        if (storedDevice.optString("curve25519_key") != curveKey ||
+            storedDevice.optString("ed25519_key") != edKey ||
+            !storedDevice.optBoolean("is_active")) {
+            throw IOException("Ключи E2EE-устройства не совпадают с сохранённой регистрацией")
+        }
+
+        suspend fun uploadPendingKeys() {
+            val pending = JSONArray(e2ee.pendingOneTimeKeysJson())
+            if (pending.length() == 0) return
+            val keyIds = mutableListOf<String>()
+            val rows = JSONArray()
+            for (index in 0 until pending.length()) {
+                val key = pending.getJSONObject(index)
+                val keyId = key.getString("key_id")
+                keyIds += keyId
+                rows.put(
+                    JSONObject()
+                        .put("user_id", uid)
+                        .put("device_id", deviceId)
+                        .put("key_id", keyId)
+                        .put("curve25519_key", key.getString("key"))
+                        .put("signature", key.getString("signature"))
+                )
+            }
+
+            call(
+                "/rest/v1/e2ee_one_time_keys?on_conflict=user_id,device_id,key_id",
+                "POST",
+                rows.toString(),
+                prefer = "resolution=ignore-duplicates,return=minimal"
+            )
+
+            val filter = keyIds.joinToString(",")
+            val storedKeys = JSONArray(call(
+                "/rest/v1/e2ee_one_time_keys?select=key_id,curve25519_key,signature" +
+                    "&user_id=eq.$uid&device_id=eq.$deviceId&key_id=in.($filter)"
+            ))
+            val storedById = (0 until storedKeys.length()).associate { index ->
+                val row = storedKeys.getJSONObject(index)
+                row.getString("key_id") to row
+            }
+            for (index in 0 until pending.length()) {
+                val expected = pending.getJSONObject(index)
+                val actual = storedById[expected.getString("key_id")]
+                    ?: throw IOException("Supabase не подтвердил сохранение одноразового E2EE-ключа")
+                if (actual.optString("curve25519_key") != expected.optString("key") ||
+                    actual.optString("signature") != expected.optString("signature")) {
+                    throw IOException("Одноразовый E2EE-ключ на сервере не совпадает с устройством")
+                }
+            }
+            e2ee.markPublicKeysPublished(keyIds)
+        }
+
+        uploadPendingKeys()
+
+        var available = countAvailableE2eeKeys(uid, deviceId)
+        if (available < 10) {
+            e2ee.replenishOneTimeKeys(20)
+            uploadPendingKeys()
+            available = countAvailableE2eeKeys(uid, deviceId)
+        }
+        return available
+    }
+
+    private suspend fun countAvailableE2eeKeys(userId: String, deviceId: String): Int {
+        val rows = JSONArray(call(
+            "/rest/v1/e2ee_one_time_keys?select=key_id" +
+                "&user_id=eq.$userId&device_id=eq.$deviceId&consumed_at=is.null&limit=100"
+        ))
+        return rows.length()
+    }
+
+    /** Atomically consumes one recipient OTK only when both users share this chat. */
+    suspend fun consumeE2eePreKey(
+        conversationId: String,
+        recipientUserId: String,
+        recipientDeviceId: String
+    ): JSONObject {
+        val rows = JSONArray(call(
+            "/rest/v1/rpc/consume_e2ee_one_time_key",
+            "POST",
+            JSONObject()
+                .put("p_conversation_id", normalizeUuid(conversationId))
+                .put("p_recipient_user_id", normalizeUuid(recipientUserId))
+                .put("p_device_id", normalizeUuid(recipientDeviceId))
+                .toString()
+        ))
+        if (rows.length() != 1) throw IOException("Не удалось получить одноразовый E2EE-ключ собеседника")
+        return rows.getJSONObject(0)
+    }
+
     suspend fun registerPushToken(token: String) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val payload = JSONObject().put("user_id", uid).put("token", token).put("platform", "android").put("updated_at", java.time.Instant.now().toString())
