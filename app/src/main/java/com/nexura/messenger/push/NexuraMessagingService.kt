@@ -36,11 +36,12 @@ class NexuraMessagingService : FirebaseMessagingService() {
         }
     }
     override fun onMessageReceived(message: RemoteMessage) {
+        val incomingCall = message.data["type"] == "incoming_call"
         val title = message.data["title"] ?: message.notification?.title ?: "Nexura"
-        val body = message.data["body"] ?: message.notification?.body ?: "Новое сообщение"
+        val body = message.data["body"] ?: message.notification?.body ?: if (incomingCall) "Входящий звонок" else "Новое сообщение"
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Сообщения", NotificationManager.IMPORTANCE_HIGH))
+            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Сообщения и звонки", NotificationManager.IMPORTANCE_HIGH))
         }
         val conversationId = message.data["conversation_id"]?.let { raw ->
             runCatching { UUID.fromString(raw).toString() }.getOrNull()
@@ -49,7 +50,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             if (conversationId != null) {
                 action = "com.nexura.messenger.OPEN_CHAT"
-                data = Uri.parse("nexura://chat/$conversationId")
+                data = Uri.parse("nexura://chat/$conversationId" + if (incomingCall) "?call=1" else "")
             }
         }
         val notificationId = conversationId?.hashCode() ?: (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
@@ -58,8 +59,8 @@ class NexuraMessagingService : FirebaseMessagingService() {
             .setSmallIcon(android.R.drawable.sym_action_chat).setContentTitle(title).setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body)).setContentIntent(pending)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH).build()
+            .setCategory(if (incomingCall) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_MAX).build()
         NotificationManagerCompat.from(this).notify(notificationId, notification)
     }
     companion object { private const val CHANNEL_ID = "nexura_messages" }
