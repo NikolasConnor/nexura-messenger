@@ -2,6 +2,8 @@ package com.nexura.messenger.data
 
 import android.net.Uri
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -175,9 +177,17 @@ class NexuraApi(private val store: SessionStore) {
     }
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
-        val raw = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,last_read_at,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc"))
+        // Fetch memberships and the aggregate unread counters concurrently.
+        val (membershipJson, unreadJson) = coroutineScope {
+            val memberships = async {
+                call("/rest/v1/conversation_members?select=conversation_id,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc")
+            }
+            val unread = async { call("/rest/v1/rpc/get_my_unread_counts", "POST", "{}") }
+            memberships.await() to unread.await()
+        }
+        val raw = JSONArray(membershipJson)
         // Aggregate unread counts in Postgres; do not download thousands of message rows.
-        val unreadRows = JSONArray(call("/rest/v1/rpc/get_my_unread_counts", "POST", "{}"))
+        val unreadRows = JSONArray(unreadJson)
         val unreadByChat = mutableMapOf<String, Int>()
         for (i in 0 until unreadRows.length()) {
             val row = unreadRows.optJSONObject(i) ?: continue
