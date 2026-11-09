@@ -244,6 +244,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                // Register public E2EE device keys when the reviewed key-directory
+                // schema is available. Failure must not block ordinary chat access.
+                val e2eeUserId = store.userId
+                if (!e2eeUserId.isNullOrBlank()) {
+                    try {
+                        api.publishE2eeDevice(E2eeClient(context.applicationContext, e2eeUserId))
+                    } catch (_: Exception) {
+                        // E2EE remains unavailable until its server schema is deployed.
+                    }
+                }
                 val pushToken = FirebaseMessaging.getInstance().token.await()
                 if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
                 chats = api.chats()
