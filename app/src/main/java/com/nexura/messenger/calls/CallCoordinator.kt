@@ -1,0 +1,245 @@
+package com.nexura.messenger.calls
+
+import android.content.Context
+import org.json.JSONObject
+import org.webrtc.IceCandidate
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.util.UUID
+
+data class CallUiState(
+    val status: String = "Подключение…",
+    val incoming: Boolean = false,
+    val active: Boolean = false,
+    val video: Boolean = false,
+    val muted: Boolean = false,
+    val cameraEnabled: Boolean = true,
+    val error: String? = null
+)
+
+class CallCoordinator(
+    private val context: Context,
+    private val chatId: String,
+    private val ownUserId: String,
+    private val peerUserId: String,
+    private val onState: (CallUiState) -> Unit
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var signaling: CallSignalingClient? = null
+    private var engine: NexuraCallEngine? = null
+    private var callId: String? = null
+    private var pendingOffer: String? = null
+    private var videoMode = false
+    private var ready = false
+    private var closed = false
+    private val queuedIce = mutableListOf<IceCandidate>()
+    private var remoteDescriptionSet = false
+
+    fun connect() {
+        signaling = CallSignalingClient(
+            projectRef = "lyhzawblxcvpgpjrkspc",
+            apiKey = com.nexura.messenger.data.NexuraApi.PUBLIC_KEY,
+            accessToken = "", // replaced immediately by the authenticated session token below
+            ownUserId = ownUserId,
+            peerUserId = peerUserId,
+            onSignal = { signal -> scope.launch { receive(signal) } },
+            onReady = {
+                scope.launch {
+                    ready = true
+                    onState(CallUiState(status = "Готово к звонку"))
+                }
+            },
+            onError = { message -> scope.launch { onState(CallUiState(status = "Ошибка связи", error = message)) } }
+        )
+    }
+
+    fun setAccessToken(token: String) {
+        // The Realtime socket authenticates at channel join; it must be created with
+        // the current Supabase access token, so callers should use connect(token).
+    }
+
+    fun connect(token: String) {
+        signaling?.close()
+        signaling = CallSignalingClient(
+            "lyhzawblxcvpgpjrkspc",
+            com.nexura.messenger.data.NexuraApi.PUBLIC_KEY,
+            token,
+            ownUserId,
+            peerUserId,
+            { signal -> scope.launch { receive(signal) } },
+            { scope.launch { ready = true; onState(CallUiState(status = "Готово к звонку")) } },
+            { message -> scope.launch { onState(CallUiState(status = "Ошибка связи", error = message)) } }
+        )
+    }
+
+    fun start(video: Boolean) {
+        if (!ready || closed) {
+            onState(CallUiState(status = "Подключение…", error = "Сервер звонков ещё подключается"))
+            return
+        }
+        videoMode = video
+        callId = UUID.randomUUID().toString()
+        createEngine(video)
+        engine?.createOffer(
+            onReady = { sdp ->
+                val signal = JSONObject().put("type", "offer").put("call_id", callId)
+                    .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
+                if (!send(signal)) onState(CallUiState(status = "Не удалось вызвать", error = "Сигнал не отправлен"))
+                else onState(CallUiState(status = "Вызов…", active = true, video = video))
+                flushIce()
+            },
+            onError = { error -> onState(CallUiState(status = "Ошибка звонка", error = error)) }
+        )
+    }
+
+    fun accept() {
+        val offer = pendingOffer ?: return
+        videoMode = pendingVideo
+        callId = pendingCallId
+        createEngine(videoMode)
+        engine?.acceptOffer(
+            offer,
+            onReady = { sdp ->
+                remoteDescriptionSet = true
+                val signal = JSONObject().put("type", "answer").put("call_id", callId)
+                    .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
+                send(signal)
+                flushIce()
+                onState(CallUiState(status = "На связи", active = true, video = videoMode))
+            },
+            onError = { error -> onState(CallUiState(status = "Ошибка звонка", error = error)) }
+        )
+    }
+
+    private var pendingVideo = false
+    private var pendingCallId: String? = null
+
+    private fun receive(signal: JSONObject) {
+        if (signal.optString("to") != ownUserId) return
+        val id = signal.optString("call_id")
+        when (signal.optString("type")) {
+            "offer" -> {
+                if (engine != null) {
+                    send(JSONObject().put("type", "busy").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
+                    return
+                }
+                pendingOffer = signal.optString("sdp")
+                pendingCallId = id
+                pendingVideo = signal.optBoolean("video")
+                onState(CallUiState(status = "Входящий видеозвонок".takeIf { pendingVideo } ?: "Входящий звонок", incoming = true, video = pendingVideo))
+            }
+            "answer" -> if (id == callId) {
+                engine?.acceptAnswer(signal.optString("sdp")) { error ->
+                    onState(CallUiState(status = "Ошибка звонка", error = error))
+                }
+                remoteDescriptionSet = true
+                flushIce()
+                onState(CallUiState(status = "На связи", active = true, video = videoMode))
+            }
+            "ice" -> if (id == callId || id == pendingCallId) {
+                val candidate = signal.optJSONObject("candidate") ?: return
+                val sdp = candidate.optString("sdpMid").takeIf { it != "null" }
+                val line = candidate.optInt("sdpMLineIndex")
+                val value = candidate.optString("candidate")
+                if (remoteDescriptionSet) engine?.addRemoteIce(value, sdp, line)
+                else queuedRemoteIce.add(Triple(value, sdp, line))
+            }
+            "end", "decline", "busy" -> if (id == callId || id == pendingCallId) {
+                val text = when (signal.optString("type")) {
+                    "busy" -> "Абонент занят"
+                    "decline" -> "Вызов отклонён"
+                    else -> "Звонок завершён"
+                }
+                finish(false)
+                onState(CallUiState(status = text))
+            }
+        }
+    }
+
+    private val queuedRemoteIce = mutableListOf<Triple<String, String?, Int>>()
+
+    private fun createEngine(video: Boolean) {
+        engine?.close()
+        engine = NexuraCallEngine(
+            context, video,
+            onLocalIce = { candidate ->
+                if (callId != null) {
+                    send(JSONObject().put("type", "ice").put("call_id", callId)
+                        .put("from", ownUserId).put("to", peerUserId)
+                        .put("candidate", JSONObject().put("candidate", candidate.sdp)
+                            .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))
+                } else queuedIce.add(candidate)
+            },
+            onRemoteVideo = { },
+            onState = { value -> scope.launch { onState(CallUiState(status = value, active = true, video = videoMode)) } }
+        )
+    }
+
+    private val queuedIce = mutableListOf<IceCandidate>()
+    private fun flushIce() {
+        queuedIce.forEach { candidate ->
+            send(JSONObject().put("type", "ice").put("call_id", callId)
+                .put("from", ownUserId).put("to", peerUserId)
+                .put("candidate", JSONObject().put("candidate", candidate.sdp)
+                    .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))
+        }
+        queuedIce.clear()
+        if (remoteDescriptionSet) {
+            queuedRemoteIce.forEach { (sdp, mid, line) -> engine?.addRemoteIce(sdp, mid, line) }
+            queuedRemoteIce.clear()
+        }
+    }
+
+    private fun send(signal: JSONObject): Boolean = signaling?.sendSignal(signal) == true
+
+    fun toggleMute(): Boolean {
+        val muted = !(lastState?.muted ?: false)
+        engine?.setMuted(muted)
+        onState((lastState ?: CallUiState()).copy(muted = muted))
+        return muted
+    }
+    private var lastState: CallUiState? = null
+
+    fun toggleCamera(): Boolean {
+        val enabled = !(lastState?.cameraEnabled ?: true)
+        engine?.setCameraEnabled(enabled)
+        onState((lastState ?: CallUiState()).copy(cameraEnabled = enabled))
+        return enabled
+    }
+    fun switchCamera() { engine?.switchCamera() }
+
+    fun decline() {
+        val id = pendingCallId ?: callId
+        if (id != null) send(JSONObject().put("type", "decline").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
+        finish()
+    }
+
+    fun end() {
+        val id = callId ?: pendingCallId
+        if (id != null) send(JSONObject().put("type", "end").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
+        finish()
+    }
+
+    private fun finish(closeSignaling: Boolean = true) {
+        engine?.close()
+        engine = null
+        pendingOffer = null
+        pendingCallId = null
+        callId = null
+        remoteDescriptionSet = false
+        queuedIce.clear()
+        queuedRemoteIce.clear()
+        if (closeSignaling) signaling?.close()
+        if (closeSignaling) signaling = null
+    }
+
+    fun close() {
+        if (closed) return
+        closed = true
+        finish()
+        scope.cancel()
+    }
+}
