@@ -218,7 +218,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     val members = api.groupMemberIds(chat.id)
                     for (memberId in members) {
                         val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
-                        if (devices.isEmpty()) throw IllegalStateException("У участника $memberId нет активного E2EE-устройства.")
+                        if (devices.isEmpty()) {
+                            if (memberId == store.userId) continue
+                            throw IllegalStateException("У участника $memberId нет активного E2EE-устройства.")
+                        }
                         if (devices.any { !client.isRemoteDeviceTrusted(memberId, it.deviceId, it.curve25519Key, it.ed25519Key) }) {
                             throw IllegalStateException("Сначала проверьте все устройства участников через кнопку замка.")
                         }
@@ -307,7 +310,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     val members = api.groupMemberIds(chat.id)
                     for (memberId in members) {
                         val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
-                        if (devices.isEmpty()) throw IllegalStateException("У участника $memberId нет активного E2EE-устройства")
+                        if (devices.isEmpty()) {
+                            if (memberId == store.userId) continue
+                            throw IllegalStateException("У участника $memberId нет активного E2EE-устройства")
+                        }
                         if (devices.any { !client.isRemoteDeviceTrusted(memberId, it.deviceId, it.curve25519Key, it.ed25519Key) }) {
                             throw IllegalStateException("Не все устройства участников подтверждены. Нажмите на замок группы.")
                         }
@@ -1069,7 +1075,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 IconButton(
                                     onClick = { videoPicker.launch("video/mp4") },
-                                    enabled = !sendingImage && chat.kind == "direct",
+                                    enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     Text("🎬", fontSize = 19.sp)
