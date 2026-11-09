@@ -484,7 +484,8 @@ class NexuraApi(private val store: SessionStore) {
         e2ee: E2eeClient,
         messageId: String,
         plaintext: String,
-        messageType: String = "text"
+        messageType: String = "text",
+        replyToId: String? = null
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val chatId = normalizeUuid(conversationId)
@@ -568,6 +569,7 @@ class NexuraApi(private val store: SessionStore) {
             .put("sender_id", uid)
             .put("message_type", messageType)
             .put("content", envelope)
+        if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         call("/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
             prefer = "resolution=ignore-duplicates,return=minimal")
         val saved = JSONArray(call(
