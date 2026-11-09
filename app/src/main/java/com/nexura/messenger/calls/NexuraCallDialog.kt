@@ -37,6 +37,7 @@ fun NexuraCallDialog(
     chat: ChatItem,
     ownUserId: String,
     accessToken: String,
+    visible: Boolean,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -96,6 +97,8 @@ fun NexuraCallDialog(
             }
         } else permissionLauncher.launch(missing.toTypedArray())
     }
+
+    if (!visible && !ui.incoming && !ui.active && ui.error.isNullOrBlank()) return
 
     Dialog(
         onDismissRequest = { if (ui.active || ui.incoming) coordinator?.end(); onDismiss() },
