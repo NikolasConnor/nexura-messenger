@@ -580,7 +580,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Аватар", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp, bottom = 7.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙").forEach { emoji ->
-                                        Box(Modifier.size(38.dp).clip(CircleShape).background(if (profileAvatar == emoji) Accent.copy(alpha = 0.25f) else Surface2).clickable { profileAvatar = emoji }, contentAlignment = Alignment.Center) { Text(emoji, fontSize = 21.sp) }
+                                        Box(Modifier.size(38.dp).clip(CircleShape).background(if (profileAvatar == emoji) Accent.copy(alpha = 0.25f) else Surface2).clickable { profileAvatar = emoji; profilePhotoUri = null }, contentAlignment = Alignment.Center) { Text(emoji, fontSize = 21.sp) }
                                     }
                                 }
                                 Text("О себе", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
