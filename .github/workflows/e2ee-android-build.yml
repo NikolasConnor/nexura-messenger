@@ -52,7 +52,8 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_2
-          emulator-options: "-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -accel on -verbose"
+          # Use the emulator's software renderer; keep Android's audio flag valid.
+          emulator-options: "-no-window -gpu swiftshader_indirect -no-snapshot -no-audio -no-boot-anim"
           emulator-boot-timeout: 900
           disable-animations: true
           script: gradle --no-daemon connectedDebugAndroidTest
