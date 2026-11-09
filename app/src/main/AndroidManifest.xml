@@ -14,6 +14,12 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="nexura" android:host="auth" android:path="/callback"/>
             </intent-filter>
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="nexura" android:host="chat"/>
+            </intent-filter>
         </activity>
         <service
             android:name=".push.NexuraMessagingService"
