@@ -323,6 +323,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             if (targetChat != null && selected?.id != targetChat.id) {
                 openChat(targetChat)
             }
+            if (targetChat != null && authCallback?.getQueryParameter("call") == "1") {
+                showCallDialog = true
+            }
         }
     }
 
