@@ -32,6 +32,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -60,6 +62,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexura.messenger.data.*
+import com.nexura.messenger.calls.NexuraCallDialog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -153,6 +156,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
     var pendingSecureMessageId by remember { mutableStateOf<String?>(null) }
     var pendingSecureMessageText by remember { mutableStateOf<String?>(null) }
+    var showCallDialog by remember { mutableStateOf(false) }
 
     fun syncContacts() {
         scope.launch {
@@ -843,6 +847,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
+                    if (showCallDialog && chat.kind == "direct" && !store.userId.isNullOrBlank() && !store.accessToken.isNullOrBlank()) {
+                        NexuraCallDialog(
+                            api = api,
+                            chat = chat,
+                            ownUserId = store.userId!!,
+                            accessToken = store.accessToken!!,
+                            onDismiss = { showCallDialog = false }
+                        )
+                    }
                     if (mediaViewerUri != null) {
                         Dialog(
                             onDismissRequest = { mediaViewerUri = null },
@@ -948,6 +961,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     fontSize = 12.sp,
                                     maxLines = 1
                                 )
+                            }
+                            if (chat.kind == "direct") {
+                                IconButton(onClick = { showCallDialog = true }) {
+                                    Icon(Icons.Default.Call, "Голосовой звонок", tint = Accent)
+                                }
+                                IconButton(onClick = { showCallDialog = true }) {
+                                    Icon(Icons.Default.Videocam, "Видеозвонок", tint = Accent)
+                                }
                             }
                             IconButton(onClick = {
                                 scope.launch {
