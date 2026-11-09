@@ -48,14 +48,19 @@ jobs:
       - name: Run E2EE instrumentation tests on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           arch: x86_64
           target: google_apis
+          profile: pixel_2
+          emulator-options: "-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -accel on -verbose"
+          emulator-boot-timeout: 900
+          disable-animations: true
           script: gradle --no-daemon connectedDebugAndroidTest
       - name: Upload debug APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nexura-e2ee-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
