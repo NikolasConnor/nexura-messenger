@@ -142,7 +142,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
     private fun callPendingIntent(baseUri: String, action: String, requestCode: Int): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            action = "com.nexura.messenger.INCOMING_CALL"
+            this.action = "com.nexura.messenger.INCOMING_CALL"
             setData(Uri.parse("$baseUri&action=$action"))
         }
         return PendingIntent.getActivity(
