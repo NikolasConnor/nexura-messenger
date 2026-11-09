@@ -560,13 +560,9 @@ class NexuraApi(private val store: SessionStore) {
         } catch (_: Exception) { }
     }
 
-    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null) {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        val payload = JSONObject().put("conversation_id", chatId).put("sender_id", uid)
-            .put("message_type", "text").put("content", text)
-        if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
-        call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
-        notifyChatPush(chatId)
+    @Deprecated("Use sendEncryptedDirectMessage; plaintext transport is disabled in this branch.")
+    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null): Nothing {
+        throw IOException("Отправка открытого текста отключена. Используйте подтверждённое E2EE-устройство.")
     }
 
     suspend fun markChatRead(chatId: String) {
@@ -578,6 +574,12 @@ class NexuraApi(private val store: SessionStore) {
 
     suspend fun editMessage(messageId: String, newText: String) {
         if (newText.isBlank()) throw IOException("Сообщение не может быть пустым")
+        val rows = JSONArray(call(
+            "/rest/v1/messages?select=content&id=eq.${normalizeUuid(messageId)}&limit=1"
+        ))
+        if (rows.length() == 1 && E2eeMessageEnvelope.isEnvelope(rows.getJSONObject(0).optString("content"))) {
+            throw IOException("Зашифрованное сообщение нельзя редактировать открытым PATCH. Отправьте исправление новым E2EE-сообщением.")
+        }
         call("/rest/v1/messages?id=eq.${normalizeUuid(messageId)}&message_type=eq.text", "PATCH",
             JSONObject().put("content", newText.trim()).put("edited_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
@@ -604,30 +606,8 @@ class NexuraApi(private val store: SessionStore) {
         return url
     }
 
-    suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String) {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        if (mimeType !in listOf("image/jpeg", "image/png", "image/webp", "image/gif")) {
-            throw IOException("Поддерживаются JPG, PNG, WEBP и GIF")
-        }
-        if (bytes.size > 20 * 1024 * 1024) throw IOException("Максимальный размер изображения — 20 МБ")
-        val extension = when (mimeType) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
-        val path = "$chatId/${UUID.randomUUID()}.$extension"
-        withContext(Dispatchers.IO) {
-            val request = Request.Builder()
-                .url("$BASE_URL/storage/v1/object/chat-attachments/$path")
-                .header("apikey", PUBLIC_KEY)
-                .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
-                .header("Content-Type", mimeType)
-                .post(bytes.toRequestBody(mimeType.toMediaType()))
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException(response.body?.string().orEmpty().ifBlank { "Не удалось загрузить изображение" })
-            }
-        }
-        call("/rest/v1/messages", "POST",
-            JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "image").put("content", path).toString(),
-            prefer = "return=minimal")
-        notifyChatPush(chatId)
+    suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String): Nothing {
+        throw IOException("Отправка вложений временно отключена: клиентское E2EE-шифрование файлов ещё не готово.")
     }
 
     suspend fun myProfile(): UserProfile {
