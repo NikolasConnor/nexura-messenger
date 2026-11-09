@@ -297,7 +297,7 @@ fun NexuraCallDialog(
                         Text("Завершить", color = Color.White, fontSize = 11.sp)
                     }
                 }
-            }            } else if (ui.active) {
+            } else if (ui.active) {
                 Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Соединяем звонок…", color = Color.White, fontSize = 14.sp)
                     FilledIconButton(
