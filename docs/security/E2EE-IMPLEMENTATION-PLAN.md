@@ -156,3 +156,12 @@ The generic-push source in this branch is not deployed to Supabase. Production c
 Do not merge or deploy this branch as a complete secure messenger until the latest Android instrumentation tests pass, the migration has been reviewed and applied to a staging project, two real accounts have completed a fingerprint-verified encrypted exchange, and media/group/multi-device limitations are clearly surfaced to users. Production rollout must be a separately approved action.
 
 - Production push-function note: the currently deployed Supabase `send-chat-push` version 4 still accepts an optional `preview` field and forwards it to FCM. The current E2EE branch client sends only `conversation_id`, so this client does not provide message text; the branch Edge Function source ignores previews and always sends generic notification text. The safe Edge Function source is not yet deployed. Before E2EE rollout, deploy the generic-only function and verify old clients cannot supply previews.
+
+### Production Supabase rollout (2026-11-09)
+
+- Applied the E2EE key-directory schema to Supabase project `lyhzawblxcvpgpjrkspc`. The migration creates public device/one-time-key tables with RLS and owner-scoped insert/select/delete policies; authenticated clients have no UPDATE privilege, and anon has no table privileges.
+- Applied a follow-up hardening function that permits one-time-key consumption only for a genuine two-member `direct` conversation, requires the caller and recipient to be its two members, and rejects self-consumption.
+- The RPC's public wrapper is SECURITY INVOKER; its implementation is in the non-exposed `private` schema, SECURITY DEFINER with an empty search path, and is not executable by anon.
+- Deployed `send-chat-push` version 5 with JWT verification enabled. It no longer accepts or forwards message previews and sends only the generic notification body `Новое сообщение`.
+- Verified in Postgres that both E2EE tables have RLS enabled, anon has no SELECT access, authenticated has no UPDATE access, and both migration records exist.
+- The Supabase Security Advisor still reports three pre-existing SECURITY DEFINER functions (`create_direct_conversation`, `create_group_conversation`, `match_contact_users`) and disabled leaked-password protection. These are outside this E2EE migration and need a separate compatibility/security review; they were not modified here.
