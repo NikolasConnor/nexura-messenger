@@ -277,7 +277,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val loadedMessages = api.messages(chat.id, e2eeClient)
                 if (selected?.id == chat.id) {
                     messages = loadedMessages
-                    lastSyncedMessageTimestamp = loadedMessages.maxOfOrNull { it.createdAt }
+                    lastSyncedMessageTimestamp = loadedMessages.maxOfOrNull { it.createdAt } ?: "1970-01-01T00:00:00Z"
                 }
                 api.markChatRead(chat.id)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
