@@ -71,6 +71,7 @@ class CallCoordinator(
                 }
             } },
             { message -> scope.launch {
+                ready = false
                 val previous = lastState ?: CallUiState()
                 publish(previous.copy(status = if (previous.active) "Восстанавливаем связь…" else "Ошибка связи", error = message))
             } }
