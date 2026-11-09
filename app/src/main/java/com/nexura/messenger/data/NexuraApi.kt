@@ -1,7 +1,9 @@
 package com.nexura.messenger.data
 
 import android.net.Uri
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -712,7 +714,6 @@ class NexuraApi(private val store: SessionStore) {
      */
     suspend fun sendEncryptedDirectMessage(
         conversationId: String,
-        recipient: E2eeRemoteDevice,
         e2ee: E2eeClient,
         messageId: String,
         plaintext: String,
@@ -725,9 +726,8 @@ class NexuraApi(private val store: SessionStore) {
         if (plaintext.isBlank() || bytes.size > 12_000) {
             throw IOException("Сообщение пустое или слишком большое для защищённого конверта")
         }
-        if (recipient.userId == uid) throw IOException("Нельзя отправить сообщение самому себе")
         val peerId = directPeerUserId(chatId)
-        if (peerId != recipient.userId) throw IOException("Устройство не принадлежит собеседнику этого чата")
+        if (peerId == uid) throw IOException("Нельзя отправить сообщение самому себе")
 
         val ownBundle = JSONObject(e2ee.ensureDevice())
         val ownDeviceId = ownBundle.getString("device_id")
@@ -829,11 +829,15 @@ class NexuraApi(private val store: SessionStore) {
     }
 
     // Push notifications must never contain message text, sender names, or media details.
-    private suspend fun notifyChatPush(chatId: String) {
-        try {
-            call("/functions/v1/send-chat-push", "POST",
-                JSONObject().put("conversation_id", normalizeUuid(chatId)).toString())
-        } catch (_: Exception) { }
+    private fun notifyChatPush(chatId: String) {
+        // Push is secondary to message persistence. Do not hold the sender UI
+        // while the Edge Function starts or waits on FCM delivery.
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                call("/functions/v1/send-chat-push", "POST",
+                    JSONObject().put("conversation_id", normalizeUuid(chatId)).toString())
+            } catch (_: Exception) { }
+        }
     }
 
     @Deprecated("Use sendEncryptedDirectMessage; plaintext transport is disabled in this branch.")
@@ -885,7 +889,6 @@ class NexuraApi(private val store: SessionStore) {
 
     suspend fun sendEncryptedMediaMessage(
         chatId: String,
-        recipient: E2eeRemoteDevice,
         e2ee: E2eeClient,
         encryptedMedia: EncryptedMediaFile
     ) {
@@ -927,7 +930,7 @@ class NexuraApi(private val store: SessionStore) {
         try {
             // If the POST committed but its read-back confirmation was interrupted,
             // keep the ciphertext object: deleting it could break a valid message.
-            sendEncryptedDirectMessage(chat, recipient, e2ee, messageId, payload, null, "media")
+            sendEncryptedDirectMessage(chat, e2ee, messageId, payload, null, "media")
         } finally {
             encryptedMedia.file.delete()
         }
