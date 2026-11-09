@@ -48,16 +48,17 @@ pub struct PublicDeviceKeys {
 
 /// Canonical signed payload for each one-time key. Keep this exact encoding
 /// stable across clients and server-side validation.
-fn one_time_key_signing_payload(key: &str) -> Vec<u8> {
-    format!(r#"{{"key":"{}"}}"#, key).into_bytes()
+fn one_time_key_signing_payload(curve25519_identity_key: &str, key: &str) -> Vec<u8> {
+    format!(r#"{{"curve25519":"{}","key":"{}"}}"#, curve25519_identity_key, key).into_bytes()
 }
 
 fn sign_unpublished_one_time_keys(account: &Account) -> Vec<SignedOneTimeKey> {
+    let curve25519_identity_key = account.identity_keys().curve25519.to_base64();
     account.one_time_keys()
         .values()
         .map(|key| {
             let encoded = key.to_base64();
-            let signature = account.sign(one_time_key_signing_payload(&encoded));
+            let signature = account.sign(one_time_key_signing_payload(&curve25519_identity_key, &encoded));
             SignedOneTimeKey { key: encoded, signature: signature.to_base64() }
         })
         .collect()
@@ -105,6 +106,7 @@ pub fn mark_keys_as_published(account: &mut Account) {
 /// Verify a published one-time key against the device's Ed25519 identity key.
 pub fn verify_signed_one_time_key(
     ed25519_identity_key: &str,
+    curve25519_identity_key: &str,
     signed_key: &SignedOneTimeKey,
 ) -> Result<(), CryptoError> {
     let identity = Ed25519PublicKey::from_base64(ed25519_identity_key)
@@ -112,7 +114,7 @@ pub fn verify_signed_one_time_key(
     let signature = Ed25519Signature::from_base64(&signed_key.signature)
         .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
     identity
-        .verify(&one_time_key_signing_payload(&signed_key.key), &signature)
+        .verify(&one_time_key_signing_payload(curve25519_identity_key, &signed_key.key), &signature)
         .map_err(|e| CryptoError::Protocol(e.to_string()))
 }
 
@@ -282,11 +284,11 @@ mod tests {
         let (_account, public) = create_device_keys(3);
         assert_eq!(public.one_time_keys.len(), 3);
         for key in &public.one_time_keys {
-            verify_signed_one_time_key(&public.ed25519, key).expect("valid OTK signature");
+            verify_signed_one_time_key(&public.ed25519, &public.curve25519, key).expect("valid OTK signature");
         }
         let mut tampered = public.one_time_keys[0].clone();
         tampered.key.push('A');
-        assert!(verify_signed_one_time_key(&public.ed25519, &tampered).is_err());
+        assert!(verify_signed_one_time_key(&public.ed25519, &public.curve25519, &tampered).is_err());
     }
 
     #[test]
@@ -298,8 +300,8 @@ mod tests {
         let next_batch = generate_additional_one_time_keys(&mut account, 3);
         assert_eq!(next_batch.len(), 3);
         for key in &next_batch {
-            verify_signed_one_time_key(&public.ed25519, key)
-                .expect("replenished OTK must use the same device identity");
+            verify_signed_one_time_key(&public.ed25519, &public.curve25519, key)
+                .expect("replenished OTK must bind to the same device identity");
         }
 
         mark_keys_as_published(&mut account);
