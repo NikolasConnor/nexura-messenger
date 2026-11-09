@@ -904,10 +904,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
                                 Text(
-                                    if (chat.kind == "group") "Групповой чат · защищённая отправка для устройств участников"
-                                    else "Личная переписка · E2EE",
+                                    if (chat.kind == "group") "Групповой чат" else "Личная переписка",
                                     color = SecondaryText,
-                                    fontSize = 12.sp
+                                    fontSize = 12.sp,
+                                    maxLines = 1
                                 )
                             }
                             IconButton(onClick = {
@@ -1014,7 +1014,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 horizontalArrangement = Arrangement.End
                                             ) {
                                                 if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 10.sp)
-                                                Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 10.sp)
+                                                Text(messageTimeLabel(msg.createdAt), color = Color(0xFFB7C4D9), fontSize = 10.sp)
                                                 Box {
                                                     IconButton(
                                                         onClick = { openMessageMenu = if (openMessageMenu == msg.id) null else msg.id },
@@ -1065,10 +1065,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Spacer(Modifier.height(7.dp))
                             }
-                            Text(
-                                "Медиа шифруется отдельно для каждого подтверждённого устройства · до 24 МБ",
-                                color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 5.dp)
-                            )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = { imagePicker.launch(arrayOf("image/jpeg", "image/png", "image/webp")) },
@@ -1115,6 +1111,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         }
     }
+}
+
+private fun messageTimeLabel(value: String): String {
+    val time = value.substringAfter("T", "").take(5)
+    return if (time.length == 5) time else value.take(16).replace("T", " ")
 }
 
 private fun chatTimeLabel(value: String?): String {
