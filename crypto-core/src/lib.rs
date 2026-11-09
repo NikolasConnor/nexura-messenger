@@ -206,12 +206,11 @@ pub fn encrypt_message(session: &mut Session, plaintext: &[u8]) -> Result<String
 pub fn decrypt_message(session: &mut Session, envelope_json: &str) -> Result<Vec<u8>, CryptoError> {
     let message: OlmMessage = serde_json::from_str(envelope_json)
         .map_err(|e| CryptoError::InvalidEnvelope(e.to_string()))?;
-    let OlmMessage::Normal(normal) = message else {
-        return Err(CryptoError::UnexpectedPreKey);
-    };
 
+    // Until the sender receives a reply, Olm may emit more PreKey envelopes.
+    // An established receiver session must accept both Olm message variants.
     session
-        .decrypt(&OlmMessage::Normal(normal))
+        .decrypt(&message)
         .map_err(|e| CryptoError::Protocol(e.to_string()))
 }
 
@@ -246,6 +245,34 @@ mod tests {
         let reply = encrypt_message(&mut bob_session, b"hello from Bob").expect("encrypt reply");
         let reply_plaintext = decrypt_message(&mut alice_session, &reply).expect("decrypt reply");
         assert_eq!(reply_plaintext, b"hello from Bob");
+    }
+
+    #[test]
+    fn consecutive_one_way_messages_remain_decryptable_before_session_ack() {
+        let (alice, alice_public) = create_device_keys(0);
+        let (mut bob, bob_public) = create_device_keys(1);
+        let bob_otk = &bob_public.one_time_keys[0].key;
+
+        let (mut alice_session, first) = start_outbound_session(
+            &alice, &bob_public.curve25519, bob_otk, b"first one-way message"
+        ).expect("start session");
+        let (mut bob_session, received_first) = accept_inbound_session(
+            &mut bob, &alice_public.curve25519, &first
+        ).expect("accept first pre-key message");
+        assert_eq!(received_first, b"first one-way message");
+
+        let second = encrypt_message(&mut alice_session, b"second one-way message")
+            .expect("encrypt second message");
+        assert_eq!(
+            decrypt_message(&mut bob_session, &second).expect("decrypt second message"),
+            b"second one-way message"
+        );
+        let third = encrypt_message(&mut alice_session, b"third one-way message")
+            .expect("encrypt third message");
+        assert_eq!(
+            decrypt_message(&mut bob_session, &third).expect("decrypt third message"),
+            b"third one-way message"
+        );
     }
 
     #[test]
