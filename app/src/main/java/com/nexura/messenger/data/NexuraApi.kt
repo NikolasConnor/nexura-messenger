@@ -224,6 +224,7 @@ class NexuraApi(private val store: SessionStore) {
                     val envelope = E2eeMessageEnvelope.decode(content)
                     if (envelope.conversationId != normalizeUuid(chatId)) throw IOException("Конверт относится к другому чату")
                     if (senderId == uid) {
+                        if (envelope.senderDeviceId != client.deviceId()) throw IOException("Сообщение отправлено с другого устройства")
                         client.cachedMessage(chatId, id)?.toString(Charsets.UTF_8)
                             ?: throw IOException("Локальная копия сообщения недоступна")
                     } else {
@@ -236,6 +237,9 @@ class NexuraApi(private val store: SessionStore) {
                         val device = deviceRows.getJSONObject(0)
                         val curve = device.optString("curve25519_key")
                         val ed = device.optString("ed25519_key")
+                        if (device.optString("protocol") != "olm-v1" || device.optInt("bundle_version") != 1) {
+                            throw IOException("Версия протокола устройства не поддерживается")
+                        }
                         if (curve != envelope.senderCurve25519) throw IOException("Идентичность отправителя не совпадает")
                         if (!client.isRemoteDeviceTrusted(senderId, envelope.senderDeviceId, curve, ed)) {
                             throw IOException("Сначала проверьте отпечаток устройства отправителя")
@@ -485,6 +489,14 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Сообщение пустое или слишком большое для защищённого конверта")
         }
         if (recipient.userId == uid) throw IOException("Нельзя отправить сообщение самому себе")
+        val actualPeerId = directPeerUserId(chatId)
+        if (actualPeerId != recipient.userId) throw IOException("Устройство не принадлежит собеседнику этого чата")
+        val activeDevices = activeE2eeDevices(actualPeerId)
+        if (activeDevices.size != 1 || activeDevices.single().deviceId != recipient.deviceId ||
+            activeDevices.single().curve25519Key != recipient.curve25519Key ||
+            activeDevices.single().ed25519Key != recipient.ed25519Key) {
+            throw IOException("Состав или ключи устройств собеседника изменились. Проверьте отпечаток повторно.")
+        }
         if (!e2ee.isRemoteDeviceTrusted(
                 recipient.userId, recipient.deviceId, recipient.curve25519Key, recipient.ed25519Key
             )) {
@@ -495,6 +507,16 @@ class NexuraApi(private val store: SessionStore) {
         val ownDeviceId = ownBundle.getString("device_id")
         val pendingCiphertext = e2ee.pendingOutboundEnvelope(chatId, messageId)
         val pendingKind = e2ee.pendingOutboundKind(chatId, messageId)
+        if ((pendingCiphertext == null) != (pendingKind == null)) {
+            throw IOException("Локальная очередь E2EE повреждена. Не отправляйте это сообщение повторно с новым ID.")
+        }
+        if (pendingCiphertext != null) {
+            val pendingPlaintext = e2ee.cachedMessage(chatId, messageId)
+                ?: throw IOException("Не найдена локальная копия сообщения из очереди E2EE")
+            if (!pendingPlaintext.contentEquals(plaintext.toByteArray(Charsets.UTF_8))) {
+                throw IOException("Текст не совпадает с ожидающим зашифрованным сообщением")
+            }
+        }
         val kind: E2eeMessageEnvelope.Kind
         val ciphertext: String
         if (pendingCiphertext != null && pendingKind != null) {
