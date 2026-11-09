@@ -306,6 +306,46 @@ class NexuraApi(private val store: SessionStore) {
         return rows.length()
     }
 
+    /**
+     * Creates an Olm pre-key envelope only when the fetched device identity
+     * matches a fingerprint the caller has already verified out of band.
+     * This does not send or persist the envelope.
+     */
+    suspend fun createVerifiedE2eePreKeyEnvelope(
+        e2ee: E2eeClient,
+        conversationId: String,
+        recipientUserId: String,
+        recipientDeviceId: String,
+        verifiedRecipientEd25519Key: String,
+        firstPlaintext: ByteArray
+    ): String {
+        if (verifiedRecipientEd25519Key.isBlank()) {
+            throw IOException("Сначала подтвердите цифровой отпечаток устройства собеседника")
+        }
+        val preKey = consumeE2eePreKey(conversationId, recipientUserId, recipientDeviceId)
+        if (preKey.optString("device_id") != recipientDeviceId) {
+            throw IOException("Сервер вернул ключ другого устройства")
+        }
+        val identityKey = preKey.optString("ed25519_key")
+        if (identityKey != verifiedRecipientEd25519Key) {
+            throw IOException("Цифровой отпечаток устройства изменился. Отправка остановлена")
+        }
+        val oneTimeKey = preKey.optString("one_time_key")
+        val signature = preKey.optString("one_time_key_signature")
+        if (oneTimeKey.isBlank() || signature.isBlank() ||
+            !e2ee.verifyPublishedOneTimeKey(identityKey, oneTimeKey, signature)) {
+            throw IOException("Подпись одноразового E2EE-ключа недействительна")
+        }
+        return e2ee.startDirectSession(
+            conversationId = normalizeUuid(conversationId),
+            recipientCurve25519 = preKey.getString("curve25519_key"),
+            recipientEd25519 = identityKey,
+            recipientOneTimeKey = oneTimeKey,
+            recipientOneTimeKeySignature = signature,
+            firstPlaintext = firstPlaintext
+        )
+    }
+
     /** Atomically consumes one recipient OTK only when both users share this chat. */
     suspend fun consumeE2eePreKey(
         conversationId: String,
