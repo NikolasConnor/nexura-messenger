@@ -226,8 +226,15 @@ class NexuraApi(private val store: SessionStore) {
             val replyTo = m.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }
             val edited = m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" }
 
-            if (type in setOf("text", "media") && E2eeMessageEnvelope.isEnvelope(content)) {
-                val decrypted = try {
+            if (type in setOf("text", "media") &&
+                (E2eeMessageEnvelope.isEnvelope(content) || E2eeGroupMessageEnvelope.isEnvelope(content))) {
+                val decrypted = if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
+                    runCatching {
+                        val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
+                        decryptGroupEnvelope(content, chatId, id, senderId, client)
+                    }.getOrNull()
+                } else try {
+
                     val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
                     val envelope = E2eeMessageEnvelope.decode(content)
                     if (envelope.conversationId != normalizeUuid(chatId)) throw IOException("Конверт относится к другому чату")
@@ -263,6 +270,7 @@ class NexuraApi(private val store: SessionStore) {
                         }
                         plaintext.toString(Charsets.UTF_8)
                     }
+
                 } catch (error: Exception) {
                     null
                 }
