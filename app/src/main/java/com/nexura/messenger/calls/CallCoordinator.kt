@@ -203,13 +203,13 @@ class CallCoordinator(
     fun decline() {
         val id = pendingCallId ?: callId
         if (id != null) send(JSONObject().put("type", "decline").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
-        finish()
+        finish(false)
     }
 
     fun end() {
         val id = callId ?: pendingCallId
         if (id != null) send(JSONObject().put("type", "end").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
-        finish()
+        finish(false)
     }
 
     private fun finish(closeSignaling: Boolean = true) {
@@ -221,7 +221,7 @@ class CallCoordinator(
         callId = null
         remoteDescriptionSet = false
         videoMode = false
-        ready = false
+        if (closeSignaling) ready = false
         queuedIce.clear()
         queuedRemoteIce.clear()
         if (closeSignaling) signaling?.close()
