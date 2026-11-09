@@ -198,9 +198,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     fun sendPickedMedia(uri: Uri?) {
         val chat = selected ?: return
-        if (uri == null) return
+        if (uri == null || sendingImage) return
+        sendingImage = true
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
         scope.launch {
-            sendingImage = true
             error = ""
             var encrypted: EncryptedMediaFile? = null
             try {
@@ -244,10 +247,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         sendPickedMedia(uri)
     }
-    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         sendPickedMedia(uri)
     }
 
@@ -279,6 +282,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
+        if (sendingMessage) return
         if (pendingSecureMessageText != null && pendingSecureMessageText != text) {
             error = "Предыдущее зашифрованное сообщение ещё не подтверждено сервером. Повторите отправку того же текста."
             return
@@ -287,8 +291,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             pendingSecureMessageId = it
             pendingSecureMessageText = text
         }
+        sendingMessage = true
         scope.launch {
-            sendingMessage = true
             error = ""
             try {
                 val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
@@ -1071,7 +1075,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
-                                    onClick = { imagePicker.launch("image/*") },
+                                    onClick = { imagePicker.launch(arrayOf("image/jpeg", "image/png", "image/webp")) },
                                     enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
@@ -1079,7 +1083,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     else Icon(Icons.Default.Image, "Отправить фото", tint = Accent)
                                 }
                                 IconButton(
-                                    onClick = { videoPicker.launch("video/mp4") },
+                                    onClick = { videoPicker.launch(arrayOf("video/*")) },
                                     enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
