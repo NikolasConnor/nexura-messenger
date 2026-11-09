@@ -190,9 +190,10 @@ fun NexuraCallDialog(
                         modifier = Modifier.fillMaxSize(),
                         factory = { viewContext ->
                             SurfaceViewRenderer(viewContext).also { renderer ->
-                                renderer.init(eglContext.eglBaseContext, null)
+                                renderer.init(coordinator?.sharedEglContext() ?: eglContext.eglBaseContext, null)
                                 renderer.setEnableHardwareScaler(true)
                                 renderer.setMirror(false)
+                                renderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                                 remoteRenderer = renderer
                             }
                         },
@@ -217,6 +218,7 @@ fun NexuraCallDialog(
                                     renderer.init(eglContext.eglBaseContext, null)
                                     renderer.setEnableHardwareScaler(true)
                                     renderer.setMirror(true)
+                                renderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                                     localRenderer = renderer
                                 }
                             },
@@ -251,46 +253,51 @@ fun NexuraCallDialog(
             Text(chat.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Text(ui.status, color = Color(0xFFA4AFBF), fontSize = 14.sp)
             if (!ui.error.isNullOrBlank()) Text(ui.error!!, color = Color(0xFFFF858D), fontSize = 12.sp)
-            if (ui.active) {
-                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FilledIconButton(
-                        onClick = {
-                            coordinator?.decline()
-                            com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
-                            onDismiss()
-                        },
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFB83E4A)),
-                        modifier = Modifier.size(60.dp)
-                    ) { Icon(Icons.Default.CallEnd, "Отклонить", tint = Color.White) }
-                    FilledIconButton(
-                        onClick = { request("accept", ui.video) },
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFF2F9D68)),
-                        modifier = Modifier.size(60.dp)
-                    ) { Icon(if (ui.video) Icons.Default.Videocam else Icons.Default.Call, "Принять", tint = Color.White) }
+            if (ui.incoming) {
+                Row(horizontalArrangement = Arrangement.spacedBy(52.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        FilledIconButton(
+                            onClick = {
+                                coordinator?.decline()
+                                com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
+                                onDismiss()
+                            },
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFB83E4A)),
+                            modifier = Modifier.size(68.dp)
+                        ) { Icon(Icons.Default.CallEnd, "Отклонить", tint = Color.White) }
+                        Text("Отклонить", color = Color.White, fontSize = 12.sp)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        FilledIconButton(
+                            onClick = { request("accept", ui.video) },
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFF249B68)),
+                            modifier = Modifier.size(68.dp)
+                        ) { Icon(if (ui.video) Icons.Default.Videocam else Icons.Default.Call, "Ответить", tint = Color.White) }
+                        Text("Ответить", color = Color.White, fontSize = 12.sp)
+                    }
                 }
-            } else if (ui.incoming) {
-                Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FilledIconButton(onClick = { coordinator?.toggleSpeaker(); ui = ui.copy(speaker = !ui.speaker) }) {
-                        Icon(if (ui.speaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff, "Громкая связь")
-                    }
-                    FilledIconButton(onClick = { coordinator?.toggleMute(); ui = ui.copy(muted = !ui.muted) }) {
-                        Icon(if (ui.muted) Icons.Default.MicOff else Icons.Default.Mic, "Микрофон")
-                    }
+            } else if (ui.active) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CallControlButton(label = if (ui.muted) "Звук выкл." else "Микрофон", icon = if (ui.muted) Icons.Default.MicOff else Icons.Default.Mic, selected = ui.muted, onClick = { ui = ui.copy(muted = coordinator?.toggleMute() ?: !ui.muted) })
+                    CallControlButton(label = if (ui.speaker) "Динамик вкл." else "Динамик", icon = if (ui.speaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff, selected = ui.speaker, onClick = { ui = ui.copy(speaker = coordinator?.toggleSpeaker() ?: !ui.speaker) })
                     if (ui.video) {
-                        FilledIconButton(onClick = { coordinator?.toggleCamera(); ui = ui.copy(cameraEnabled = !ui.cameraEnabled) }) {
-                            Icon(Icons.Default.CameraAlt, "Камера")
-                        }
-                        FilledIconButton(onClick = { coordinator?.switchCamera() }) {
-                            Icon(Icons.Default.Cameraswitch, "Сменить камеру")
-                        }
+                        CallControlButton(label = if (ui.cameraEnabled) "Камера" else "Камера выкл.", icon = Icons.Default.CameraAlt, selected = !ui.cameraEnabled, onClick = { ui = ui.copy(cameraEnabled = coordinator?.toggleCamera() ?: !ui.cameraEnabled) })
+                        CallControlButton(label = "Сменить", icon = Icons.Default.Cameraswitch, onClick = { coordinator?.switchCamera() })
                     }
-                    FilledIconButton(
-                        onClick = { coordinator?.end(); onDismiss() },
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFB83E4A)),
-                        modifier = Modifier.size(58.dp)
-                    ) { Icon(Icons.Default.CallEnd, "Завершить", tint = Color.White) }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        FilledIconButton(
+                            onClick = {
+                                coordinator?.end()
+                                com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
+                                onDismiss()
+                            },
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFB83E4A)),
+                            modifier = Modifier.size(58.dp)
+                        ) { Icon(Icons.Default.CallEnd, "Завершить", tint = Color.White) }
+                        Text("Завершить", color = Color.White, fontSize = 11.sp)
+                    }
                 }
-            } else {
+            }            } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Button(onClick = { request("audio", false) }, enabled = coordinator != null && ui.status == "Готово к звонку" && !starting) {
                         Icon(Icons.Default.Call, null)
@@ -305,7 +312,27 @@ fun NexuraCallDialog(
                 }
             }
             Spacer(Modifier.weight(1f, fill = false))
-            TextButton(onClick = { coordinator?.end(); onDismiss() }) { Text("Закрыть", color = Color(0xFFA4AFBF)) }
         }
+    }
+}
+
+
+@Composable
+private fun CallControlButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        FilledTonalIconButton(
+            onClick = onClick,
+            modifier = Modifier.size(54.dp),
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = if (selected) Color(0xFF365B83) else Color(0xFF263242),
+                contentColor = Color.White
+            )
+        ) { Icon(icon, contentDescription = label) }
+        Text(label, color = Color.White, fontSize = 10.sp, maxLines = 1)
     }
 }
