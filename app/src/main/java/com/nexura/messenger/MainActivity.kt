@@ -566,7 +566,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
-                            }
+                            } else if (search.length >= 2 && !searching && users.isEmpty()) {
+                            Text("Введите имя и нажмите «Найти человека». Если совпадений нет, попробуйте другой запрос.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 16.dp))
+                        }
                         }
                         if (homeTab == "chats") {
                             OutlinedTextField(
@@ -673,6 +675,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(48.dp),
                             shape = RoundedCornerShape(16.dp)
                         ) { Text(if (searching) "Ищем…" else "Найти человека") }
+                        if (searching) {
+                            Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(18.dp), color = Accent, strokeWidth = 2.dp)
+                                Text("Ищем людей…", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 9.dp))
+                            }
+                        }
                         if (users.isNotEmpty()) {
                             Text("Результаты поиска", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
                             users.forEach { user ->
@@ -757,19 +765,40 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 selected = homeTab == "chats",
                                 onClick = { homeTab = "chats"; createGroupOpen = false },
                                 icon = { Icon(Icons.Default.ChatBubbleOutline, contentDescription = null) },
-                                label = { Text("Чаты") }
+                                label = { Text("Чаты") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Accent,
+                                    selectedTextColor = Accent,
+                                    indicatorColor = Accent.copy(alpha = 0.14f),
+                                    unselectedIconColor = SecondaryText,
+                                    unselectedTextColor = SecondaryText
+                                )
                             )
                             NavigationBarItem(
                                 selected = homeTab == "contacts",
                                 onClick = { homeTab = "contacts"; createGroupOpen = false },
                                 icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
-                                label = { Text("Контакты") }
+                                label = { Text("Контакты") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Accent,
+                                    selectedTextColor = Accent,
+                                    indicatorColor = Accent.copy(alpha = 0.14f),
+                                    unselectedIconColor = SecondaryText,
+                                    unselectedTextColor = SecondaryText
+                                )
                             )
                             NavigationBarItem(
                                 selected = homeTab == "search",
                                 onClick = { homeTab = "search"; createGroupOpen = false },
                                 icon = { Icon(Icons.Default.Search, contentDescription = null) },
-                                label = { Text("Поиск") }
+                                label = { Text("Поиск") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Accent,
+                                    selectedTextColor = Accent,
+                                    indicatorColor = Accent.copy(alpha = 0.14f),
+                                    unselectedIconColor = SecondaryText,
+                                    unselectedTextColor = SecondaryText
+                                )
                             )
                             NavigationBarItem(
                                 selected = settingsOpen,
@@ -787,7 +816,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 },
                                 icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                label = { Text("Профиль") }
+                                label = { Text("Профиль") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Accent,
+                                    selectedTextColor = Accent,
+                                    indicatorColor = Accent.copy(alpha = 0.14f),
+                                    unselectedIconColor = SecondaryText,
+                                    unselectedTextColor = SecondaryText
+                                )
                             )
                         }
                     }
@@ -1168,7 +1204,7 @@ private fun Avatar(name: String, avatar: String? = null) {
 
 @Composable
 private fun GroupAvatar() {
-    Box(Modifier.size(54.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(50.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
         Text("👥", fontSize = 22.sp)
     }
 }
