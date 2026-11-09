@@ -18,6 +18,7 @@ data class CallUiState(
     val status: String = "Подключение…",
     val incoming: Boolean = false,
     val active: Boolean = false,
+    val connected: Boolean = false,
     val video: Boolean = false,
     val muted: Boolean = false,
     val speaker: Boolean = false,
@@ -125,7 +126,7 @@ class CallCoordinator(
                 if (!send(signal)) publish((lastState ?: CallUiState()).copy(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
                 else localDescriptionSignaled = true
                 flushIce()
-                publish((lastState ?: CallUiState()).copy(status = "На связи", incoming = false, active = true, video = videoMode, speaker = videoMode))
+                publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
             },
             onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
         )
@@ -158,7 +159,7 @@ class CallCoordinator(
                     onReady = {
                         remoteDescriptionSet = true
                         flushIce()
-                        publish((lastState ?: CallUiState()).copy(status = "На связи", active = true, video = videoMode, speaker = videoMode))
+                        publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
                     },
                     onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
                 )
@@ -185,6 +186,8 @@ class CallCoordinator(
 
     private val queuedRemoteIce = mutableListOf<Triple<String, String?, Int>>()
 
+    fun sharedEglContext(): org.webrtc.EglBase.Context? = engine?.sharedEglContext()
+
     private fun createEngine(video: Boolean) {
         engine?.close()
         engine = NexuraCallEngine(
@@ -201,7 +204,8 @@ class CallCoordinator(
             onRemoteVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(remoteVideoTrack = track)) } },
             onLocalVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(localVideoTrack = track)) } },
             onState = { value -> scope.launch {
-                publish((lastState ?: CallUiState()).copy(status = value, video = videoMode))
+                val connected = value == "Подключено"
+                publish((lastState ?: CallUiState()).copy(status = if (connected) "На связи" else value, connected = connected, video = videoMode))
             } }
         )
     }
