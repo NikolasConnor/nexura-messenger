@@ -44,6 +44,7 @@ fun NexuraCallDialog(
     ownUserId: String,
     accessToken: String,
     visible: Boolean,
+    autoAction: String = "show",
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -141,6 +142,17 @@ fun NexuraCallDialog(
                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
             }
             else -> continueCallAfterPermissions()
+        }
+    }
+
+    var autoActionHandled by remember { mutableStateOf(false) }
+    LaunchedEffect(ui.incoming, autoAction) {
+        if (ui.incoming && !autoActionHandled && autoAction != "show") {
+            autoActionHandled = true
+            when (autoAction) {
+                "accept" -> request("accept", ui.video)
+                "decline" -> { coordinator?.decline(); onDismiss() }
+            }
         }
     }
 
