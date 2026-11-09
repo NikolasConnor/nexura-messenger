@@ -721,20 +721,22 @@ class NexuraApi(private val store: SessionStore) {
         return rows.getJSONObject(0).getString("user_id")
     }
 
-    suspend fun activeE2eeDevices(userId: String): List<E2eeRemoteDevice> {
+    suspend fun activeE2eeDevices(userId: String): List<E2eeRemoteDevice> =
+        activeE2eeDevicesForUsers(listOf(userId))
+
+    private suspend fun activeE2eeDevicesForUsers(userIds: Collection<String>): List<E2eeRemoteDevice> {
+        val ids = userIds.map { normalizeUuid(it) }.distinct()
+        if (ids.isEmpty()) return emptyList()
         val rows = JSONArray(call(
             "/rest/v1/e2ee_devices?select=user_id,device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
-                "&user_id=eq.${normalizeUuid(userId)}&is_active=eq.true&order=created_at.asc"
+                "&user_id=in.(${ids.joinToString(",")})&is_active=eq.true&order=created_at.asc"
         ))
         return (0 until rows.length()).map { index ->
             val row = rows.getJSONObject(index)
             E2eeRemoteDevice(
-                row.getString("user_id"),
-                row.getString("device_id"),
-                row.getString("curve25519_key"),
-                row.getString("ed25519_key"),
-                row.getString("protocol"),
-                row.getInt("bundle_version")
+                row.getString("user_id"), row.getString("device_id"),
+                row.getString("curve25519_key"), row.getString("ed25519_key"),
+                row.getString("protocol"), row.getInt("bundle_version")
             )
         }
     }
