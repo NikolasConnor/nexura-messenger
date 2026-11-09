@@ -30,6 +30,8 @@ import androidx.core.content.ContextCompat
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import org.webrtc.EglBase
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
@@ -227,18 +229,30 @@ fun NexuraCallDialog(
                 }
             } else {
                 Spacer(Modifier.weight(1f))
+                val avatarUrl = chat.avatar.takeIf {
+                    it.startsWith("https://") || it.startsWith("http://")
+                }
                 Box(
                     Modifier.size(112.dp).background(Color(0xFF28364A), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(chat.avatar.ifBlank { "🙂" }, fontSize = 48.sp)
+                    if (avatarUrl != null) {
+                        AsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "Аватар ${chat.title}",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text(chat.avatar.takeIf { it.isNotBlank() && it != "null" } ?: "🙂", fontSize = 48.sp)
+                    }
                 }
             }
             Text(chat.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Text(ui.status, color = Color(0xFFA4AFBF), fontSize = 14.sp)
             if (!ui.error.isNullOrBlank()) Text(ui.error!!, color = Color(0xFFFF858D), fontSize = 12.sp)
-            if (ui.incoming) {
-                Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (ui.active) {
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     FilledIconButton(
                         onClick = {
                             coordinator?.decline()
@@ -254,8 +268,8 @@ fun NexuraCallDialog(
                         modifier = Modifier.size(60.dp)
                     ) { Icon(if (ui.video) Icons.Default.Videocam else Icons.Default.Call, "Принять", tint = Color.White) }
                 }
-            } else if (ui.active) {
-                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            } else if (ui.incoming) {
+                Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
                     FilledIconButton(onClick = { coordinator?.toggleSpeaker(); ui = ui.copy(speaker = !ui.speaker) }) {
                         Icon(if (ui.speaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff, "Громкая связь")
                     }
