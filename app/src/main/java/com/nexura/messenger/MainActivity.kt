@@ -338,6 +338,20 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    LaunchedEffect(authCallback, signedIn, chats) {
+        val targetChatId = if (authCallback?.scheme == "nexura" && authCallback.host == "chat") {
+            authCallback.pathSegments.firstOrNull()?.let { raw ->
+                runCatching { UUID.fromString(raw).toString() }.getOrNull()
+            }
+        } else null
+        if (signedIn && targetChatId != null) {
+            val targetChat = chats.firstOrNull { it.id.equals(targetChatId, ignoreCase = true) }
+            if (targetChat != null && selected?.id != targetChat.id) {
+                openChat(targetChat)
+            }
+        }
+    }
+
     LaunchedEffect(signedIn) {
         if (signedIn) {
             try {
