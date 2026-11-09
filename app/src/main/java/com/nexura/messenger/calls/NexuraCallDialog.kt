@@ -164,6 +164,9 @@ fun NexuraCallDialog(
             com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
         }
     }
+    LaunchedEffect(ui.incoming, ui.active) {
+        if (!ui.incoming && !ui.active) autoActionHandled = false
+    }
 
     if (!visible && !ui.incoming && !ui.active && ui.error.isNullOrBlank()) return
 
