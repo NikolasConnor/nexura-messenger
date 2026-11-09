@@ -1,4 +1,4 @@
-use jni::objects::{JByteArray, JClass, JObject, JObjectArray, JString};
+use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::sys::{jboolean, jint, jobjectArray, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use nexura_crypto_core::{
@@ -6,10 +6,6 @@ use nexura_crypto_core::{
     pickle_account, pickle_session, start_outbound_session, unpickle_account,
     unpickle_session, verify_signed_one_time_key, PublicDeviceKeys, SignedOneTimeKey,
 };
-
-fn java_string(env: &mut JNIEnv, value: &str) -> Result<JString<'static>, String> {
-    env.new_string(value).map_err(|e| e.to_string())
-}
 
 fn set_error(env: &mut JNIEnv, message: &str) {
     let _ = env.throw_new("java/lang/IllegalStateException", message);
