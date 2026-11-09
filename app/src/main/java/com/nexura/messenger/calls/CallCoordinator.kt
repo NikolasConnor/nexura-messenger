@@ -36,7 +36,8 @@ class CallCoordinator(
     private val ownUserId: String,
     private val peerUserId: String,
     private val api: com.nexura.messenger.data.NexuraApi,
-    private val onState: (CallUiState) -> Unit
+    private val onState: (CallUiState) -> Unit,
+    private val onCallFinished: (Long, Boolean, Boolean, String) -> Unit = { _, _, _, _ -> }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var signaling: CallSignalingClient? = null
@@ -51,6 +52,10 @@ class CallCoordinator(
     private var offerRetryJob: Job? = null
     private var ringTimeoutJob: Job? = null
     private var connectionTimeoutJob: Job? = null
+    private var connectedAtMs: Long? = null
+    private var callVideoForHistory = false
+    private var callDirectionOutgoing = false
+    private var callHistoryWritten = false
 
     fun connect(token: String) {
         signaling?.close()
@@ -85,6 +90,10 @@ class CallCoordinator(
             return
         }
         videoMode = video
+        callVideoForHistory = video
+        callDirectionOutgoing = true
+        callHistoryWritten = false
+        connectedAtMs = null
         callId = UUID.randomUUID().toString()
         localDescriptionSignaled = false
         startKeepAlive(video)
@@ -136,6 +145,10 @@ class CallCoordinator(
     fun accept() {
         val offer = pendingOffer ?: return
         videoMode = pendingVideo
+        callVideoForHistory = pendingVideo
+        callDirectionOutgoing = false
+        callHistoryWritten = false
+        connectedAtMs = null
         callId = pendingCallId
         startKeepAlive(videoMode)
         try {
@@ -238,7 +251,11 @@ class CallCoordinator(
             onLocalVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(localVideoTrack = track)) } },
             onState = { value -> scope.launch {
                 val connected = value == "Подключено"
-                if (connected) { connectionTimeoutJob?.cancel(); connectionTimeoutJob = null }
+                if (connected) {
+                    connectionTimeoutJob?.cancel()
+                    connectionTimeoutJob = null
+                    if (connectedAtMs == null) connectedAtMs = System.currentTimeMillis()
+                }
                 publish((lastState ?: CallUiState()).copy(status = if (connected) "На связи" else value, connected = connected, video = videoMode))
             } }
         )
@@ -335,7 +352,15 @@ class CallCoordinator(
         runCatching { context.stopService(Intent(context, CallKeepAliveService::class.java)) }
         engine?.close()
         engine = null
-        val wasOutgoing = lastState?.outgoing == true
+        val wasOutgoing = callDirectionOutgoing
+        val connectedAt = connectedAtMs
+        if (connectedAt != null && !callHistoryWritten) {
+            callHistoryWritten = true
+            val duration = ((System.currentTimeMillis() - connectedAt) / 1000L).coerceAtLeast(0L)
+            val result = if (duration > 0) "completed" else "missed"
+            runCatching { onCallFinished(duration, wasOutgoing, callVideoForHistory, result) }
+        }
+        connectedAtMs = null
         val readyForNextCall = !closeSignaling && ready
         publish(CallUiState(
             status = if (readyForNextCall) "Готово к звонку" else "Подключение…",
@@ -348,6 +373,8 @@ class CallCoordinator(
         localDescriptionSignaled = false
         videoMode = false
         pendingVideo = false
+        callVideoForHistory = false
+        callDirectionOutgoing = false
         if (closeSignaling) ready = false
         queuedIce.clear()
         queuedRemoteIce.clear()
