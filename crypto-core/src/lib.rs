@@ -122,30 +122,6 @@ pub fn unpickle_session(serialized: &str) -> Result<Session, CryptoError> {
     Ok(Session::from_pickle(pickle))
 }
 
-/// Creates a new device account and an initial batch of one-time keys.
-/// The caller may upload ONLY the returned public material.
-pub fn create_device_keys(one_time_key_count: usize) -> (Account, PublicDeviceKeys) {
-    let mut account = Account::new();
-    let count = one_time_key_count.min(account.max_number_of_one_time_keys());
-    account.generate_one_time_keys(count);
-
-    let identity = account.identity_keys();
-    let one_time_keys = account
-        .one_time_keys()
-        .values()
-        .map(|key| key.to_base64())
-        .collect();
-
-    (
-        account,
-        PublicDeviceKeys {
-            curve25519: identity.curve25519.to_base64(),
-            ed25519: identity.ed25519.to_base64(),
-            one_time_keys,
-        },
-    )
-}
-
 /// Creates an outbound Olm session and encrypts its first pre-key message.
 /// Peer identity verification and signed-pre-key validation belong to the
 /// higher-level key-directory protocol and are intentionally not implied here.
