@@ -164,7 +164,12 @@ class CallSignalingClient(
             val waitMs = (1_000L shl reconnectAttempt.coerceAtMost(5)).coerceAtMost(30_000L)
             reconnectAttempt = (reconnectAttempt + 1).coerceAtMost(5)
             delay(waitMs)
-            if (!closed && !readyDelivered) connectSocket()
+            if (!closed && !readyDelivered) {
+                val staleSocket = socket
+                socket = null
+                staleSocket?.cancel()
+                connectSocket()
+            }
         }
     }
 
