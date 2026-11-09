@@ -573,9 +573,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
-                            } else if (search.length >= 2 && !searching && users.isEmpty()) {
-                            Text("Введите имя и нажмите «Найти человека». Если совпадений нет, попробуйте другой запрос.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 16.dp))
-                        }
+                            }
                         }
                         if (homeTab == "chats") {
                             OutlinedTextField(
