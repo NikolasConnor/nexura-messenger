@@ -9,6 +9,8 @@ create table if not exists public.e2ee_devices (
     device_id uuid not null,
     curve25519_key text not null,
     ed25519_key text not null,
+    protocol text not null default 'olm-v1' check (protocol = 'olm-v1'),
+    bundle_version smallint not null default 1 check (bundle_version = 1),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     is_active boolean not null default true,
@@ -77,22 +79,14 @@ create policy e2ee_otk_insert_owner
 on public.e2ee_one_time_keys for insert to authenticated
 with check (user_id = (select auth.uid()));
 
-create policy e2ee_otk_update_owner
-on public.e2ee_one_time_keys for update to authenticated
-using (user_id = (select auth.uid()))
-with check (user_id = (select auth.uid()));
-
 create policy e2ee_otk_delete_owner
 on public.e2ee_one_time_keys for delete to authenticated
 using (user_id = (select auth.uid()));
 
 grant select, insert, update, delete on public.e2ee_devices to authenticated;
-grant select, insert, update, delete on public.e2ee_one_time_keys to authenticated;
+grant select, insert, delete on public.e2ee_one_time_keys to authenticated;
 
--- Atomic one-time-key consumption is intentionally left for a separate
--- reviewed RPC. Never let a client directly set consumed_at on another user's
--- row. The RPC must check auth.uid() and both users' membership in the supplied
--- conversation, then SELECT ... FOR UPDATE SKIP LOCKED and mark one key consumed.
+-- Clients cannot update consumed_at. Only the membership-checked RPC below can consume a key.
 
 
 create policy e2ee_otk_read_owner
