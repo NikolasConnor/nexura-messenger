@@ -460,6 +460,137 @@ class NexuraApi(private val store: SessionStore) {
         return rows.getJSONObject(0)
     }
 
+    suspend fun groupMemberIds(conversationId: String): List<String> {
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(conversationId)}&order=joined_at.asc"
+        ))
+        val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("user_id") }.distinct()
+        if (ids.size !in 2..E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
+            throw IOException("В группе должно быть от 2 до ${E2eeGroupMessageEnvelope.MAX_RECIPIENTS} участников")
+        }
+        return ids
+    }
+
+    suspend fun sendEncryptedGroupMessage(
+        conversationId: String,
+        e2ee: E2eeClient,
+        messageId: String,
+        plaintext: String,
+        messageType: String = "text"
+    ) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val chatId = normalizeUuid(conversationId)
+        if (plaintext.isBlank() || plaintext.toByteArray(Charsets.UTF_8).size > 12_000) {
+            throw IOException("Сообщение пустое или слишком большое для защищённого конверта")
+        }
+        val members = groupMemberIds(chatId)
+        if (uid !in members) throw IOException("Вы больше не состоите в этой группе")
+        val own = JSONObject(e2ee.ensureDevice())
+        val ownDeviceId = own.getString("device_id")
+        val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
+        for (memberId in members.filter { it != uid }) {
+            val devices = activeE2eeDevices(memberId)
+            if (devices.isEmpty()) throw IOException("У участника $memberId нет активного E2EE-устройства. Отправка остановлена.")
+            for (device in devices) {
+                if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
+                    throw IOException("Устройство участника использует неподдерживаемый протокол")
+                }
+                if (!e2ee.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)) {
+                    throw IOException("Не подтверждён отпечаток устройства участника $memberId. Отправка остановлена.")
+                }
+                val ciphertext: String
+                val kind: E2eeMessageEnvelope.Kind
+                if (e2ee.hasGroupSession(chatId, memberId, device.deviceId)) {
+                    ciphertext = e2ee.encryptGroupMessage(
+                        chatId, memberId, device.deviceId, plaintext.toByteArray(Charsets.UTF_8), messageId
+                    )
+                    kind = E2eeMessageEnvelope.Kind.NORMAL
+                } else {
+                    val preKey = consumeE2eePreKey(chatId, memberId, device.deviceId)
+                    if (preKey.optString("ed25519_key") != device.ed25519Key ||
+                        preKey.optString("curve25519_key") != device.curve25519Key) {
+                        throw IOException("Ключ устройства участника изменился. Отправка отменена.")
+                    }
+                    val otk = preKey.optString("one_time_key")
+                    val signature = preKey.optString("one_time_key_signature")
+                    if (!e2ee.verifyPublishedOneTimeKey(device.ed25519Key, device.curve25519Key, otk, signature)) {
+                        throw IOException("Подпись одноразового ключа участника недействительна")
+                    }
+                    ciphertext = e2ee.startGroupSession(
+                        chatId, memberId, device.deviceId, device.curve25519Key, device.ed25519Key,
+                        otk, signature, plaintext.toByteArray(Charsets.UTF_8), messageId
+                    )
+                    kind = E2eeMessageEnvelope.Kind.PRE_KEY
+                }
+                recipients += E2eeGroupRecipientEnvelope(memberId, device.deviceId, kind, ciphertext)
+            }
+        }
+        val envelope = E2eeGroupMessageEnvelope(
+            chatId, uid, ownDeviceId, own.getString("curve25519"), recipients
+        ).encode()
+        val payload = JSONObject()
+            .put("id", normalizeUuid(messageId))
+            .put("conversation_id", chatId)
+            .put("sender_id", uid)
+            .put("message_type", messageType)
+            .put("content", envelope)
+        call("/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
+            prefer = "resolution=ignore-duplicates,return=minimal")
+        val saved = JSONArray(call(
+            "/rest/v1/messages?select=id,sender_id,content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
+        ))
+        if (saved.length() != 1 || saved.getJSONObject(0).optString("sender_id") != uid ||
+            saved.getJSONObject(0).optString("content") != envelope) {
+            throw IOException("Сервер не подтвердил сохранение группового E2EE-сообщения")
+        }
+        notifyChatPush(chatId)
+    }
+
+    private suspend fun decryptGroupEnvelope(
+        raw: String,
+        chatId: String,
+        messageId: String,
+        senderId: String,
+        e2ee: E2eeClient
+    ): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val envelope = E2eeGroupMessageEnvelope.decode(raw)
+        if (envelope.conversationId != normalizeUuid(chatId) || envelope.senderUserId != senderId) {
+            throw IOException("Групповой конверт не соответствует чату или отправителю")
+        }
+        val members = groupMemberIds(chatId)
+        if (senderId !in members || uid !in members) throw IOException("Отправитель или получатель не состоит в группе")
+        val senderRows = JSONArray(call(
+            "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
+                "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
+        ))
+        if (senderRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
+        val sender = senderRows.getJSONObject(0)
+        if (sender.optString("curve25519_key") != envelope.senderCurve25519 ||
+            sender.optString("protocol") != "olm-v1" || sender.optInt("bundle_version") != 1) {
+            throw IOException("Идентичность отправителя группы не подтверждена")
+        }
+        if (!e2ee.isRemoteDeviceTrusted(senderId, envelope.senderDeviceId,
+                sender.optString("curve25519_key"), sender.optString("ed25519_key"))) {
+            throw IOException("Сначала проверьте отпечаток отправителя группы")
+        }
+        val myDeviceId = e2ee.deviceId()
+        val recipient = envelope.recipients.singleOrNull {
+            it.userId == uid && it.deviceId == myDeviceId
+        } ?: throw IOException("Это групповое сообщение не адресовано данному устройству")
+        val cached = e2ee.cachedMessage(chatId, messageId)
+        val plaintext = cached ?: when (recipient.kind) {
+            E2eeMessageEnvelope.Kind.PRE_KEY -> e2ee.acceptGroupSession(
+                chatId, senderId, envelope.senderDeviceId, envelope.senderCurve25519,
+                recipient.ciphertext, messageId
+            )
+            E2eeMessageEnvelope.Kind.NORMAL -> e2ee.decryptGroupMessage(
+                chatId, senderId, envelope.senderDeviceId, recipient.ciphertext, messageId
+            )
+        }
+        return plaintext.toString(Charsets.UTF_8)
+    }
+
     /** Resolve the sole peer in a direct conversation; group chats are rejected. */
     suspend fun directPeerUserId(conversationId: String): String {
         val uid = store.userId ?: throw IOException("Сессия истекла")
