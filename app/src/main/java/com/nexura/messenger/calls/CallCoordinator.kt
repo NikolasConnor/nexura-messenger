@@ -111,12 +111,15 @@ class CallCoordinator(
                 publish(CallUiState(status = "Входящий видеозвонок".takeIf { pendingVideo } ?: "Входящий звонок", incoming = true, video = pendingVideo))
             }
             "answer" -> if (id == callId) {
-                engine?.acceptAnswer(signal.optString("sdp")) { error ->
-                    publish(CallUiState(status = "Ошибка звонка", error = error))
-                }
-                remoteDescriptionSet = true
-                flushIce()
-                publish(CallUiState(status = "На связи", active = true, video = videoMode))
+                engine?.acceptAnswer(
+                    signal.optString("sdp"),
+                    onReady = {
+                        remoteDescriptionSet = true
+                        flushIce()
+                        publish((lastState ?: CallUiState()).copy(status = "На связи", active = true, video = videoMode))
+                    },
+                    onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
+                )
             }
             "ice" -> if (id == callId || id == pendingCallId) {
                 val candidate = signal.optJSONObject("candidate") ?: return
