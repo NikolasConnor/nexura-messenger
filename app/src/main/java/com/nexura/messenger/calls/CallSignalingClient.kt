@@ -43,6 +43,8 @@ class CallSignalingClient(
     private val joined = mutableSetOf<String>()
     private val lock = Any()
     @Volatile private var closed = false
+    @Volatile private var readyDelivered = false
+    @Volatile private var errorDelivered = false
 
     init {
         val request = Request.Builder()
@@ -62,10 +64,16 @@ class CallSignalingClient(
                             val payload = message.optJSONObject("payload")
                             if (payload?.optString("status") == "ok") {
                                 val topic = message.optString("topic")
-                                synchronized(lock) { joined.add(topic) }
-                                if (topic == peerTopic || peerTopic == ownTopic) onReady()
+                                val allJoined = synchronized(lock) {
+                                    joined.add(topic)
+                                    joined.contains(ownTopic) && joined.contains(peerTopic)
+                                }
+                                if (allJoined && !readyDelivered) {
+                                    readyDelivered = true
+                                    onReady()
+                                }
                             } else if (payload?.optString("status") == "error") {
-                                onError(payload.optJSONObject("response")?.toString() ?: "Realtime отклонил подключение")
+                                reportError(payload.optJSONObject("response")?.toString() ?: "Realtime отклонил подключение")
                             }
                         }
                         "broadcast" -> {
@@ -75,17 +83,24 @@ class CallSignalingClient(
                                 if (signal.optString("to") == ownUserId) onSignal(signal)
                             }
                         }
-                        "phx_error", "phx_close" -> onError("Соединение сигнализации прервано")
+                        "phx_error", "phx_close" -> reportError("Соединение сигнализации прервано")
                     }
                 } catch (e: Exception) {
-                    onError(e.message ?: "Ошибка обработки сигнала звонка")
+                    reportError(e.message ?: "Ошибка обработки сигнала звонка")
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (!closed) onError(t.message ?: "Не удалось подключиться к серверу звонков")
+                if (!closed) reportError(buildString {
+                    append(t.message ?: "Не удалось подключиться к серверу звонков")
+                    if (response != null) append(" (HTTP ").append(response.code).append(")")
+                })
             }
         })
+        scope.launch {
+            delay(18_000)
+            if (!closed && !readyDelivered) reportError("Сервер звонков не подтвердил подключение за 18 секунд. Проверьте сеть и повторите попытку.")
+        }
         scope.launch {
             var ref = 10
             while (isActive && !closed) {
@@ -97,6 +112,12 @@ class CallSignalingClient(
                     .put("ref", (ref++).toString()).toString())
             }
         }
+    }
+
+    private fun reportError(message: String) {
+        if (closed || errorDelivered) return
+        errorDelivered = true
+        onError(message)
     }
 
     private fun join(topic: String, ref: String) {
@@ -115,7 +136,7 @@ class CallSignalingClient(
     }
 
     fun sendSignal(signal: JSONObject): Boolean {
-        if (closed || !synchronized(lock) { joined.contains(peerTopic) }) return false
+        if (closed || !readyDelivered || !synchronized(lock) { joined.contains(peerTopic) }) return false
         val payload = JSONObject()
             .put("event", "call_signal")
             .put("type", "broadcast")
