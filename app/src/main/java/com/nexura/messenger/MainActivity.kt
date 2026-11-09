@@ -910,7 +910,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         } else {
                                             val members = api.groupMemberIds(chat.id).filter { it != store.userId }
                                             val queue = members.flatMap { memberId ->
-                                                api.activeE2eeDevices(memberId).map { memberId to it }
+                                                val devices = api.activeE2eeDevices(memberId)
+                                                if (devices.isEmpty()) throw IllegalStateException("У участника $memberId пока нет активного E2EE-устройства")
+                                                devices.map { memberId to it }
                                             }.filter { (memberId, device) ->
                                                 !client.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
                                             }
