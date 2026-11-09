@@ -202,6 +202,8 @@ class E2eeClientInstrumentedTest {
             val bytes = encrypted.readBytes()
             bytes[bytes.lastIndex] = (bytes.last().toInt() xor 0x01).toByte()
             encrypted.writeBytes(bytes)
+            val tamperedDigest = MessageDigest.getInstance("SHA-256").digest(encrypted.readBytes())
+                .joinToString("") { "%02x".format(it) }
             assertEquals(
                 true,
                 runCatching {
@@ -209,7 +211,7 @@ class E2eeClientInstrumentedTest {
                         encrypted, tamperedOutput,
                         Base64.encodeToString(key, Base64.NO_WRAP),
                         Base64.encodeToString(iv, Base64.NO_WRAP),
-                        digest
+                        tamperedDigest
                     )
                 }.isFailure
             )
