@@ -168,6 +168,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingSecureMessageText by remember { mutableStateOf<String?>(null) }
     var showCallDialog by remember { mutableStateOf(false) }
     var pendingCallAction by remember { mutableStateOf(authCallback?.getQueryParameter("action") ?: "show") }
+    LaunchedEffect(selected?.id) {
+        context.getSharedPreferences("nexura_runtime", android.content.Context.MODE_PRIVATE)
+            .edit().putString("active_chat_id", selected?.id).apply()
+    }
 
     fun syncContacts() {
         scope.launch {
