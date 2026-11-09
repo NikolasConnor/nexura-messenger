@@ -715,7 +715,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 4.dp)) {
                                                 Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                             }
-                                        } else Icon(Icons.Default.ArrowBack, null, tint = SecondaryText.copy(alpha = 0.55f), modifier = Modifier.size(16.dp))
+                                        } else Text("›", color = SecondaryText.copy(alpha = 0.7f), fontSize = 24.sp)
                                     }
                                     HorizontalDivider(color = Surface1.copy(alpha = 0.9f), modifier = Modifier.padding(start = 70.dp))
                                 }
