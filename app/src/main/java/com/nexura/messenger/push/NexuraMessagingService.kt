@@ -121,8 +121,10 @@ class NexuraMessagingService : FirebaseMessagingService() {
         try {
             NotificationManagerCompat.from(this).notify(notificationId, builder.build())
             if (incomingCall && conversationId != null && callId != null &&
-                getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE)
-                    .getBoolean("activity_visible", false)
+                getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE).let { prefs ->
+                    prefs.getBoolean("activity_visible", false) &&
+                        prefs.getString("active_chat_id", null) != conversationId
+                }
             ) {
                 val launch = Intent(this, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
