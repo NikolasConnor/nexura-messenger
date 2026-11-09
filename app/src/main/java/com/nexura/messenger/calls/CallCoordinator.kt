@@ -75,7 +75,7 @@ class CallCoordinator(
                     .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
                 if (!send(signal)) publish(CallUiState(status = "Не удалось вызвать", error = "Сигнал не отправлен"))
                 else {
-                    publish(CallUiState(status = "Вызов…", active = true, video = video, speaker = video))
+                    publish((lastState ?: CallUiState()).copy(status = "Вызов…", active = true, video = video, speaker = video))
                     scope.launch {
                         runCatching { api.notifyIncomingCall(chatId, peerUserId, callId!!, video) }
                     }
@@ -108,7 +108,7 @@ class CallCoordinator(
                     .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
                 if (!send(signal)) publish(CallUiState(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
                 flushIce()
-                publish(CallUiState(status = "На связи", active = true, video = videoMode, speaker = videoMode))
+                publish((lastState ?: CallUiState()).copy(status = "На связи", active = true, video = videoMode, speaker = videoMode))
             },
             onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
         )
@@ -171,28 +171,36 @@ class CallCoordinator(
         engine = NexuraCallEngine(
             context, video,
             onLocalIce = { candidate ->
-                if (callId != null && remoteDescriptionSet) {
-                    send(JSONObject().put("type", "ice").put("call_id", callId)
+                val id = callId
+                if (id != null && send(JSONObject().put("type", "ice").put("call_id", id)
                         .put("from", ownUserId).put("to", peerUserId)
                         .put("candidate", JSONObject().put("candidate", candidate.sdp)
-                            .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))
+                            .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))) {
+                    // Trickle ICE can be sent as soon as the local description exists.
                 } else queuedIce.add(candidate)
             },
             onRemoteVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(remoteVideoTrack = track)) } },
             onLocalVideo = { track -> scope.launch { publish((lastState ?: CallUiState()).copy(localVideoTrack = track)) } },
-            onState = { value -> scope.launch { publish((lastState ?: CallUiState()).copy(status = value, active = true, video = videoMode)) } }
+            onState = { value -> scope.launch {
+                publish((lastState ?: CallUiState()).copy(status = value, video = videoMode))
+            } }
         )
     }
 
     private val queuedIce = mutableListOf<IceCandidate>()
     private fun flushIce() {
-        queuedIce.forEach { candidate ->
-            send(JSONObject().put("type", "ice").put("call_id", callId)
-                .put("from", ownUserId).put("to", peerUserId)
-                .put("candidate", JSONObject().put("candidate", candidate.sdp)
-                    .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))
+        val id = callId
+        if (id != null) {
+            val iterator = queuedIce.iterator()
+            while (iterator.hasNext()) {
+                val candidate = iterator.next()
+                val sent = send(JSONObject().put("type", "ice").put("call_id", id)
+                    .put("from", ownUserId).put("to", peerUserId)
+                    .put("candidate", JSONObject().put("candidate", candidate.sdp)
+                        .put("sdpMid", candidate.sdpMid).put("sdpMLineIndex", candidate.sdpMLineIndex)))
+                if (sent) iterator.remove()
+            }
         }
-        queuedIce.clear()
         if (remoteDescriptionSet) {
             queuedRemoteIce.forEach { (sdp, mid, line) -> engine?.addRemoteIce(sdp, mid, line) }
             queuedRemoteIce.clear()
