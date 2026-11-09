@@ -116,9 +116,10 @@ class E2eeClient(context: Context, userId: String) {
 
     fun verifyPublishedOneTimeKey(
         ed25519IdentityKey: String,
+        curve25519IdentityKey: String,
         oneTimeKey: String,
         signature: String
-    ): Boolean = E2eeNative.nativeVerifyOneTimeKey(ed25519IdentityKey, oneTimeKey, signature)
+    ): Boolean = E2eeNative.nativeVerifyOneTimeKey(ed25519IdentityKey, curve25519IdentityKey, oneTimeKey, signature)
 
     @Synchronized
     fun startDirectSession(
