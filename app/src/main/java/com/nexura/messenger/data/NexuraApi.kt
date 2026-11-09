@@ -724,8 +724,10 @@ class NexuraApi(private val store: SessionStore) {
 
         val peerDevices = activeE2eeDevices(peerId)
         if (peerDevices.isEmpty()) throw IOException("У собеседника пока нет активных устройств Nexura")
-        if (peerDevices.size > E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
-            throw IOException("У собеседника слишком много устройств для одной защищённой отправки")
+        val ownOtherDevices = activeE2eeDevices(uid).filterNot { it.deviceId == ownDeviceId }
+        val allTargets = (peerDevices + ownOtherDevices).distinctBy { "${it.userId}:${it.deviceId}" }
+        if (allTargets.size > E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
+            throw IOException("Слишком много активных устройств для одной защищённой отправки")
         }
 
         val pending = e2ee.cachedMessage(chatId, messageId)
@@ -734,12 +736,12 @@ class NexuraApi(private val store: SessionStore) {
         }
 
         val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
-        for (device in peerDevices) {
+        for (device in allTargets) {
             if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
                 throw IOException("Одно из устройств собеседника использует неподдерживаемый протокол")
             }
-            e2ee.trustRemoteDeviceOnFirstUse(peerId, device.deviceId, device.curve25519Key, device.ed25519Key)
-            val saved = e2ee.pendingGroupEnvelope(chatId, messageId, peerId, device.deviceId)
+            e2ee.trustRemoteDeviceOnFirstUse(device.userId, device.deviceId, device.curve25519Key, device.ed25519Key)
+            val saved = e2ee.pendingGroupEnvelope(chatId, messageId, device.userId, device.deviceId)
             if (saved != null) {
                 val cached = e2ee.cachedMessage(chatId, messageId)
                     ?: throw IOException("Не найдена локальная копия ожидающего сообщения")
@@ -747,9 +749,9 @@ class NexuraApi(private val store: SessionStore) {
                 recipients += saved
             } else if (e2ee.hasGroupSession(chatId, peerId, device.deviceId)) {
                 val cipher = e2ee.encryptGroupMessage(chatId, peerId, device.deviceId, bytes, messageId)
-                recipients += E2eeGroupRecipientEnvelope(peerId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, cipher)
+                recipients += E2eeGroupRecipientEnvelope(device.userId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, cipher)
             } else {
-                val preKey = consumeE2eePreKey(chatId, peerId, device.deviceId)
+                val preKey = consumeE2eePreKey(chatId, device.userId, device.deviceId)
                 if (preKey.optString("ed25519_key") != device.ed25519Key ||
                     preKey.optString("curve25519_key") != device.curve25519Key) {
                     throw IOException("Ключ одного из устройств собеседника изменился. Отправка отменена.")
@@ -760,16 +762,18 @@ class NexuraApi(private val store: SessionStore) {
                     throw IOException("Подпись одноразового ключа одного из устройств недействительна")
                 }
                 val cipher = e2ee.startGroupSession(
-                    chatId, peerId, device.deviceId, device.curve25519Key, device.ed25519Key,
+                    chatId, device.userId, device.deviceId, device.curve25519Key, device.ed25519Key,
                     otk, signature, bytes, messageId
                 )
-                recipients += E2eeGroupRecipientEnvelope(peerId, device.deviceId, E2eeMessageEnvelope.Kind.PRE_KEY, cipher)
+                recipients += E2eeGroupRecipientEnvelope(device.userId, device.deviceId, E2eeMessageEnvelope.Kind.PRE_KEY, cipher)
             }
         }
 
-        val latestDevices = activeE2eeDevices(peerId)
-        if (latestDevices.map { it.deviceId }.toSet() != peerDevices.map { it.deviceId }.toSet()) {
-            throw IOException("Список устройств собеседника изменился во время отправки. Повторите отправку.")
+        val latestPeerDevices = activeE2eeDevices(peerId)
+        val latestOwnDevices = activeE2eeDevices(uid).filterNot { it.deviceId == ownDeviceId }
+        val latestTargets = (latestPeerDevices + latestOwnDevices).distinctBy { "${it.userId}:${it.deviceId}" }
+        if (latestTargets.map { "${it.userId}:${it.deviceId}" }.toSet() != allTargets.map { "${it.userId}:${it.deviceId}" }.toSet()) {
+            throw IOException("Список устройств одного из участников изменился во время отправки. Повторите отправку.")
         }
         val envelope = E2eeGroupMessageEnvelope(
             chatId, uid, ownDeviceId, ownBundle.getString("curve25519"), recipients
