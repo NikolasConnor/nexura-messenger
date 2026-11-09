@@ -89,7 +89,7 @@ class NexuraCallEngine(
                 }
                 override fun onTrack(transceiver: org.webrtc.RtpTransceiver) {
                     val track = transceiver.receiver.track()
-                    if (track is VideoTrack) onRemoteVideo(track)
+                    if (track is VideoTrack) { track.setEnabled(true); onRemoteVideo(track) }
                 }
             }
         ) ?: error("Не удалось создать WebRTC соединение")
