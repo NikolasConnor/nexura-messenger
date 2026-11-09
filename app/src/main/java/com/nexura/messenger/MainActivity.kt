@@ -835,12 +835,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             client?.deviceFingerprint(ownBundle.getString("curve25519"), ownBundle.getString("ed25519")) ?: "Недоступен"
                         } else "Недоступен"
                         AlertDialog(
-                            onDismissRequest = { trustCandidate = null; trustPeerId = null },
+                            onDismissRequest = { trustCandidate = null; trustPeerId = null; groupTrustQueue = emptyList() },
                             title = { Text("Проверка устройства") },
                             text = {
                                 Column {
                                     Text("Сравните отпечаток собеседника с отпечатком его устройства по другому доверенному каналу — например, лично или по видеосвязи. Не подтверждайте ключ, если сравнить его не удалось.")
-                                    Text("Устройство собеседника", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                    Text(
+                                        if (groupTrustQueue.isNotEmpty()) "Устройство участника: ${trustPeerId}" else "Устройство собеседника",
+                                        color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp)
+                                    )
                                     Text(remoteFingerprint, color = MainText, fontWeight = FontWeight.Bold)
                                     Text("Ваш отпечаток", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
                                     Text(ownFingerprint, color = MainText, fontWeight = FontWeight.Bold)
@@ -853,13 +856,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         client ?: throw IllegalStateException("Ключ устройства не готов")
                                         client.trustRemoteDevice(trustPeerId!!, remote.deviceId, remote.curve25519Key, remote.ed25519Key)
                                         notice = "Устройство подтверждено. Сообщения этому ключу будут шифроваться."
-                                        trustCandidate = null
-                                        trustPeerId = null
+                                        if (groupTrustQueue.isNotEmpty()) {
+                                            val remaining = groupTrustQueue.drop(1)
+                                            groupTrustQueue = remaining
+                                            if (remaining.isNotEmpty()) {
+                                                trustPeerId = remaining.first().first
+                                                trustCandidate = remaining.first().second
+                                            } else {
+                                                trustCandidate = null
+                                                trustPeerId = null
+                                                notice = "Все устройства участников группы подтверждены"
+                                            }
+                                        } else {
+                                            trustCandidate = null
+                                            trustPeerId = null
+                                        }
                                     } catch (e: Exception) { error = e.message ?: "Не удалось сохранить доверие" }
                                 }) { Text("Я сверил отпечаток") }
                             },
                             dismissButton = {
-                                TextButton(onClick = { trustCandidate = null; trustPeerId = null }) { Text("Отмена") }
+                                TextButton(onClick = { trustCandidate = null; trustPeerId = null; groupTrustQueue = emptyList() }) { Text("Отмена") }
                             }
                         )
                     }
