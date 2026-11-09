@@ -43,7 +43,6 @@ class CallCoordinator(
     private var videoMode = false
     private var ready = false
     private var closed = false
-    private val queuedIce = mutableListOf<IceCandidate>()
     private var remoteDescriptionSet = false
     private var offerRetryJob: Job? = null
 
