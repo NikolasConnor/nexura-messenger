@@ -142,6 +142,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var e2eeStatus by remember { mutableStateOf("Шифрование не проверено") }
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
+    var pendingSecureMessageId by remember { mutableStateOf<String?>(null) }
+    var pendingSecureMessageText by remember { mutableStateOf<String?>(null) }
 
     fun syncContacts() {
         scope.launch {
@@ -233,7 +235,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
-        val messageId = UUID.randomUUID().toString()
+        if (pendingSecureMessageText != null && pendingSecureMessageText != text) {
+            error = "Предыдущее зашифрованное сообщение ещё не подтверждено сервером. Повторите отправку того же текста."
+            return
+        }
+        val messageId = pendingSecureMessageId ?: UUID.randomUUID().toString().also {
+            pendingSecureMessageId = it
+            pendingSecureMessageText = text
+        }
         scope.launch {
             sendingMessage = true
             error = ""
@@ -254,6 +263,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 api.sendEncryptedDirectMessage(chat.id, remote, client, messageId, text, replyToId)
                 draft = ""
                 replyTarget = null
+                pendingSecureMessageId = null
+                pendingSecureMessageText = null
                 messages = api.messages(chat.id, client)
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось отправить защищённое сообщение"
@@ -912,22 +923,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                                     keyboardActions = KeyboardActions(onSend = {
                                         val text = draft.trim()
-                                        if (text.isNotEmpty() && !sendingMessage) scope.launch {
-                                            sendingMessage = true
-                                            error = ""
-                                            sendSecureMessage(chat, text, replyTarget?.id)
-                                        }
+                                        if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
                                     })
                                 )
                                 Spacer(Modifier.width(7.dp))
                                 IconButton(
                                     onClick = {
                                         val text = draft.trim()
-                                        if (text.isNotEmpty() && !sendingMessage) scope.launch {
-                                            sendingMessage = true
-                                            error = ""
-                                            sendSecureMessage(chat, text, replyTarget?.id)
-                                        }
+                                        if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
                                     },
                                     enabled = draft.isNotBlank() && !sendingMessage,
                                     modifier = Modifier.size(46.dp).background(if (draft.isNotBlank()) Accent else Surface2, CircleShape)
