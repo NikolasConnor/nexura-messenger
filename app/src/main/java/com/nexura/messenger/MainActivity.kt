@@ -146,6 +146,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     var sendingMessage by remember { mutableStateOf(false) }
     var sendingImage by remember { mutableStateOf(false) }
+    var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
     var profileName by remember { mutableStateOf("") }
@@ -217,12 +218,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
     fun sendPickedMedia(uri: Uri?) {
-        val chat = selected ?: return
-        if (uri == null || sendingImage) return
-        sendingImage = true
+        if (uri == null) return
         runCatching {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        pendingMediaUri = uri
+    }
+
+    fun sendPendingMedia(chat: ChatItem, uri: Uri, caption: String, replyToId: String?) {
+        if (sendingImage) return
+        sendingImage = true
         scope.launch {
             error = ""
             var encrypted: EncryptedMediaFile? = null
@@ -232,10 +237,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
                 if (chat.kind == "direct") {
-                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!)
+                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId)
                 } else {
-                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!)
+                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId)
                 }
+                pendingMediaUri = null
+                draft = ""
+                replyTarget = null
                 notice = "Медиа отправлено с E2EE-шифрованием"
             } catch (e: Exception) {
                 encrypted?.file?.delete()
@@ -246,10 +254,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        sendPickedMedia(uri)
-    }
-    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         sendPickedMedia(uri)
     }
 
@@ -1052,6 +1057,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         Icon(Icons.Default.PlayArrow, "Открыть видео", tint = Color.White, modifier = Modifier.size(54.dp))
                                                         Text("Видео", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(10.dp))
                                                     }
+                                                    msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
+                                                        Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+                                                    }
                                                 } else {
                                                     AsyncImage(
                                                         model = mediaUri,
@@ -1060,6 +1068,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image" },
                                                         contentScale = ContentScale.Crop
                                                     )
+                                                    msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
+                                                        Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+                                                    }
                                                 }
                                             } else if (msg.messageType == "image") {
                                                 AsyncImage(model = msg.content, contentDescription = "Изображение", modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
@@ -1123,21 +1134,36 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Spacer(Modifier.height(7.dp))
                             }
+                            if (pendingMediaUri != null) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                                        .clip(RoundedCornerShape(12.dp)).background(Surface2).padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val isVideo = context.contentResolver.getType(pendingMediaUri!!)?.startsWith("video/") == true
+                                    AsyncImage(
+                                        model = pendingMediaUri,
+                                        contentDescription = if (isVideo) "Выбранное видео" else "Выбранное фото",
+                                        modifier = Modifier.size(54.dp).clip(RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                                        Text(if (isVideo) "Видео прикреплено" else "Фото прикреплено", color = MainText, fontSize = 13.sp)
+                                        Text("Добавьте подпись или отправьте как есть", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    IconButton(onClick = { pendingMediaUri = null }, modifier = Modifier.size(32.dp)) {
+                                        Text("×", color = SecondaryText, fontSize = 22.sp)
+                                    }
+                                }
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
-                                    onClick = { imagePicker.launch(arrayOf("image/jpeg", "image/png", "image/webp")) },
+                                    onClick = { mediaPicker.launch(arrayOf("image/*", "video/*")) },
                                     enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
-                                    else Icon(Icons.Default.Image, "Отправить фото", tint = Accent)
-                                }
-                                IconButton(
-                                    onClick = { videoPicker.launch(arrayOf("video/mp4")) },
-                                    enabled = !sendingImage,
-                                    modifier = Modifier.size(44.dp)
-                                ) {
-                                    Text("🎬", fontSize = 19.sp)
+                                    else Icon(Icons.Default.Add, "Прикрепить фото или видео", tint = Accent)
                                 }
                                 OutlinedTextField(
                                     value = draft, onValueChange = { draft = it },
@@ -1147,20 +1173,24 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                                     keyboardActions = KeyboardActions(onSend = {
                                         val text = draft.trim()
-                                        if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
+                                        val media = pendingMediaUri
+                                        if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
+                                        else if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
                                     })
                                 )
                                 Spacer(Modifier.width(7.dp))
                                 IconButton(
                                     onClick = {
                                         val text = draft.trim()
-                                        if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
+                                        val media = pendingMediaUri
+                                        if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
+                                        else if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
                                     },
-                                    enabled = draft.isNotBlank() && !sendingMessage,
-                                    modifier = Modifier.size(46.dp).background(if (draft.isNotBlank()) Accent else Surface2, CircleShape)
+                                    enabled = (draft.isNotBlank() || pendingMediaUri != null) && !sendingMessage && !sendingImage,
+                                    modifier = Modifier.size(46.dp).background(if (draft.isNotBlank() || pendingMediaUri != null) Accent else Surface2, CircleShape)
                                 ) {
-                                    if (sendingMessage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
-                                    else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText)
+                                    if (sendingMessage || sendingImage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
+                                    else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank() || pendingMediaUri != null) Bg else SecondaryText)
                                 }
                             }
                         }
