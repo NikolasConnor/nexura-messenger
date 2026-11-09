@@ -84,13 +84,19 @@ class CallCoordinator(
         callId = UUID.randomUUID().toString()
         localDescriptionSignaled = false
         startKeepAlive(video)
-        createEngine(video)
+        try {
+            createEngine(video)
+        } catch (error: Exception) {
+            failCall("Не удалось запустить звонок", error.message ?: "Проверьте разрешения микрофона и камеры")
+            return
+        }
         engine?.createOffer(
             onReady = { sdp ->
                 val signal = JSONObject().put("type", "offer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
-                if (!send(signal)) publish(CallUiState(status = "Не удалось вызвать", error = "Сигнал не отправлен"))
-                else {
+                if (!send(signal)) {
+                    failCall("Не удалось вызвать", "Сигнал не отправлен. Проверьте соединение и повторите попытку.")
+                } else {
                     // The local SDP is installed; flush ICE candidates collected before this offer.
                     localDescriptionSignaled = true
                     publish((lastState ?: CallUiState()).copy(status = "Вызов…", incoming = false, active = true, video = video, speaker = video))
@@ -119,7 +125,7 @@ class CallCoordinator(
                 }
                 flushIce()
             },
-            onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
+            onError = { error -> failCall("Ошибка звонка", error) }
         )
     }
 
@@ -128,20 +134,28 @@ class CallCoordinator(
         videoMode = pendingVideo
         callId = pendingCallId
         startKeepAlive(videoMode)
-        createEngine(videoMode)
+        try {
+            createEngine(videoMode)
+        } catch (error: Exception) {
+            failCall("Не удалось принять звонок", error.message ?: "Проверьте разрешения микрофона и камеры")
+            return
+        }
         engine?.acceptOffer(
             offer,
             onReady = { sdp ->
                 remoteDescriptionSet = true
                 val signal = JSONObject().put("type", "answer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
-                if (!send(signal)) publish((lastState ?: CallUiState()).copy(status = "Ошибка звонка", error = "Не удалось отправить ответ собеседнику"))
-                else localDescriptionSignaled = true
-                flushIce()
-                armConnectionTimeout()
-                publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
+                if (!send(signal)) {
+                    failCall("Ошибка звонка", "Не удалось отправить ответ собеседнику")
+                } else {
+                    localDescriptionSignaled = true
+                    flushIce()
+                    armConnectionTimeout()
+                    publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
+                }
             },
-            onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
+            onError = { error -> failCall("Ошибка звонка", error) }
         )
     }
 
@@ -175,7 +189,7 @@ class CallCoordinator(
                         armConnectionTimeout()
                         publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
                     },
-                    onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
+                    onError = { error -> failCall("Ошибка звонка", error) }
                 )
             }
             "ice" -> if (id == callId || id == pendingCallId) {
@@ -245,6 +259,10 @@ class CallCoordinator(
         }
     }
 
+    private fun failCall(status: String, message: String) {
+        finish(false)
+        publish(CallUiState(status = status, error = message))
+    }
     private fun armConnectionTimeout() {
         connectionTimeoutJob?.cancel()
         val expectedCallId = callId
