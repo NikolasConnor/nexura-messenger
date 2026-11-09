@@ -176,31 +176,13 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
         val raw = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,last_read_at,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc"))
-        val readAfterByChat = mutableMapOf<String, String>()
-        val allChatIds = mutableListOf<String>()
-        for (i in 0 until raw.length()) {
-            val membership = raw.optJSONObject(i) ?: continue
-            val conversation = membership.optJSONObject("conversations") ?: continue
-            val id = conversation.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: continue
-            allChatIds += id
-            readAfterByChat[id] = membership.optString("last_read_at")
-                .takeIf { it.isNotBlank() && it != "null" } ?: "1970-01-01T00:00:00Z"
-        }
+        // Aggregate unread counts in Postgres; do not download thousands of message rows.
+        val unreadRows = JSONArray(call("/rest/v1/rpc/get_my_unread_counts", "POST", "{}"))
         val unreadByChat = mutableMapOf<String, Int>()
-        if (allChatIds.isNotEmpty()) {
-            val unreadRows = JSONArray(call(
-                "/rest/v1/messages?select=conversation_id,created_at&conversation_id=in.(" +
-                    allChatIds.distinct().joinToString(",") + ")&sender_id=neq." + uid +
-                    "&deleted_at=is.null&order=created_at.desc&limit=5000"
-            ))
-            for (i in 0 until unreadRows.length()) {
-                val row = unreadRows.optJSONObject(i) ?: continue
-                val chatId = row.optString("conversation_id")
-                val lastRead = readAfterByChat[chatId] ?: continue
-                if (row.optString("created_at") > lastRead) {
-                    unreadByChat[chatId] = (unreadByChat[chatId] ?: 0) + 1
-                }
-            }
+        for (i in 0 until unreadRows.length()) {
+            val row = unreadRows.optJSONObject(i) ?: continue
+            val id = row.optString("conversation_id")
+            if (id.isNotBlank() && id != "null") unreadByChat[id] = row.optInt("unread_count")
         }
 
         val base = (0 until raw.length()).mapNotNull { i ->
