@@ -49,10 +49,10 @@ class CallCoordinator(
             onReady = {
                 scope.launch {
                     ready = true
-                    onState(CallUiState(status = "Готово к звонку"))
+                    publish(CallUiState(status = "Готово к звонку"))
                 }
             },
-            onError = { message -> scope.launch { onState(CallUiState(status = "Ошибка связи", error = message)) } }
+            onError = { message -> scope.launch { publish(CallUiState(status = "Ошибка связи", error = message)) } }
         )
     }
 
@@ -70,14 +70,14 @@ class CallCoordinator(
             ownUserId,
             peerUserId,
             { signal -> scope.launch { receive(signal) } },
-            { scope.launch { ready = true; onState(CallUiState(status = "Готово к звонку")) } },
-            { message -> scope.launch { onState(CallUiState(status = "Ошибка связи", error = message)) } }
+            { scope.launch { ready = true; publish(CallUiState(status = "Готово к звонку")) } },
+            { message -> scope.launch { publish(CallUiState(status = "Ошибка связи", error = message)) } }
         )
     }
 
     fun start(video: Boolean) {
         if (!ready || closed) {
-            onState(CallUiState(status = "Подключение…", error = "Сервер звонков ещё подключается"))
+            publish(CallUiState(status = "Подключение…", error = "Сервер звонков ещё подключается"))
             return
         }
         videoMode = video
@@ -87,11 +87,11 @@ class CallCoordinator(
             onReady = { sdp ->
                 val signal = JSONObject().put("type", "offer").put("call_id", callId)
                     .put("from", ownUserId).put("to", peerUserId).put("video", video).put("sdp", sdp)
-                if (!send(signal)) onState(CallUiState(status = "Не удалось вызвать", error = "Сигнал не отправлен"))
-                else onState(CallUiState(status = "Вызов…", active = true, video = video))
+                if (!send(signal)) publish(CallUiState(status = "Не удалось вызвать", error = "Сигнал не отправлен"))
+                else publish(CallUiState(status = "Вызов…", active = true, video = video))
                 flushIce()
             },
-            onError = { error -> onState(CallUiState(status = "Ошибка звонка", error = error)) }
+            onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
         )
     }
 
@@ -108,9 +108,9 @@ class CallCoordinator(
                     .put("from", ownUserId).put("to", peerUserId).put("sdp", sdp)
                 send(signal)
                 flushIce()
-                onState(CallUiState(status = "На связи", active = true, video = videoMode))
+                publish(CallUiState(status = "На связи", active = true, video = videoMode))
             },
-            onError = { error -> onState(CallUiState(status = "Ошибка звонка", error = error)) }
+            onError = { error -> publish(CallUiState(status = "Ошибка звонка", error = error)) }
         )
     }
 
@@ -129,15 +129,15 @@ class CallCoordinator(
                 pendingOffer = signal.optString("sdp")
                 pendingCallId = id
                 pendingVideo = signal.optBoolean("video")
-                onState(CallUiState(status = "Входящий видеозвонок".takeIf { pendingVideo } ?: "Входящий звонок", incoming = true, video = pendingVideo))
+                publish(CallUiState(status = "Входящий видеозвонок".takeIf { pendingVideo } ?: "Входящий звонок", incoming = true, video = pendingVideo))
             }
             "answer" -> if (id == callId) {
                 engine?.acceptAnswer(signal.optString("sdp")) { error ->
-                    onState(CallUiState(status = "Ошибка звонка", error = error))
+                    publish(CallUiState(status = "Ошибка звонка", error = error))
                 }
                 remoteDescriptionSet = true
                 flushIce()
-                onState(CallUiState(status = "На связи", active = true, video = videoMode))
+                publish(CallUiState(status = "На связи", active = true, video = videoMode))
             }
             "ice" -> if (id == callId || id == pendingCallId) {
                 val candidate = signal.optJSONObject("candidate") ?: return
@@ -154,7 +154,7 @@ class CallCoordinator(
                     else -> "Звонок завершён"
                 }
                 finish(false)
-                onState(CallUiState(status = text))
+                publish(CallUiState(status = text))
             }
         }
     }
@@ -174,7 +174,7 @@ class CallCoordinator(
                 } else queuedIce.add(candidate)
             },
             onRemoteVideo = { },
-            onState = { value -> scope.launch { onState(CallUiState(status = value, active = true, video = videoMode)) } }
+            onState = { value -> scope.launch { publish(CallUiState(status = value, active = true, video = videoMode)) } }
         )
     }
 
@@ -198,15 +198,16 @@ class CallCoordinator(
     fun toggleMute(): Boolean {
         val muted = !(lastState?.muted ?: false)
         engine?.setMuted(muted)
-        onState((lastState ?: CallUiState()).copy(muted = muted))
+        publish((lastState ?: CallUiState()).copy(muted = muted))
         return muted
     }
     private var lastState: CallUiState? = null
+    private fun publish(state: CallUiState) { lastState = state; onState(state) }
 
     fun toggleCamera(): Boolean {
         val enabled = !(lastState?.cameraEnabled ?: true)
         engine?.setCameraEnabled(enabled)
-        onState((lastState ?: CallUiState()).copy(cameraEnabled = enabled))
+        publish((lastState ?: CallUiState()).copy(cameraEnabled = enabled))
         return enabled
     }
     fun switchCamera() { engine?.switchCamera() }
