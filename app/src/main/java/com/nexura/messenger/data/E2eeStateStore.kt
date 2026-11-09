@@ -58,6 +58,31 @@ class E2eeStateStore(context: Context, userNamespace: String) {
         }
     }
 
+    /**
+     * Encrypts a group of related protocol states and commits them in one
+     * SharedPreferences transaction. Used to persist a ratchet advance and its
+     * corresponding local message cache/outbox record without a partial commit.
+     */
+    @Synchronized
+    @Throws(GeneralSecurityException::class)
+    fun saveBatch(states: Map<String, ByteArray>) {
+        require(states.isNotEmpty()) { "states must not be empty" }
+        val editor = preferences.edit()
+        for ((sessionId, serializedState) in states) {
+            require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+            require(serializedState.isNotEmpty()) { "serializedState must not be empty" }
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            cipher.updateAAD(aad(sessionId))
+            val encrypted = cipher.doFinal(serializedState)
+            val encoded = VERSION + ":" +
+                Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
+                Base64.encodeToString(encrypted, Base64.NO_WRAP)
+            editor.putString(storageKey(sessionId), encoded)
+        }
+        check(editor.commit()) { "Unable to persist encrypted E2EE state batch" }
+    }
+
     @Synchronized
     @Throws(GeneralSecurityException::class)
     fun load(sessionId: String): ByteArray? {
