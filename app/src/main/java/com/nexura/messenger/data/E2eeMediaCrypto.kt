@@ -1,6 +1,9 @@
 package com.nexura.messenger.data
 
 import android.content.ContentResolver
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
@@ -53,10 +56,16 @@ object E2eeMediaCrypto {
         val iv = ByteArray(12).also(SecureRandom()::nextBytes)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+        val optimizedImage = if (mime.startsWith("image/")) optimizeImage(resolver, uri, cacheDir, mime) else null
+        val uploadMime = optimizedImage?.second ?: mime
+        val uploadName = if (optimizedImage != null) {
+            name.substringBeforeLast(".", name) + when (uploadMime) { "image/png" -> ".png"; "image/webp" -> ".webp"; else -> ".jpg" }
+        } else name
         val encrypted = File.createTempFile("nexura-media-", ".enc", cacheDir)
         var total = 0L
         try {
-            val input = resolver.openInputStream(uri) ?: throw IOException("Не удалось открыть файл")
+            val input = if (optimizedImage != null) FileInputStream(optimizedImage.first)
+                else resolver.openInputStream(uri) ?: throw IOException("Не удалось открыть файл")
             input.use { source ->
                 CipherOutputStream(FileOutputStream(encrypted), cipher).use { target ->
                     val buffer = ByteArray(BUFFER_SIZE)
@@ -64,16 +73,14 @@ object E2eeMediaCrypto {
                         val read = source.read(buffer)
                         if (read < 0) break
                         total += read
-                        if (total > MAX_PLAINTEXT_BYTES) {
-                            throw IOException("Файл слишком большой. Максимум 24 МБ.")
-                        }
+                        if (total > MAX_PLAINTEXT_BYTES) throw IOException("Файл слишком большой. Максимум 24 МБ.")
                         target.write(buffer, 0, read)
                     }
                 }
             }
             if (total == 0L) throw IOException("Файл пустой")
             return EncryptedMediaFile(
-                encrypted, mime, name, total,
+                encrypted, uploadMime, uploadName, total,
                 Base64.encodeToString(key, Base64.NO_WRAP),
                 Base64.encodeToString(iv, Base64.NO_WRAP),
                 sha256(encrypted), encrypted.length()
@@ -81,6 +88,43 @@ object E2eeMediaCrypto {
         } catch (error: Exception) {
             encrypted.delete()
             throw error
+        } finally {
+            optimizedImage?.first?.delete()
+        }
+    }
+
+    private fun optimizeImage(resolver: ContentResolver, uri: Uri, cacheDir: File, mime: String): Pair<File, String> {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            ?: throw IOException("Не удалось прочитать изображение")
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("Повреждённое изображение")
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = 1
+            while (bounds.outWidth / (inSampleSize * 2) >= 1920 || bounds.outHeight / (inSampleSize * 2) >= 1920) {
+                inSampleSize *= 2
+            }
+        }
+        val bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+            ?: throw IOException("Не удалось декодировать изображение")
+        val outputMime = when (mime) { "image/png" -> "image/png"; "image/webp" -> "image/webp"; else -> "image/jpeg" }
+        val extension = when (outputMime) { "image/png" -> ".png"; "image/webp" -> ".webp"; else -> ".jpg" }
+        val output = File.createTempFile("nexura-image-", extension, cacheDir)
+        try {
+            val format = when (outputMime) {
+                "image/png" -> Bitmap.CompressFormat.PNG
+                "image/webp" -> if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+                else -> Bitmap.CompressFormat.JPEG
+            }
+            FileOutputStream(output).use { stream ->
+                val quality = if (outputMime == "image/png") 100 else 82
+                if (!bitmap.compress(format, quality, stream)) throw IOException("Не удалось оптимизировать изображение")
+            }
+            return output to outputMime
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            bitmap.recycle()
         }
     }
 
