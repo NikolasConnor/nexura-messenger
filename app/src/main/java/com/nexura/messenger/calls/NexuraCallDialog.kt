@@ -27,6 +27,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.viewinterop.AndroidView
+import org.webrtc.EglBase
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 import com.nexura.messenger.data.ChatItem
 import com.nexura.messenger.data.NexuraApi
 import kotlinx.coroutines.launch
@@ -46,6 +50,12 @@ fun NexuraCallDialog(
     var ui by remember { mutableStateOf(CallUiState()) }
     var pendingAction by remember { mutableStateOf("audio") }
     var starting by remember { mutableStateOf(false) }
+    val eglContext = remember { EglBase.create() }
+    var remoteRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+    var localRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+    DisposableEffect(Unit) { onDispose { remoteRenderer?.release(); localRenderer?.release(); eglContext.release() } }
+    LaunchedEffect(ui.remoteVideoTrack, remoteRenderer) { remoteRenderer?.let { renderer -> ui.remoteVideoTrack?.addSink(renderer) } }
+    LaunchedEffect(ui.localVideoTrack, localRenderer) { localRenderer?.let { renderer -> ui.localVideoTrack?.addSink(renderer) } }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -110,11 +120,42 @@ fun NexuraCallDialog(
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Text(if (ui.video) "Видеозвонок" else "Звонок", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Box(
-                Modifier.size(112.dp).background(Color(0xFF28364A), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(chat.avatar.ifBlank { "🙂" }, fontSize = 48.sp)
+            if (ui.video && ui.active) {
+                Box(Modifier.fillMaxWidth().height(360.dp).background(Color.Black, MaterialTheme.shapes.large)) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { viewContext ->
+                            SurfaceViewRenderer(viewContext).also { renderer ->
+                                renderer.init(eglContext.eglBaseContext, null)
+                                renderer.setEnableHardwareScaler(true)
+                                renderer.setMirror(false)
+                                remoteRenderer = renderer
+                            }
+                        },
+                        update = { renderer -> ui.remoteVideoTrack?.addSink(renderer) }
+                    )
+                    if (ui.localVideoTrack != null) {
+                        AndroidView(
+                            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).width(104.dp).height(148.dp),
+                            factory = { viewContext ->
+                                SurfaceViewRenderer(viewContext).also { renderer ->
+                                    renderer.init(eglContext.eglBaseContext, null)
+                                    renderer.setEnableHardwareScaler(true)
+                                    renderer.setMirror(true)
+                                    localRenderer = renderer
+                                }
+                            },
+                            update = { renderer -> ui.localVideoTrack?.addSink(renderer) }
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    Modifier.size(112.dp).background(Color(0xFF28364A), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(chat.avatar.ifBlank { "🙂" }, fontSize = 48.sp)
+                }
             }
             Text(chat.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Text(ui.status, color = Color(0xFFA4AFBF), fontSize = 14.sp)
