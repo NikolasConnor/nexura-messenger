@@ -12,7 +12,6 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
-import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -105,20 +104,32 @@ object E2eeMediaCrypto {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
         try {
-            CipherInputStream(FileInputStream(encryptedFile), cipher).use { source ->
+            FileInputStream(encryptedFile).use { source ->
                 FileOutputStream(outputFile).use { target ->
                     val buffer = ByteArray(BUFFER_SIZE)
                     var total = 0L
                     while (true) {
                         val read = source.read(buffer)
                         if (read < 0) break
-                        total += read
-                        if (total > MAX_PLAINTEXT_BYTES) throw IOException("Расшифрованный файл превышает лимит")
-                        target.write(buffer, 0, read)
+                        val plainChunk = cipher.update(buffer, 0, read)
+                        if (plainChunk != null && plainChunk.isNotEmpty()) {
+                            total += plainChunk.size
+                            if (total > MAX_PLAINTEXT_BYTES) throw IOException("Расшифрованный файл превышает лимит")
+                            target.write(plainChunk)
+                        }
                     }
+                    // GCM authentication is checked here. Never expose the file
+                    // until doFinal succeeds and verifies the 128-bit tag.
+                    val finalChunk = cipher.doFinal()
+                    if (finalChunk.isNotEmpty()) {
+                        total += finalChunk.size
+                        if (total > MAX_PLAINTEXT_BYTES) throw IOException("Расшифрованный файл превышает лимит")
+                        target.write(finalChunk)
+                    }
+                    target.fd.sync()
+                    if (total == 0L) throw IOException("Расшифрованный файл пустой")
                 }
             }
-            if (outputFile.length() == 0L) throw IOException("Расшифрованный файл пустой")
         } catch (error: Exception) {
             outputFile.delete()
             throw IOException("Не удалось проверить или расшифровать медиафайл", error)
