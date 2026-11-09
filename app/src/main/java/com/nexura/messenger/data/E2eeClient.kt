@@ -9,8 +9,8 @@ import java.nio.charset.StandardCharsets
  * All account/session pickles are encrypted at rest by E2eeStateStore before
  * persistence. The server-facing public bundle contains no private material.
  */
-class E2eeClient(context: Context) {
-    private val store = E2eeStateStore(context.applicationContext)
+class E2eeClient(context: Context, userId: String) {
+    private val store = E2eeStateStore(context.applicationContext, userId)
 
     @Synchronized
     fun ensureDevice(oneTimeKeyCount: Int = 20): String {
@@ -100,6 +100,12 @@ class E2eeClient(context: Context) {
         require(result.size == 2) { "Invalid native decryption result" }
         store.save(sessionKey(conversationId), result[0])
         return result[1]
+    }
+
+    /** Permanently remove this user's local E2EE identity and all local sessions. */
+    @Synchronized
+    fun clearLocalIdentity() {
+        store.clearAll()
     }
 
     private fun sessionKey(conversationId: String): String = "olm-session:$conversationId"
