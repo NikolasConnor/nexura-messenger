@@ -661,7 +661,7 @@ class NexuraApi(private val store: SessionStore) {
             .header("apikey", PUBLIC_KEY)
             .header("Authorization", "Bearer ${store.accessToken ?: throw IOException("Сессия истекла")}")
             .header("x-upsert", "false")
-            .post(encryptedMedia.file.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
+            .post(encryptedMedia.file.asRequestBody(encryptedMedia.mimeType.toMediaTypeOrNull()))
             .build()
         val upload = withContext(Dispatchers.IO) { client.newCall(uploadRequest).execute() }
         upload.use {
