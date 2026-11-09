@@ -902,11 +902,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                             if (msg.messageType == "media" && msg.encrypted) {
                                                 val mediaUri = Uri.parse(msg.content)
-                                                val mediaMeta = runCatching {
-                                                    // The URI extension is selected from the original encrypted MIME metadata.
-                                                    if (msg.content.endsWith(".mp4", true)) "video" else "image"
-                                                }.getOrDefault("image")
-                                                if (mediaMeta == "video") {
+                                                if (msg.mediaKind == "video") {
                                                     Box(
                                                         Modifier.width(230.dp).height(150.dp).clip(RoundedCornerShape(12.dp))
                                                             .background(Color.Black).clickable { mediaViewerUri = mediaUri; mediaViewerType = "video" },
