@@ -57,6 +57,7 @@ fun NexuraCallDialog(
     var coordinator by remember { mutableStateOf<CallCoordinator?>(null) }
     var ui by remember { mutableStateOf(CallUiState()) }
     var callSeconds by remember { mutableStateOf(0L) }
+    var callStartedAt by remember { mutableStateOf<Long?>(null) }
     var pendingAction by remember { mutableStateOf("audio") }
     var starting by remember { mutableStateOf(false) }
     val eglContext = remember { EglBase.create() }
@@ -176,13 +177,16 @@ fun NexuraCallDialog(
         }
     }
 
-    LaunchedEffect(ui.connected) {
-        if (!ui.connected) {
+    LaunchedEffect(ui.active, ui.connected) {
+        if (!ui.active) {
+            callStartedAt = null
             callSeconds = 0L
         } else {
-            val startedAt = SystemClock.elapsedRealtime()
-            while (ui.connected) {
-                callSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000L
+            if (ui.connected && callStartedAt == null) callStartedAt = SystemClock.elapsedRealtime()
+            while (ui.active) {
+                callStartedAt?.let { startedAt ->
+                    callSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000L
+                }
                 delay(1000L)
             }
         }
