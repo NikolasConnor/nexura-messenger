@@ -176,6 +176,98 @@ class E2eeClient(context: Context, userId: String) {
         return result[2]
     }
 
+    private fun groupSessionKey(conversationId: String, peerUserId: String, peerDeviceId: String): String =
+        "olm-group-session:$conversationId:$peerUserId:$peerDeviceId"
+
+    @Synchronized
+    fun hasGroupSession(conversationId: String, peerUserId: String, peerDeviceId: String): Boolean =
+        store.load(groupSessionKey(conversationId, peerUserId, peerDeviceId)) != null
+
+    @Synchronized
+    fun startGroupSession(
+        conversationId: String,
+        peerUserId: String,
+        peerDeviceId: String,
+        recipientCurve25519: String,
+        recipientEd25519: String,
+        recipientOneTimeKey: String,
+        recipientOneTimeKeySignature: String,
+        plaintext: ByteArray,
+        messageId: String
+    ): String {
+        val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
+        val result = E2eeNative.nativeStartOutbound(
+            account, recipientCurve25519, recipientEd25519,
+            recipientOneTimeKey, recipientOneTimeKeySignature, plaintext
+        )
+        require(result.size == 2) { "Invalid group outbound-session result" }
+        val key = groupSessionKey(conversationId, peerUserId, peerDeviceId)
+        val ciphertext = String(result[1], StandardCharsets.UTF_8)
+        store.saveBatch(mapOf(
+            key to result[0],
+            messageCacheKey(conversationId, messageId) to plaintext
+        ))
+        return ciphertext
+    }
+
+    @Synchronized
+    fun acceptGroupSession(
+        conversationId: String,
+        peerUserId: String,
+        peerDeviceId: String,
+        senderCurve25519: String,
+        ciphertext: String,
+        messageId: String
+    ): ByteArray {
+        val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
+        val result = E2eeNative.nativeAcceptInbound(account, senderCurve25519, ciphertext)
+        require(result.size == 3) { "Invalid group inbound-session result" }
+        store.saveBatch(mapOf(
+            ACCOUNT_KEY to result[0],
+            groupSessionKey(conversationId, peerUserId, peerDeviceId) to result[1],
+            messageCacheKey(conversationId, messageId) to result[2]
+        ))
+        return result[2]
+    }
+
+    @Synchronized
+    fun encryptGroupMessage(
+        conversationId: String,
+        peerUserId: String,
+        peerDeviceId: String,
+        plaintext: ByteArray,
+        messageId: String
+    ): String {
+        val key = groupSessionKey(conversationId, peerUserId, peerDeviceId)
+        val session = store.load(key) ?: error("No E2EE group session for recipient device")
+        val result = E2eeNative.nativeEncrypt(session, plaintext)
+        require(result.size == 2) { "Invalid group encryption result" }
+        store.saveBatch(mapOf(
+            key to result[0],
+            messageCacheKey(conversationId, messageId) to plaintext
+        ))
+        return String(result[1], StandardCharsets.UTF_8)
+    }
+
+    @Synchronized
+    fun decryptGroupMessage(
+        conversationId: String,
+        peerUserId: String,
+        peerDeviceId: String,
+        ciphertext: String,
+        messageId: String
+    ): ByteArray {
+        val key = groupSessionKey(conversationId, peerUserId, peerDeviceId)
+        val session = store.load(key) ?: error("No E2EE group session for sender device")
+        val result = E2eeNative.nativeDecrypt(session, ciphertext)
+        require(result.size == 2) { "Invalid group decryption result" }
+        store.saveBatch(mapOf(
+            key to result[0],
+            messageCacheKey(conversationId, messageId) to result[1]
+        ))
+        return result[1]
+    }
+
     @Synchronized
     fun hasDirectSession(conversationId: String): Boolean {
         require(conversationId.isNotBlank()) { "conversationId must not be blank" }
