@@ -249,12 +249,13 @@ class CallCoordinator(
         runCatching { context.stopService(Intent(context, CallKeepAliveService::class.java)) }
         engine?.close()
         engine = null
-        publish((lastState ?: CallUiState()).copy(localVideoTrack = null, remoteVideoTrack = null))
+        publish(CallUiState(status = "Звонок завершён"))
         pendingOffer = null
         pendingCallId = null
         callId = null
         remoteDescriptionSet = false
         videoMode = false
+        pendingVideo = false
         if (closeSignaling) ready = false
         queuedIce.clear()
         queuedRemoteIce.clear()
