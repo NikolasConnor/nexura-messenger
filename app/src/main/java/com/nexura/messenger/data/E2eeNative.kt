@@ -18,6 +18,7 @@ internal object E2eeNative {
 
     external fun nativeVerifyOneTimeKey(
         ed25519IdentityKey: String,
+        curve25519IdentityKey: String,
         oneTimeKey: String,
         signature: String
     ): Boolean
