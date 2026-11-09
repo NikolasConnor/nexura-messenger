@@ -6,6 +6,7 @@ import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
 import java.util.UUID
+import org.json.JSONObject
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
@@ -464,7 +465,20 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         Text("СЕАНС И БЕЗОПАСНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Card(Modifier.fillMaxWidth().padding(top = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text("Сквозное шифрование", color = MainText, fontWeight = FontWeight.SemiBold)
+                                Text(e2eeStatus, color = if (e2eeStatus.startsWith("Устройство зарегистрировано")) Success else Color(0xFFFFC56E), fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                                val client = e2eeClient
+                                val bundle = runCatching { JSONObject(client?.ensureDevice() ?: "{}") }.getOrNull()
+                                if (client != null && bundle != null && bundle.has("curve25519") && bundle.has("ed25519")) {
+                                    Text("Отпечаток этого устройства", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp))
+                                    Text(client.deviceFingerprint(bundle.getString("curve25519"), bundle.getString("ed25519")), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Text("Для защиты переписки сравните отпечатки устройств лично или по другому доверенному каналу. Группы и вложения пока не поддерживают E2EE.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
+                            }
+                        }
+                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
                                 Text("Авторизация", color = MainText, fontWeight = FontWeight.SemiBold)
                                 Text("Сессия хранится на устройстве в зашифрованном виде.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
@@ -476,7 +490,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Spacer(Modifier.weight(1f))
                         OutlinedButton(onClick = { showLogoutDialog = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp).height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) { Text("Выйти из аккаунта") }
                     }
-                    if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { api.signOut(); signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; notice = "" } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
+                    if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { api.signOut(); signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; e2eeClient = null; e2eeStatus = "Шифрование не проверено"; notice = "" } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
                 }
                 selected == null -> {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
@@ -880,14 +894,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Spacer(Modifier.height(7.dp))
                             }
+                            Text("Фото и файлы будут доступны после реализации клиентского E2EE для вложений.", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 5.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = { imagePicker.launch("image/*") },
-                                    enabled = !sendingImage && !sendingMessage,
+                                    enabled = false,
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
-                                    else Text("+", color = Accent, fontSize = 29.sp, fontWeight = FontWeight.Light)
+                                    else Text("🔒", color = SecondaryText, fontSize = 18.sp)
                                 }
                                 OutlinedTextField(
                                     value = draft, onValueChange = { draft = it },
