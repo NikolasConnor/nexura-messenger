@@ -6,6 +6,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -150,13 +152,21 @@ class NexuraMessagingService : FirebaseMessagingService() {
                     description = "Входящие аудио- и видеозвонки Nexura"
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                     setBypassDnd(false)
+                    setSound(
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    vibrationPattern = longArrayOf(0, 900, 500, 900, 500, 900)
                 }
             )
         }
     }
 
     companion object {
-        const val CALL_CHANNEL_ID = "nexura_incoming_calls"
+        const val CALL_CHANNEL_ID = "nexura_incoming_calls_v2"
         private const val MESSAGE_CHANNEL_ID = "nexura_messages"
         private const val CALL_RING_TIMEOUT_MS = 35_000L
     }
