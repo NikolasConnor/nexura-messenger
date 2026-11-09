@@ -9,6 +9,7 @@ import java.util.UUID
 import org.json.JSONObject
 import android.os.Build
 import android.net.Uri
+import android.widget.VideoView
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -47,6 +48,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -126,6 +130,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     var sendingMessage by remember { mutableStateOf(false) }
     var sendingImage by remember { mutableStateOf(false) }
+    var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
+    var mediaViewerType by remember { mutableStateOf("image") }
     var profileName by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
     var savingProfile by remember { mutableStateOf(false) }
@@ -187,24 +193,43 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         context.startActivity(Intent.createChooser(send, "Пригласить в Nexura"))
     }
 
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null && selected != null) {
-            scope.launch {
-                sendingImage = true
-                error = ""
-                try {
-                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("Не удалось прочитать изображение")
-                    api.sendImageMessage(selected!!.id, bytes, mime)
-                    messages = api.messages(selected!!.id, e2eeClient)
-                } catch (e: Exception) {
-                    error = e.message ?: "Не удалось отправить изображение"
-                } finally {
-                    sendingImage = false
+    fun sendPickedMedia(uri: Uri?) {
+        val chat = selected ?: return
+        if (uri == null) return
+        scope.launch {
+            sendingImage = true
+            error = ""
+            var encrypted: EncryptedMediaFile? = null
+            try {
+                if (chat.kind != "direct") throw IllegalStateException("Защищённая отправка медиа пока доступна только в личных чатах.")
+                val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
+                val peerId = api.directPeerUserId(chat.id)
+                val devices = api.activeE2eeDevices(peerId)
+                if (devices.size != 1) throw IllegalStateException("Для медиа требуется ровно одно активное устройство собеседника.")
+                val peer = devices.single()
+                if (!client.isRemoteDeviceTrusted(peerId, peer.deviceId, peer.curve25519Key, peer.ed25519Key)) {
+                    throw IllegalStateException("Сначала проверьте отпечаток устройства собеседника через замок вверху чата.")
                 }
+                encrypted = withContext(Dispatchers.IO) {
+                    E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
+                }
+                api.sendEncryptedMediaMessage(chat.id, peer, client, encrypted!!)
+                messages = api.messages(chat.id, client)
+                notice = "Медиа отправлено с E2EE-шифрованием"
+            } catch (e: Exception) {
+                encrypted?.file?.delete()
+                error = e.message ?: "Не удалось отправить медиа"
+            } finally {
+                sendingImage = false
             }
         }
+    }
+
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        sendPickedMedia(uri)
+    }
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        sendPickedMedia(uri)
     }
 
     val visibleChats = chats.filter { it.title.contains(chatFilter, ignoreCase = true) }
@@ -740,6 +765,33 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
+                    if (mediaViewerUri != null) {
+                        Dialog(
+                            onDismissRequest = { mediaViewerUri = null },
+                            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+                        ) {
+                            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                                if (mediaViewerType == "video") {
+                                    AndroidView(
+                                        factory = { ctx -> VideoView(ctx).apply { setVideoURI(mediaViewerUri); setOnPreparedListener { player -> player.isLooping = false; start() } } },
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        model = mediaViewerUri,
+                                        contentDescription = "Фото на весь экран",
+                                        modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null },
+                                        contentScale = ContentScale.Fit
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { mediaViewerUri = null },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp)
+                                        .background(Color(0x99000000), CircleShape)
+                                ) { Text("×", color = Color.White, fontSize = 28.sp) }
+                            }
+                        }
+                    }
                     if (trustCandidate != null && trustPeerId != null) {
                         val remote = trustCandidate!!
                         val client = e2eeClient
@@ -848,7 +900,31 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 val parent = messages.firstOrNull { it.id == msg.replyToId }
                                                 Text("↪ Ответ: ${parent?.content?.take(70) ?: "сообщение"}", color = Accent, fontSize = 11.sp, modifier = Modifier.padding(bottom = 5.dp))
                                             }
-                                            if (msg.messageType == "image") {
+                                            if (msg.messageType == "media" && msg.encrypted) {
+                                                val mediaUri = Uri.parse(msg.content)
+                                                val mediaMeta = runCatching {
+                                                    // The URI extension is selected from the original encrypted MIME metadata.
+                                                    if (msg.content.endsWith(".mp4", true)) "video" else "image"
+                                                }.getOrDefault("image")
+                                                if (mediaMeta == "video") {
+                                                    Box(
+                                                        Modifier.width(230.dp).height(150.dp).clip(RoundedCornerShape(12.dp))
+                                                            .background(Color.Black).clickable { mediaViewerUri = mediaUri; mediaViewerType = "video" },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(Icons.Default.PlayArrow, "Открыть видео", tint = Color.White, modifier = Modifier.size(54.dp))
+                                                        Text("Видео", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(10.dp))
+                                                    }
+                                                } else {
+                                                    AsyncImage(
+                                                        model = mediaUri,
+                                                        contentDescription = "Фото",
+                                                        modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp))
+                                                            .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image" },
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                }
+                                            } else if (msg.messageType == "image") {
                                                 AsyncImage(model = msg.content, contentDescription = "Изображение", modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
                                             } else {
                                                 Text(msg.content, color = MainText, fontSize = 14.sp)
@@ -910,15 +986,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Spacer(Modifier.height(7.dp))
                             }
-                            Text("Фото и файлы будут доступны после реализации клиентского E2EE для вложений.", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 5.dp))
+                            Text(
+                                if (chat.kind == "direct") "Медиа шифруется на устройстве перед отправкой · до 24 МБ"
+                                else "E2EE-медиа для групп пока не поддерживается",
+                                color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, bottom = 5.dp)
+                            )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = { imagePicker.launch("image/*") },
-                                    enabled = false,
+                                    enabled = !sendingImage && chat.kind == "direct",
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
-                                    else Text("🔒", color = SecondaryText, fontSize = 18.sp)
+                                    else Icon(Icons.Default.Image, "Отправить фото", tint = Accent)
+                                }
+                                IconButton(
+                                    onClick = { videoPicker.launch("video/mp4") },
+                                    enabled = !sendingImage && chat.kind == "direct",
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Text("🎬", fontSize = 19.sp)
                                 }
                                 OutlinedTextField(
                                     value = draft, onValueChange = { draft = it },
