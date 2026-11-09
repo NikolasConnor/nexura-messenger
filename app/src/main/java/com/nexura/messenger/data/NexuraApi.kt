@@ -170,6 +170,11 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("type", "signup").put("email", email.trim()).toString(),
             auth = false)
     }
+    /** Revokes every refresh-token session except the one currently used by this device. */
+    suspend fun signOutOtherSessions() {
+        call("/auth/v1/logout?scope=others", "POST", "{}", auth = true)
+    }
+
     suspend fun signOut() {
         try { call("/auth/v1/logout", "POST", "{}", auth = true) } finally {
             store.mediaCacheDir.listFiles()?.forEach { it.delete() }
