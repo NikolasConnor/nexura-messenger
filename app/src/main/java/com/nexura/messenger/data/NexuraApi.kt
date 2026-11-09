@@ -32,7 +32,8 @@ data class MessageItem(
     val replyToId: String? = null,
     val editedAt: String? = null,
     val encrypted: Boolean = false,
-    val securityWarning: Boolean = false
+    val securityWarning: Boolean = false,
+    val mediaKind: String? = null
 )
 data class E2eeRemoteDevice(
     val userId: String,
@@ -276,7 +277,8 @@ class NexuraApi(private val store: SessionStore) {
                     },
                     m.optString("created_at"), type, replyTo, edited,
                     encrypted = decrypted != null && (type != "media" || mediaUri != null),
-                    securityWarning = decrypted == null || (type == "media" && mediaUri == null)
+                    securityWarning = decrypted == null || (type == "media" && mediaUri == null),
+                    mediaKind = mediaJson?.optString("media_type")
                 )
             } else {
                 val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
