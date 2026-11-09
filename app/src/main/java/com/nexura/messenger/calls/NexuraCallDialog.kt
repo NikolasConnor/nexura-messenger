@@ -38,6 +38,8 @@ import org.webrtc.VideoTrack
 import com.nexura.messenger.data.ChatItem
 import com.nexura.messenger.data.NexuraApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import android.os.SystemClock
 
 @Composable
 fun NexuraCallDialog(
@@ -47,12 +49,14 @@ fun NexuraCallDialog(
     accessToken: String,
     visible: Boolean,
     autoAction: String = "show",
+    onCallFinished: (Long, Boolean, Boolean, String) -> Unit = { _, _, _, _ -> },
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var coordinator by remember { mutableStateOf<CallCoordinator?>(null) }
     var ui by remember { mutableStateOf(CallUiState()) }
+    var callSeconds by remember { mutableStateOf(0L) }
     var pendingAction by remember { mutableStateOf("audio") }
     var starting by remember { mutableStateOf(false) }
     val eglContext = remember { EglBase.create() }
@@ -116,7 +120,7 @@ fun NexuraCallDialog(
     LaunchedEffect(chat.id) {
         try {
             val peerId = api.directPeerUserId(chat.id)
-            coordinator = CallCoordinator(context, chat.id, ownUserId, peerId, api) { ui = it }
+            coordinator = CallCoordinator(context, chat.id, ownUserId, peerId, api, { ui = it }, onCallFinished)
             coordinator?.connect(accessToken)
         } catch (e: Exception) {
             ui = ui.copy(status = "Не удалось подготовить звонок", error = e.message)
@@ -168,6 +172,18 @@ fun NexuraCallDialog(
             "start_video" -> if (ui.status == "Готово к звонку") {
                 autoActionHandled = true
                 request("video", true)
+            }
+        }
+    }
+
+    LaunchedEffect(ui.connected) {
+        if (!ui.connected) {
+            callSeconds = 0L
+        } else {
+            val startedAt = SystemClock.elapsedRealtime()
+            while (ui.connected) {
+                callSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000L
+                delay(1000L)
             }
         }
     }
@@ -262,7 +278,12 @@ fun NexuraCallDialog(
                 }
             }
             Text(chat.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Text(ui.status, color = Color(0xFFA4AFBF), fontSize = 14.sp)
+            Text(
+                if (ui.connected) String.format("%02d:%02d", callSeconds / 60, callSeconds % 60) else ui.status,
+                color = if (ui.connected) Color(0xFF72D6A2) else Color(0xFFA4AFBF),
+                fontSize = if (ui.connected) 18.sp else 14.sp,
+                fontWeight = if (ui.connected) FontWeight.SemiBold else FontWeight.Normal
+            )
             if (!ui.error.isNullOrBlank()) Text(ui.error!!, color = Color(0xFFFF858D), fontSize = 12.sp)
             if (ui.incoming) {
                 Row(horizontalArrangement = Arrangement.spacedBy(52.dp), verticalAlignment = Alignment.CenterVertically) {
