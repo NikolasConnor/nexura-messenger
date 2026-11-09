@@ -496,6 +496,12 @@ class NexuraApi(private val store: SessionStore) {
         if (uid !in members) throw IOException("Вы больше не состоите в этой группе")
         val own = JSONObject(e2ee.ensureDevice())
         val ownDeviceId = own.getString("device_id")
+        val publishedOwnDevice = activeE2eeDevices(uid).singleOrNull { it.deviceId == ownDeviceId }
+            ?: throw IOException("Ваше E2EE-устройство не зарегистрировано на сервере. Повторите инициализацию защиты.")
+        if (publishedOwnDevice.curve25519Key != own.getString("curve25519") ||
+            publishedOwnDevice.ed25519Key != own.getString("ed25519")) {
+            throw IOException("Ключи вашего E2EE-устройства не совпадают с регистрацией сервера")
+        }
         val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
         for (memberId in members) {
             val devices = activeE2eeDevices(memberId).filterNot { memberId == uid && it.deviceId == ownDeviceId }
