@@ -354,10 +354,11 @@ class CallCoordinator(
         engine = null
         val wasOutgoing = callDirectionOutgoing
         val connectedAt = connectedAtMs
-        if (connectedAt != null && !callHistoryWritten) {
+        if (wasOutgoing && callId != null && !callHistoryWritten) {
             callHistoryWritten = true
-            val duration = ((System.currentTimeMillis() - connectedAt) / 1000L).coerceAtLeast(0L)
-            val result = if (duration > 0) "completed" else "missed"
+            val duration = if (connectedAt == null) 0L else
+                ((System.currentTimeMillis() - connectedAt) / 1000L).coerceAtLeast(0L)
+            val result = if (connectedAt != null) "completed" else "missed"
             runCatching { onCallFinished(duration, wasOutgoing, callVideoForHistory, result) }
         }
         connectedAtMs = null
