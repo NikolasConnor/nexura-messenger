@@ -150,6 +150,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var e2eeStatus by remember { mutableStateOf("Шифрование не проверено") }
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
+    var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
     var pendingSecureMessageId by remember { mutableStateOf<String?>(null) }
     var pendingSecureMessageText by remember { mutableStateOf<String?>(null) }
 
@@ -203,19 +204,35 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             error = ""
             var encrypted: EncryptedMediaFile? = null
             try {
-                if (chat.kind != "direct") throw IllegalStateException("Защищённая отправка медиа пока доступна только в личных чатах.")
                 val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
-                val peerId = api.directPeerUserId(chat.id)
-                val devices = api.activeE2eeDevices(peerId)
-                if (devices.size != 1) throw IllegalStateException("Для медиа требуется ровно одно активное устройство собеседника.")
-                val peer = devices.single()
-                if (!client.isRemoteDeviceTrusted(peerId, peer.deviceId, peer.curve25519Key, peer.ed25519Key)) {
-                    throw IllegalStateException("Сначала проверьте отпечаток устройства собеседника через замок вверху чата.")
+                if (chat.kind == "direct") {
+                    val peerId = api.directPeerUserId(chat.id)
+                    val devices = api.activeE2eeDevices(peerId)
+                    if (devices.size != 1) throw IllegalStateException("Для личного чата требуется ровно одно активное устройство собеседника.")
+                    val peer = devices.single()
+                    if (!client.isRemoteDeviceTrusted(peerId, peer.deviceId, peer.curve25519Key, peer.ed25519Key)) {
+                        throw IllegalStateException("Сначала проверьте отпечаток устройства собеседника через замок вверху чата.")
+                    }
+                } else {
+                    val members = api.groupMemberIds(chat.id).filter { it != store.userId }
+                    for (memberId in members) {
+                        val devices = api.activeE2eeDevices(memberId)
+                        if (devices.isEmpty()) throw IllegalStateException("У участника $memberId нет активного E2EE-устройства.")
+                        if (devices.any { !client.isRemoteDeviceTrusted(memberId, it.deviceId, it.curve25519Key, it.ed25519Key) }) {
+                            throw IllegalStateException("Сначала проверьте все устройства участников через кнопку замка.")
+                        }
+                    }
                 }
                 encrypted = withContext(Dispatchers.IO) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
-                api.sendEncryptedMediaMessage(chat.id, peer, client, encrypted!!)
+                if (chat.kind == "direct") {
+                    val peerId = api.directPeerUserId(chat.id)
+                    val peer = api.activeE2eeDevices(peerId).single()
+                    api.sendEncryptedMediaMessage(chat.id, peer, client, encrypted!!)
+                } else {
+                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!)
+                }
                 messages = api.messages(chat.id, client)
                 notice = "Медиа отправлено с E2EE-шифрованием"
             } catch (e: Exception) {
@@ -274,20 +291,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             sendingMessage = true
             error = ""
             try {
-                if (chat.kind != "direct") {
-                    throw IllegalStateException("Групповое E2EE ещё не реализовано. Открытая отправка отключена.")
-                }
                 val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
-                val peerId = api.directPeerUserId(chat.id)
-                val devices = api.activeE2eeDevices(peerId)
-                if (devices.size != 1) {
-                    throw IllegalStateException("Для защищённого чата пока требуется ровно одно активное устройство собеседника")
+                if (chat.kind == "direct") {
+                    val peerId = api.directPeerUserId(chat.id)
+                    val devices = api.activeE2eeDevices(peerId)
+                    if (devices.size != 1) throw IllegalStateException("Для личного чата требуется ровно одно активное устройство собеседника")
+                    val remote = devices.single()
+                    if (!client.isRemoteDeviceTrusted(peerId, remote.deviceId, remote.curve25519Key, remote.ed25519Key)) {
+                        throw IllegalStateException("Нажмите на замок и сверьте отпечаток устройства собеседника")
+                    }
+                    api.sendEncryptedDirectMessage(chat.id, remote, client, messageId, text, replyToId)
+                } else {
+                    val members = api.groupMemberIds(chat.id).filter { it != store.userId }
+                    for (memberId in members) {
+                        val devices = api.activeE2eeDevices(memberId)
+                        if (devices.isEmpty()) throw IllegalStateException("У участника $memberId нет активного E2EE-устройства")
+                        if (devices.any { !client.isRemoteDeviceTrusted(memberId, it.deviceId, it.curve25519Key, it.ed25519Key) }) {
+                            throw IllegalStateException("Не все устройства участников подтверждены. Нажмите на замок группы.")
+                        }
+                    }
+                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text)
                 }
-                val remote = devices.single()
-                if (!client.isRemoteDeviceTrusted(peerId, remote.deviceId, remote.curve25519Key, remote.ed25519Key)) {
-                    throw IllegalStateException("Нажмите на замок вверху чата и сверьте отпечаток устройства собеседника")
-                }
-                api.sendEncryptedDirectMessage(chat.id, remote, client, messageId, text, replyToId)
                 draft = ""
                 replyTarget = null
                 pendingSecureMessageId = null
