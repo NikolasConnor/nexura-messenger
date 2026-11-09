@@ -1,7 +1,9 @@
 package com.nexura.messenger.data
 
 import android.content.Context
+import org.json.JSONObject
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 /**
  * Experimental 1:1 Olm facade. Not connected to NexuraApi or chat UI yet.
@@ -22,9 +24,12 @@ class E2eeClient(context: Context, userId: String) {
 
         val result = E2eeNative.nativeCreateDevice(oneTimeKeyCount)
         require(result.size == 2) { "Invalid native device creation result" }
+        val publicBundle = JSONObject(String(result[1], StandardCharsets.UTF_8))
+            .put("device_id", UUID.randomUUID().toString())
+        val publicBundleBytes = publicBundle.toString().toByteArray(StandardCharsets.UTF_8)
         store.save(ACCOUNT_KEY, result[0])
-        store.save(PUBLIC_BUNDLE_KEY, result[1])
-        return String(result[1], StandardCharsets.UTF_8)
+        store.save(PUBLIC_BUNDLE_KEY, publicBundleBytes)
+        return String(publicBundleBytes, StandardCharsets.UTF_8)
     }
 
     /**
