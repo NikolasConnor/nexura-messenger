@@ -69,6 +69,20 @@ class E2eeClientInstrumentedTest {
             )
         )
         assertArrayEquals(initialText, bob.cachedMessage(conversationId, firstMessageId))
+        assertEquals(
+            true,
+            runCatching {
+                bob.acceptDirectSession(
+                    conversationId,
+                    aliceBundle.getString("curve25519"),
+                    preKeyEnvelope,
+                    firstMessageId
+                )
+            }.isFailure
+        )
+        // The caller's encrypted local cache lets message polling avoid replaying
+        // the already-consumed pre-key envelope.
+        assertArrayEquals(initialText, bob.cachedMessage(conversationId, firstMessageId))
 
         val replyMessageId = UUID.randomUUID().toString()
         val replyText = "Reply after session setup".toByteArray(StandardCharsets.UTF_8)
