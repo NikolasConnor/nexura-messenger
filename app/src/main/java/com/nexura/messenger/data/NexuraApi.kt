@@ -37,7 +37,8 @@ data class MessageItem(
     val editedAt: String? = null,
     val encrypted: Boolean = false,
     val securityWarning: Boolean = false,
-    val mediaKind: String? = null
+    val mediaKind: String? = null,
+    val mediaCaption: String? = null
 )
 data class E2eeRemoteDevice(
     val userId: String,
@@ -323,7 +324,8 @@ class NexuraApi(private val store: SessionStore) {
                     m.optString("created_at"), type, replyTo, edited,
                     encrypted = decrypted != null && (type != "media" || mediaUri != null),
                     securityWarning = decrypted == null || (type == "media" && mediaUri == null),
-                    mediaKind = mediaJson?.optString("media_type")
+                    mediaKind = mediaJson?.optString("media_type"),
+                    mediaCaption = mediaJson?.optString("caption")?.takeIf { it.isNotBlank() }
                 )
             } else {
                 val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
@@ -958,7 +960,9 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun sendEncryptedMediaMessage(
         chatId: String,
         e2ee: E2eeClient,
-        encryptedMedia: EncryptedMediaFile
+        encryptedMedia: EncryptedMediaFile,
+        caption: String = "",
+        replyToId: String? = null
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) throw IOException("Зашифрованный файл превышает лимит Storage")
@@ -993,12 +997,13 @@ class NexuraApi(private val store: SessionStore) {
             .put("key", encryptedMedia.keyBase64)
             .put("iv", encryptedMedia.ivBase64)
             .put("cipher_sha256", encryptedMedia.cipherSha256)
+            .put("caption", caption.trim())
             .toString()
         val messageId = UUID.randomUUID().toString()
         try {
             // If the POST committed but its read-back confirmation was interrupted,
             // keep the ciphertext object: deleting it could break a valid message.
-            sendEncryptedDirectMessage(chat, e2ee, messageId, payload, null, "media")
+            sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media")
         } finally {
             encryptedMedia.file.delete()
         }
@@ -1007,7 +1012,9 @@ class NexuraApi(private val store: SessionStore) {
     suspend fun sendEncryptedGroupMediaMessage(
         chatId: String,
         e2ee: E2eeClient,
-        encryptedMedia: EncryptedMediaFile
+        encryptedMedia: EncryptedMediaFile,
+        caption: String = "",
+        replyToId: String? = null
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) {
@@ -1044,9 +1051,10 @@ class NexuraApi(private val store: SessionStore) {
             .put("key", encryptedMedia.keyBase64)
             .put("iv", encryptedMedia.ivBase64)
             .put("cipher_sha256", encryptedMedia.cipherSha256)
+            .put("caption", caption.trim())
             .toString()
         try {
-            sendEncryptedGroupMessage(chat, e2ee, UUID.randomUUID().toString(), payload, "media")
+            sendEncryptedGroupMessage(chat, e2ee, UUID.randomUUID().toString(), payload, "media", replyToId)
         } finally {
             encryptedMedia.file.delete()
         }
