@@ -20,6 +20,7 @@ data class CallUiState(
     val active: Boolean = false,
     val video: Boolean = false,
     val muted: Boolean = false,
+    val speaker: Boolean = false,
     val cameraEnabled: Boolean = true,
     val error: String? = null,
     val localVideoTrack: org.webrtc.VideoTrack? = null,
@@ -205,6 +206,13 @@ class CallCoordinator(
     }
 
     private fun send(signal: JSONObject): Boolean = signaling?.sendSignal(signal) == true
+
+    fun toggleSpeaker(): Boolean {
+        val enabled = !(lastState?.speaker ?: videoMode)
+        engine?.setSpeakerEnabled(enabled)
+        publish((lastState ?: CallUiState()).copy(speaker = enabled))
+        return enabled
+    }
 
     fun toggleMute(): Boolean {
         val muted = !(lastState?.muted ?: false)
