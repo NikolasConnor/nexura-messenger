@@ -206,9 +206,11 @@ class NexuraApi(private val store: SessionStore) {
         call("/rest/v1/device_tokens?on_conflict=token", "POST", payload.toString(), prefer = "resolution=merge-duplicates,return=minimal")
     }
 
-    private suspend fun notifyChatPush(chatId: String, preview: String) {
+    // Push notifications must never contain message text, sender names, or media details.
+    private suspend fun notifyChatPush(chatId: String) {
         try {
-            call("/functions/v1/send-chat-push", "POST", JSONObject().put("conversation_id", normalizeUuid(chatId)).put("preview", preview.take(180)).toString())
+            call("/functions/v1/send-chat-push", "POST",
+                JSONObject().put("conversation_id", normalizeUuid(chatId)).toString())
         } catch (_: Exception) { }
     }
 
@@ -218,7 +220,7 @@ class NexuraApi(private val store: SessionStore) {
             .put("message_type", "text").put("content", text)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
-        notifyChatPush(chatId, text)
+        notifyChatPush(chatId)
     }
 
     suspend fun markChatRead(chatId: String) {
@@ -279,7 +281,7 @@ class NexuraApi(private val store: SessionStore) {
         call("/rest/v1/messages", "POST",
             JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "image").put("content", path).toString(),
             prefer = "return=minimal")
-        notifyChatPush(chatId, "📷 Фото")
+        notifyChatPush(chatId)
     }
 
     suspend fun myProfile(): UserProfile {
