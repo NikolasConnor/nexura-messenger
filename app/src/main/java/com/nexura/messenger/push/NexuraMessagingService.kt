@@ -39,11 +39,11 @@ class NexuraMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val payload = message.data
         val incomingCall = payload["type"] == "incoming_call"
-        val conversationId = data["conversation_id"]?.let { raw ->
+        val conversationId = payload["conversation_id"]?.let { raw ->
             runCatching { UUID.fromString(raw).toString() }.getOrNull()
         }
-        val callId = data["call_id"]?.takeIf { it.length <= 64 }
-        val video = data["video"] == "true"
+        val callId = payload["call_id"]?.takeIf { it.length <= 64 }
+        val video = payload["video"] == "true"
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannels(manager)
 
@@ -65,7 +65,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 if (conversationId != null) {
                     action = "com.nexura.messenger.OPEN_CHAT"
-                    data = Uri.parse("nexura://chat/$conversationId")
+                    setData(Uri.parse("nexura://chat/$conversationId"))
                 }
             }
             PendingIntent.getActivity(
@@ -77,12 +77,12 @@ class NexuraMessagingService : FirebaseMessagingService() {
         val title = if (incomingCall) {
             if (video) "Входящий видеозвонок" else "Входящий аудиозвонок"
         } else {
-            data["title"] ?: message.notification?.title ?: "Nexura"
+            payload["title"] ?: message.notification?.title ?: "Nexura"
         }
         val body = if (incomingCall) {
             "Вам звонят в Nexura"
         } else {
-            data["body"] ?: message.notification?.body ?: "Новое сообщение"
+            payload["body"] ?: message.notification?.body ?: "Новое сообщение"
         }
 
         val builder = NotificationCompat.Builder(
@@ -133,7 +133,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
             val launch = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 action = "com.nexura.messenger.INCOMING_CALL"
-                data = Uri.parse("nexura://chat/$conversationId?call=1&action=show")
+                setData(Uri.parse("nexura://chat/$conversationId?call=1&action=show"))
             }
             runCatching { startActivity(launch) }
         }
@@ -143,7 +143,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             action = "com.nexura.messenger.INCOMING_CALL"
-            data = Uri.parse("$baseUri&action=$action")
+            setData(Uri.parse("$baseUri&action=$action"))
         }
         return PendingIntent.getActivity(
             this, requestCode, intent,
