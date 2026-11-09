@@ -29,7 +29,7 @@ class CallSignalingClient(
     private val peerUserId: String,
     private val onSignal: (JSONObject) -> Unit,
     private val onReady: () -> Unit,
-    private val onFailure: (String) -> Unit
+    private val onError: (String) -> Unit
 ) {
     private val http = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
@@ -65,7 +65,7 @@ class CallSignalingClient(
                                 synchronized(lock) { joined.add(topic) }
                                 if (topic == peerTopic || peerTopic == ownTopic) onReady()
                             } else if (payload?.optString("status") == "error") {
-                                onFailure(payload.optJSONObject("response")?.toString() ?: "Realtime отклонил подключение")
+                                onError(payload.optJSONObject("response")?.toString() ?: "Realtime отклонил подключение")
                             }
                         }
                         "broadcast" -> {
@@ -75,15 +75,15 @@ class CallSignalingClient(
                                 if (signal.optString("to") == ownUserId) onSignal(signal)
                             }
                         }
-                        "phx_error", "phx_close" -> onFailure("Соединение сигнализации прервано")
+                        "phx_error", "phx_close" -> onError("Соединение сигнализации прервано")
                     }
                 } catch (e: Exception) {
-                    onFailure(e.message ?: "Ошибка обработки сигнала звонка")
+                    onError(e.message ?: "Ошибка обработки сигнала звонка")
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (!closed) onFailure(t.message ?: "Не удалось подключиться к серверу звонков")
+                if (!closed) onError(t.message ?: "Не удалось подключиться к серверу звонков")
             }
         })
         scope.launch {
