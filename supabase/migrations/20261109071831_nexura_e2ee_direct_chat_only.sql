@@ -1,3 +1,37 @@
+-- Bootstrap the public key directory before defining an RPC that references it.
+-- The later 20261109090000 migration adds indexes, RLS policies, and grants.
+create schema if not exists private;
+
+create table if not exists public.e2ee_devices (
+    user_id uuid not null references auth.users(id) on delete cascade,
+    device_id uuid not null,
+    curve25519_key text not null,
+    ed25519_key text not null,
+    protocol text not null default 'olm-v1' check (protocol = 'olm-v1'),
+    bundle_version smallint not null default 1 check (bundle_version = 1),
+    created_at timestamptz not null default pg_catalog.now(),
+    updated_at timestamptz not null default pg_catalog.now(),
+    is_active boolean not null default true,
+    primary key (user_id, device_id),
+    constraint e2ee_devices_curve25519_length check (length(curve25519_key) between 40 and 64),
+    constraint e2ee_devices_ed25519_length check (length(ed25519_key) between 40 and 64)
+);
+
+create table if not exists public.e2ee_one_time_keys (
+    user_id uuid not null,
+    device_id uuid not null,
+    key_id uuid not null,
+    curve25519_key text not null,
+    signature text not null,
+    created_at timestamptz not null default pg_catalog.now(),
+    consumed_at timestamptz,
+    primary key (user_id, device_id, key_id),
+    foreign key (user_id, device_id)
+        references public.e2ee_devices(user_id, device_id) on delete cascade,
+    constraint e2ee_otk_key_length check (length(curve25519_key) between 40 and 64),
+    constraint e2ee_otk_signature_length check (length(signature) between 80 and 100)
+);
+
 -- Restrict OTK consumption to genuine two-member direct conversations.
 -- Prevents group members from exhausting another participant's pre-key pool.
 create or replace function private.consume_e2ee_one_time_key(
