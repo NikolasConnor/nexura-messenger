@@ -4,7 +4,6 @@ import android.content.Context
 import android.media.AudioManager
 import android.media.AudioDeviceInfo
 import android.os.Build
-import com.nexura.messenger.BuildConfig
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
@@ -26,6 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class NexuraCallEngine(
     context: Context,
     private val videoEnabled: Boolean,
+    private val iceServers: List<PeerConnection.IceServer>,
     private val onLocalIce: (IceCandidate) -> Unit,
     private val onRemoteVideo: (VideoTrack?) -> Unit,
     private val onLocalVideo: (VideoTrack?) -> Unit,
@@ -58,21 +58,6 @@ class NexuraCallEngine(
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
             .createPeerConnectionFactory()
 
-        val iceServers = buildList {
-            add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-            add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer())
-            val turnUrls = BuildConfig.WEBRTC_TURN_URLS.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            val turnUser = BuildConfig.WEBRTC_TURN_USERNAME
-            val turnCredential = BuildConfig.WEBRTC_TURN_CREDENTIAL
-            if (turnUrls.isNotEmpty() && turnUser.isNotBlank() && turnCredential.isNotBlank()) {
-                add(
-                    PeerConnection.IceServer.builder(turnUrls)
-                        .setUsername(turnUser)
-                        .setPassword(turnCredential)
-                        .createIceServer()
-                )
-            }
-        }
         peer = factory.createPeerConnection(
             PeerConnection.RTCConfiguration(iceServers).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
