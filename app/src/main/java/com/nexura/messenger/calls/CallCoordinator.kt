@@ -20,6 +20,7 @@ data class CallUiState(
     val incoming: Boolean = false,
     val active: Boolean = false,
     val connected: Boolean = false,
+    val outgoing: Boolean = false,
     val video: Boolean = false,
     val muted: Boolean = false,
     val speaker: Boolean = false,
@@ -102,7 +103,7 @@ class CallCoordinator(
                 } else {
                     // The local SDP is installed; flush ICE candidates collected before this offer.
                     localDescriptionSignaled = true
-                    publish((lastState ?: CallUiState()).copy(status = "Вызов…", incoming = false, active = true, video = video, speaker = video))
+                    publish((lastState ?: CallUiState()).copy(status = "Вызов…", incoming = false, active = true, outgoing = true, video = video, speaker = video))
                     scope.launch {
                         runCatching { api.notifyIncomingCall(chatId, peerUserId, callId!!, video) }
                     }
@@ -122,7 +123,7 @@ class CallCoordinator(
                             send(JSONObject().put("type", "end").put("call_id", ringingCallId)
                                 .put("from", ownUserId).put("to", peerUserId))
                             finish(false)
-                            publish(CallUiState(status = "Нет ответа"))
+                            publish(CallUiState(status = "Готово к звонку", error = "Нет ответа"))
                         }
                     }
                 }
@@ -155,7 +156,7 @@ class CallCoordinator(
                     localDescriptionSignaled = true
                     flushIce()
                     armConnectionTimeout()
-                    publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, connected = false, video = videoMode, speaker = videoMode))
+                    publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true, outgoing = false, connected = false, video = videoMode, speaker = videoMode))
                 }
             },
             onError = { error -> failCall("Ошибка звонка", error) }
@@ -209,8 +210,9 @@ class CallCoordinator(
                     "decline" -> "Вызов отклонён"
                     else -> "Звонок завершён"
                 }
+                val wasOutgoing = lastState?.outgoing == true
                 finish(false)
-                publish(CallUiState(status = text))
+                publish(CallUiState(status = "Готово к звонку", outgoing = wasOutgoing, error = text))
             }
         }
     }
@@ -265,7 +267,7 @@ class CallCoordinator(
 
     private fun failCall(status: String, message: String) {
         finish(false)
-        publish(CallUiState(status = status, error = message))
+        publish(CallUiState(status = if (ready) "Готово к звонку" else "Подключение…", error = "$status: $message"))
     }
     private fun armConnectionTimeout() {
         connectionTimeoutJob?.cancel()
@@ -333,7 +335,12 @@ class CallCoordinator(
         runCatching { context.stopService(Intent(context, CallKeepAliveService::class.java)) }
         engine?.close()
         engine = null
-        publish(CallUiState(status = "Звонок завершён"))
+        val wasOutgoing = lastState?.outgoing == true
+        val readyForNextCall = !closeSignaling && ready
+        publish(CallUiState(
+            status = if (readyForNextCall) "Готово к звонку" else "Подключение…",
+            outgoing = wasOutgoing
+        ))
         pendingOffer = null
         pendingCallId = null
         callId = null
