@@ -410,6 +410,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     fun openChat(chat: ChatItem) {
         selected?.let { previous -> chatDrafts[previous.id] = draft }
         selected = chat
+        peerReadReceiptAt = null
         draft = chatDrafts[chat.id].orEmpty()
         messages = emptyList()
         lastSyncedMessageTimestamp = null
@@ -1469,7 +1470,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = { selected = null; messages = emptyList(); replyTarget = null; loadChats() }) {
+                            IconButton(onClick = { selected = null; peerReadReceiptAt = null; messages = emptyList(); replyTarget = null; loadChats() }) {
                                 Icon(Icons.Default.ArrowBack, "Назад к чатам", tint = MainText)
                             }
                             if (chat.kind == "group") {
