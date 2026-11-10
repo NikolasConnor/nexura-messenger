@@ -45,16 +45,21 @@ object E2eeMediaCrypto {
         uri: Uri,
         cacheDir: File
     ): EncryptedMediaFile {
+        val fileUri = uri.scheme == "file"
+        val localFile = if (fileUri) uri.path?.let(::File) else null
         val mime = resolver.getType(uri)?.lowercase()
-            ?: throw IOException("Не удалось определить формат файла")
+            ?: if (localFile?.extension?.lowercase() in setOf("m4a", "aac")) "audio/mp4"
+            else throw IOException("Не удалось определить формат файла")
         val isImage = mime.startsWith("image/")
-        if (!isImage && mime != "video/mp4") {
-            throw IOException("Поддерживаются изображения и видео MP4")
+        val isAudio = mime.startsWith("audio/")
+        if (!isImage && mime != "video/mp4" && mime != "audio/mp4") {
+            throw IOException("Поддерживаются изображения, видео MP4 и аудио M4A")
         }
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }?.takeIf { it.isNotBlank() }?.replace(Regex("[^A-Za-z0-9._ -]"), "_")?.take(100)
-            ?: if (mime == "video/mp4") "video.mp4" else "photo"
+            ?: localFile?.name?.take(100)
+            ?: when { mime == "video/mp4" -> "video.mp4"; isAudio -> "voice.m4a"; else -> "photo" }
 
         val key = ByteArray(32).also(SecureRandom()::nextBytes)
         val iv = ByteArray(12).also(SecureRandom()::nextBytes)
@@ -69,6 +74,7 @@ object E2eeMediaCrypto {
         var total = 0L
         try {
             val input = if (optimizedImage != null) FileInputStream(optimizedImage.first)
+                else if (localFile != null) FileInputStream(localFile)
                 else resolver.openInputStream(uri) ?: throw IOException("Не удалось открыть файл")
             input.use { source ->
                 CipherOutputStream(FileOutputStream(encrypted), cipher).use { target ->
@@ -230,8 +236,8 @@ object E2eeMediaCrypto {
         val hash = json.optString("cipher_sha256")
         val uuid = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
         require(path.matches(Regex("^$uuid/$uuid/$uuid\\.enc$")))
-        require(mime in setOf("image/jpeg", "image/png", "image/webp", "video/mp4"))
-        require(kind == if (mime.startsWith("video/")) "video" else "image")
+        require(mime in setOf("image/jpeg", "image/png", "image/webp", "video/mp4", "audio/mp4"))
+        require(kind == when { mime.startsWith("video/") -> "video"; mime.startsWith("audio/") -> "audio"; else -> "image" })
         require(key.isNotBlank() && iv.isNotBlank() && hash.matches(Regex("^[0-9a-f]{64}$")))
         require(Base64.decode(key, Base64.NO_WRAP).size == 32)
         require(Base64.decode(iv, Base64.NO_WRAP).size == 12)
