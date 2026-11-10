@@ -26,6 +26,8 @@ import java.util.concurrent.ConcurrentHashMap
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
+data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
+data class UserPresence(val isVisible: Boolean, val isOnline: Boolean, val lastSeenAt: String?)
 data class ContactMatch(val phone: String, val userId: String, val displayName: String, val avatar: String)
 data class MessageItem(
     val id: String,
@@ -958,11 +960,80 @@ class NexuraApi(private val store: SessionStore) {
         throw IOException("Отправка открытого текста отключена. Используйте подтверждённое E2EE-устройство.")
     }
 
-    suspend fun markChatRead(chatId: String) {
+    suspend fun privacySettings(): PrivacySettings {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        call("/rest/v1/conversation_members?conversation_id=eq.$chatId&user_id=eq.$uid", "PATCH",
-            JSONObject().put("last_read_at", java.time.Instant.now().toString()).toString(),
+        val profile = JSONArray(call("/rest/v1/profiles?select=read_receipts_enabled&id=eq.$uid&limit=1"))
+        val presence = JSONArray(call("/rest/v1/user_presence?select=show_online_status&user_id=eq.$uid&limit=1"))
+        return PrivacySettings(
+            showOnlineStatus = if (presence.length() > 0) presence.getJSONObject(0).optBoolean("show_online_status", true) else true,
+            readReceiptsEnabled = if (profile.length() > 0) profile.getJSONObject(0).optBoolean("read_receipts_enabled", true) else true
+        )
+    }
+
+    suspend fun updatePrivacySettings(showOnlineStatus: Boolean, readReceiptsEnabled: Boolean) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        call("/rest/v1/user_presence?on_conflict=user_id", "POST",
+            JSONObject().put("user_id", uid).put("show_online_status", showOnlineStatus)
+                .put("last_seen_at", java.time.Instant.now().toString()).toString(),
+            prefer = "resolution=merge-duplicates,return=minimal")
+        call("/rest/v1/profiles?id=eq.$uid", "PATCH",
+            JSONObject().put("read_receipts_enabled", readReceiptsEnabled).toString(),
             prefer = "return=minimal")
+    }
+
+    suspend fun updatePresenceHeartbeat() {
+        val uid = store.userId ?: return
+        call("/rest/v1/user_presence?on_conflict=user_id", "POST",
+            JSONObject().put("user_id", uid).put("last_seen_at", java.time.Instant.now().toString()).toString(),
+            prefer = "resolution=merge-duplicates,return=minimal")
+    }
+
+    suspend fun userPresence(userId: String): UserPresence {
+        val id = normalizeUuid(userId)
+        val rows = JSONArray(call("/rest/v1/rpc/get_user_presence", "POST",
+            JSONObject().put("p_user_id", id).toString()))
+        if (rows.length() == 0) return UserPresence(false, false, null)
+        val row = rows.getJSONObject(0)
+        return UserPresence(row.optBoolean("is_visible"), row.optBoolean("is_online"),
+            row.optString("last_seen_at").takeIf { it.isNotBlank() && it != "null" })
+    }
+
+    suspend fun blockedUsers(): List<UserItem> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val blocks = JSONArray(call("/rest/v1/user_blocks?select=blocked_id&blocker_id=eq.$uid&order=created_at.desc"))
+        val ids = (0 until blocks.length()).mapNotNull { blocks.optJSONObject(it)?.optString("blocked_id")?.takeIf { id -> id.isNotBlank() } }
+        if (ids.isEmpty()) return emptyList()
+        val rows = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=in.(" + ids.joinToString(",") + ")"))
+        val users = (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            UserItem(row.optString("id"), row.optString("display_name").ifBlank { row.optString("username").ifBlank { "Пользователь" } },
+                row.optString("avatar_url").ifBlank { "🙂" })
+        }
+        return ids.mapNotNull { id -> users.firstOrNull { it.id == id } }
+    }
+
+    suspend fun blockUser(userId: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val blocked = normalizeUuid(userId)
+        if (blocked == uid) throw IOException("Нельзя заблокировать собственный аккаунт")
+        call("/rest/v1/user_blocks?on_conflict=blocker_id,blocked_id", "POST",
+            JSONObject().put("blocker_id", uid).put("blocked_id", blocked).toString(),
+            prefer = "resolution=ignore-duplicates,return=minimal")
+    }
+
+    suspend fun unblockUser(userId: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        call("/rest/v1/user_blocks?blocker_id=eq.$uid&blocked_id=eq." + normalizeUuid(userId), "DELETE",
+            prefer = "return=minimal")
+    }
+
+    suspend fun markChatRead(chatId: String, shareReadReceipt: Boolean = true) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val now = java.time.Instant.now().toString()
+        val payload = JSONObject().put("last_read_at", now)
+        if (shareReadReceipt) payload.put("last_receipt_at", now)
+        call("/rest/v1/conversation_members?conversation_id=eq.$chatId&user_id=eq.$uid", "PATCH",
+            payload.toString(), prefer = "return=minimal")
     }
 
     suspend fun editMessage(messageId: String, newText: String) {
