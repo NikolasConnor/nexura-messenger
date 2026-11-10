@@ -324,4 +324,31 @@ class E2eeClientInstrumentedTest {
             }.getOrDefault(false)
         )
     }
+
+    @Test
+    fun conversationSafetyNumberIsIdenticalForBothParticipants() {
+        val (_, alice) = newClient()
+        val (_, bob) = newClient()
+        val aliceBundle = JSONObject(alice.ensureDevice())
+        val bobBundle = JSONObject(bob.ensureDevice())
+
+        val aliceView = alice.conversationFingerprint(
+            aliceBundle.getString("curve25519"), aliceBundle.getString("ed25519"),
+            bobBundle.getString("curve25519"), bobBundle.getString("ed25519")
+        )
+        val bobView = bob.conversationFingerprint(
+            bobBundle.getString("curve25519"), bobBundle.getString("ed25519"),
+            aliceBundle.getString("curve25519"), aliceBundle.getString("ed25519")
+        )
+        assertEquals(aliceView, bobView)
+
+        val (_, other) = newClient()
+        val otherBundle = JSONObject(other.ensureDevice())
+        val changedPeerView = alice.conversationFingerprint(
+            aliceBundle.getString("curve25519"), aliceBundle.getString("ed25519"),
+            otherBundle.getString("curve25519"), otherBundle.getString("ed25519")
+        )
+        assertNotEquals(aliceView, changedPeerView)
+    }
+
 }
