@@ -1300,6 +1300,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 }
                                                                 "audio" -> {
                                                                     chatGallery = null
+                                                                    chatSearchOpen = false
+                                                                    chatSearchQuery = ""
                                                                     scrollToMessageId = item.id
                                                                     scope.launch {
                                                                         try {
@@ -1342,6 +1344,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }
                                                     IconButton(onClick = {
                                                         chatGallery = null
+                                                        chatSearchOpen = false
+                                                        chatSearchQuery = ""
                                                         scrollToMessageId = item.id
                                                         scope.launch {
                                                             try {
