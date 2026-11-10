@@ -560,6 +560,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
             var retryDelay = 2500L
+            var lastReceiptRefresh = 0L
             while (true) {
                 delay(if (selected != null) retryDelay else maxOf(20_000L, retryDelay))
                 try {
@@ -567,7 +568,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     if (currentChat != null) {
                         val lastTimestamp = lastSyncedMessageTimestamp
                         val latest = api.messages(currentChat.id, e2eeClient, lastTimestamp)
-                        if (currentChat.kind == "direct") peerReadReceiptAt = api.peerReadReceiptAt(currentChat.id, currentChat.peerUserId)
+                        if (currentChat.kind == "direct" && System.currentTimeMillis() - lastReceiptRefresh >= 15_000L) {
+                            peerReadReceiptAt = api.peerReadReceiptAt(currentChat.id, currentChat.peerUserId)
+                            lastReceiptRefresh = System.currentTimeMillis()
+                        }
                         if (selected?.id == currentChat.id && latest.isNotEmpty()) {
                             messages = (messages + latest).distinctBy { it.id }.sortedBy { it.createdAt }
                             lastSyncedMessageTimestamp = maxOf(
