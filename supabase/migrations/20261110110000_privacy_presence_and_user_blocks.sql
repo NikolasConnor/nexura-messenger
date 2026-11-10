@@ -87,3 +87,34 @@ revoke all on function public.get_user_presence(uuid) from public, anon;
 grant execute on function public.get_user_presence(uuid) to authenticated;
 
 alter table public.conversation_members add column if not exists last_receipt_at timestamptz;
+
+create or replace function private.is_user_blocked(p_target_id uuid)
+returns boolean language sql stable security definer set search_path = pg_catalog, public, auth
+as $$
+ select exists (
+   select 1 from public.user_blocks b
+   where (b.blocker_id = auth.uid() and b.blocked_id = p_target_id)
+      or (b.blocker_id = p_target_id and b.blocked_id = auth.uid())
+ );
+$$;
+revoke all on function private.is_user_blocked(uuid) from public, anon;
+grant execute on function private.is_user_blocked(uuid) to authenticated;
+drop policy if exists "Visible presence is readable" on public.user_presence;
+create policy "Visible presence is readable" on public.user_presence
+ for select to authenticated using (
+   show_online_status = true and not (select private.is_user_blocked(user_id))
+ );
+drop function if exists public.get_user_presence(uuid);
+create function public.get_user_presence(p_user_id uuid)
+returns table(is_visible boolean, is_online boolean, last_seen_at timestamptz)
+language sql stable security invoker set search_path = pg_catalog, public, auth
+as $$
+ select coalesce(p.show_online_status, false),
+        coalesce(p.last_seen_at > now() - interval '2 minutes', false),
+        p.last_seen_at
+ from (select p_user_id as id) target
+ left join public.user_presence p on p.user_id = target.id
+ where auth.uid() is not null;
+$$;
+revoke all on function public.get_user_presence(uuid) from public, anon;
+grant execute on function public.get_user_presence(uuid) to authenticated;
