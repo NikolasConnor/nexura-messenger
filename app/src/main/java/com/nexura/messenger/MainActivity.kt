@@ -39,6 +39,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Call
@@ -427,7 +428,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     pinnedMessageId = api.pinnedMessage(chat.id)
                     canManagePins = api.canManageConversation(chat.id)
                 }
-                api.markChatRead(chat.id, runCatching { api.privacySettings().readReceiptsEnabled }.getOrDefault(true))
+                api.markChatRead(chat.id, readReceiptsEnabled)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
             } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
         }
@@ -514,13 +515,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         if (signedIn) {
             launch {
                 while (true) {
-                    runCatching { api.updatePresenceHeartbeat() }
+                    if (context.getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE).getBoolean("activity_visible", false)) runCatching { api.updatePresenceHeartbeat() }
                     delay(60_000)
                 }
             }
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                val initialPrivacy = api.privacySettings()
+                showOnlineStatus = initialPrivacy.showOnlineStatus
+                readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
                 // Prepare local E2EE state before chats become tappable; key publication is
                 // network work and happens after the chat list has rendered.
                 val e2eeUserId = store.userId
