@@ -1761,6 +1761,77 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
 
 @Composable
+private fun AudioMessagePlayer(uri: Uri, caption: String?) {
+    val context = LocalContext.current
+    var player by remember(uri) { mutableStateOf<MediaPlayer?>(null) }
+    var playing by remember(uri) { mutableStateOf(false) }
+    var loading by remember(uri) { mutableStateOf(false) }
+    DisposableEffect(uri) {
+        onDispose {
+            runCatching { player?.stop() }
+            runCatching { player?.release() }
+            player = null
+        }
+    }
+    Row(
+        Modifier.widthIn(min = 190.dp, max = 250.dp).clip(RoundedCornerShape(14.dp))
+            .background(Surface2).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(
+            onClick = {
+                if (playing) {
+                    runCatching { player?.pause() }
+                    playing = false
+                } else if (player != null) {
+                    runCatching { player?.start(); playing = true }
+                } else {
+                    loading = true
+                    try {
+                        val next = MediaPlayer()
+                        player = next
+                        next.setDataSource(context, uri)
+                        next.setOnPreparedListener {
+                            loading = false
+                            it.start()
+                            playing = true
+                        }
+                        next.setOnCompletionListener {
+                            playing = false
+                            runCatching { it.seekTo(0) }
+                        }
+                        next.setOnErrorListener { mp, _, _ ->
+                            loading = false
+                            playing = false
+                            runCatching { mp.release() }
+                            player = null
+                            Toast.makeText(context, "Не удалось воспроизвести аудио", Toast.LENGTH_SHORT).show()
+                            true
+                        }
+                        next.prepareAsync()
+                    } catch (_: Exception) {
+                        loading = false
+                        playing = false
+                        runCatching { player?.release() }
+                        player = null
+                        Toast.makeText(context, "Не удалось открыть голосовое сообщение", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            modifier = Modifier.size(42.dp)
+        ) {
+            if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Accent, strokeWidth = 2.dp)
+            else Icon(if (playing) Icons.Default.Stop else Icons.Default.PlayArrow,
+                if (playing) "Остановить голосовое" else "Прослушать голосовое", tint = Accent)
+        }
+        Column(Modifier.weight(1f)) {
+            Text("Голосовое сообщение", color = MainText, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(caption ?: "Аудио защищено сквозным шифрованием", color = SecondaryText, fontSize = 10.sp, maxLines = 1)
+        }
+    }
+}
+
+@Composable
 private fun NexuraBottomBar(
     selected: String,
     profileSelected: Boolean,
