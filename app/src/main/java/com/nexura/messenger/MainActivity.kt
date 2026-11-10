@@ -1550,14 +1550,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     Column(Modifier.fillMaxSize()) {
                         Row(
-                            Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 6.dp, vertical = 8.dp),
+                            Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 8.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = { selected = null; peerReadReceiptAt = null; messages = emptyList(); replyTarget = null; loadChats() }) {
                                 Icon(Icons.Default.ArrowBack, "Назад к чатам", tint = MainText)
                             }
                             if (chat.kind == "group") {
-                                GroupAvatar()
+                                ChatListAvatar(chat.title, chat.avatar, true, false)
                             } else {
                                 Box(Modifier.clickable {
                                     val peerId = chat.peerUserId
@@ -1572,7 +1572,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             finally { loadingProfile = false }
                                         }
                                     } else error = "Не удалось определить собеседника"
-                                }) { Avatar(chat.title, chat.avatar) }
+                                }) { ChatListAvatar(chat.title, chat.avatar, false, false) }
                             }
                             Column(Modifier.weight(1f).padding(start = 12.dp).clickable(enabled = chat.kind == "direct") {
                                 val peerId = chat.peerUserId
@@ -1755,13 +1755,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     items(visibleMessages, key = { it.id }) { msg ->
                                     val mine = msg.senderId == store.userId
                                     val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
-                                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                                         Column(
-                                            Modifier.widthIn(max = 310.dp).clip(RoundedCornerShape(
+                                            Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(
                                                 topStart = 18.dp, topEnd = 18.dp,
                                                 bottomStart = if (mine) 18.dp else 5.dp,
                                                 bottomEnd = if (mine) 5.dp else 18.dp
-                                            )).background(if (mine) chatBubbleColor else Surface1).padding(horizontal = 13.dp, vertical = 10.dp)
+                                            )).background(if (mine) chatBubbleColor else Surface1).padding(horizontal = 14.dp, vertical = 11.dp)
                                         ) {
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
@@ -2004,7 +2004,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 IconButton(
                                     onClick = { if (recordingVoice) stopVoiceRecording(chat) else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                                     enabled = !sendingImage,
-                                    modifier = Modifier.size(44.dp)
+                                    modifier = Modifier.size(42.dp).clip(CircleShape).background(if (recordingVoice) Danger.copy(alpha = 0.14f) else Surface2)
                                 ) {
                                     Icon(if (recordingVoice) Icons.Default.Stop else Icons.Default.Mic,
                                         if (recordingVoice) "Остановить запись" else "Записать голосовое",
@@ -2013,7 +2013,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 IconButton(
                                     onClick = { mediaPicker.launch(arrayOf("*/*")) },
                                     enabled = !sendingImage,
-                                    modifier = Modifier.size(44.dp)
+                                    modifier = Modifier.size(42.dp).clip(CircleShape).background(Surface2)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
                                     else Icon(Icons.Default.Add, "Прикрепить файл", tint = Accent)
