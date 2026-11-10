@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -64,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.AndroidView
@@ -179,6 +181,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
+    var chatThemeOpen by remember { mutableStateOf(false) }
+    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF0D1118)) }
+    var chatBubbleColor by remember { mutableStateOf(Color(0xFF304B83)) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceFile by remember { mutableStateOf<File?>(null) }
@@ -209,9 +214,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingSecureMessageText by remember { mutableStateOf<String?>(null) }
     var showCallDialog by remember { mutableStateOf(false) }
     var pendingCallAction by remember { mutableStateOf(authCallback?.getQueryParameter("action") ?: "show") }
-    LaunchedEffect(selected?.id) {
+    LaunchedEffect(selected?.id, store.userId) {
         context.getSharedPreferences("nexura_runtime", android.content.Context.MODE_PRIVATE)
             .edit().putString("active_chat_id", selected?.id).apply()
+        selected?.id?.let { chatId ->
+            val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
+            chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF0D1118.toInt()))
+            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF304B83.toInt()))
+        } ?: run {
+            chatWallpaperColor = Color(0xFF0D1118)
+            chatBubbleColor = Color(0xFF304B83)
+        }
     }
 
     fun syncContacts() {
@@ -1103,6 +1116,55 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             onDismiss = { showCallDialog = false; pendingCallAction = "show" }
                         )
                     }
+                    if (chatThemeOpen) {
+                        val wallpaperOptions = listOf("Ночь" to Color(0xFF0D1118), "Графит" to Color(0xFF171D27), "Сланец" to Color(0xFF1B2634), "Синий вечер" to Color(0xFF101D32), "Лес" to Color(0xFF14251F), "Бордовый" to Color(0xFF2A1922))
+                        val bubbleOptions = listOf("Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Фиолетовый" to Color(0xFF554078), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
+                        AlertDialog(
+                            onDismissRequest = { chatThemeOpen = false },
+                            containerColor = Surface1,
+                            title = { Text("Оформление чата", color = MainText, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    Text("Фон переписки", color = MainText, fontWeight = FontWeight.SemiBold)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                                        wallpaperOptions.forEach { (label, color) ->
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(54.dp).clickable {
+                                                chatWallpaperColor = color
+                                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().putInt("wallpaper_$id", color.toArgb()).apply() }
+                                            }) {
+                                                Box(Modifier.size(38.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+                                                    if (chatWallpaperColor == color) Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(17.dp))
+                                                }
+                                                Text(label, color = SecondaryText, fontSize = 9.sp, maxLines = 1)
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider(color = Surface2)
+                                    Text("Цвет ваших сообщений", color = MainText, fontWeight = FontWeight.SemiBold)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                                        bubbleOptions.forEach { (label, color) ->
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(54.dp).clickable {
+                                                chatBubbleColor = color
+                                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().putInt("bubble_$id", color.toArgb()).apply() }
+                                            }) {
+                                                Box(Modifier.size(38.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+                                                    if (chatBubbleColor == color) Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(17.dp))
+                                                }
+                                                Text(label, color = SecondaryText, fontSize = 9.sp, maxLines = 1)
+                                            }
+                                        }
+                                    }
+                                    Text("Настройки сохраняются только для этого чата и не меняют оформление у собеседника.", color = SecondaryText, fontSize = 11.sp)
+                                }
+                            },
+                            confirmButton = { TextButton(onClick = { chatThemeOpen = false }) { Text("Готово") } },
+                            dismissButton = { TextButton(onClick = {
+                                chatWallpaperColor = Color(0xFF0D1118)
+                                chatBubbleColor = Color(0xFF304B83)
+                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().remove("wallpaper_$id").remove("bubble_$id").apply() }
+                            }) { Text("Сбросить") } }
+                        )
+                    }
                     if (chatGallery != null) {
                         Dialog(onDismissRequest = { chatGallery = null }) {
                             Surface(shape = RoundedCornerShape(22.dp), color = Surface1, modifier = Modifier.fillMaxWidth().fillMaxHeight(0.82f)) {
@@ -1354,6 +1416,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Icon(Icons.Default.Videocam, "Видеозвонок", tint = Accent)
                                 }
                             }
+                            IconButton(onClick = { chatThemeOpen = true }) {
+                                Icon(Icons.Default.Palette, "Оформление чата", tint = if (chatThemeOpen) Accent else SecondaryText)
+                            }
                             IconButton(onClick = {
                                 scope.launch {
                                     try {
@@ -1486,7 +1551,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 LazyColumn(
                                     state = messageListState,
-                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor),
                                     contentPadding = PaddingValues(bottom = 10.dp)
                                 ) {
                                     items(visibleMessages, key = { it.id }) { msg ->
@@ -1497,7 +1562,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 topStart = 18.dp, topEnd = 18.dp,
                                                 bottomStart = if (mine) 18.dp else 5.dp,
                                                 bottomEnd = if (mine) 5.dp else 18.dp
-                                            )).background(if (mine) Color(0xFF304B83) else Surface1).padding(horizontal = 13.dp, vertical = 10.dp)
+                                            )).background(if (mine) chatBubbleColor else Surface1).padding(horizontal = 13.dp, vertical = 10.dp)
                                         ) {
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
