@@ -1114,7 +1114,7 @@ class NexuraApi(private val store: SessionStore) {
         val chat = normalizeUuid(chatId)
         val fileId = UUID.randomUUID().toString()
         val path = "$chat/$uid/$fileId.enc"
-        val mediaType = if (encryptedMedia.mimeType.startsWith("video/")) "video" else "image"
+        val mediaType = when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; else -> "image" }
         val uploadRequest = Request.Builder()
             .url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
             .header("apikey", PUBLIC_KEY)
@@ -1190,7 +1190,7 @@ class NexuraApi(private val store: SessionStore) {
             .put("schema", "nexura-media-v1")
             .put("path", path)
             .put("mime", encryptedMedia.mimeType)
-            .put("media_type", if (encryptedMedia.mimeType.startsWith("video/")) "video" else "image")
+            .put("media_type", when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; else -> "image" })
             .put("name", encryptedMedia.fileName)
             .put("size", encryptedMedia.plainSize)
             .put("key", encryptedMedia.keyBase64)
