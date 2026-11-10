@@ -138,3 +138,5 @@ end;
 $$;
 revoke all on function public.update_my_privacy_settings(boolean, boolean) from public, anon;
 grant execute on function public.update_my_privacy_settings(boolean, boolean) to authenticated;
+
+create index if not exists user_blocks_blocked_id_idx on public.user_blocks(blocked_id, blocker_id);
