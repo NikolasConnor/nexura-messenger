@@ -983,6 +983,56 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("deleted_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
     }
+
+    suspend fun messageReactions(chatId: String): Map<String, List<Pair<String, Int>>> {
+        val rows = JSONArray(call(
+            "/rest/v1/message_reactions?select=message_id,user_id,emoji&conversation_id=eq.${normalizeUuid(chatId)}"
+        ))
+        val grouped = linkedMapOf<String, MutableMap<String, Int>>()
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val messageId = row.optString("message_id")
+            val emoji = row.optString("emoji")
+            val counts = grouped.getOrPut(messageId) { linkedMapOf() }
+            counts[emoji] = (counts[emoji] ?: 0) + 1
+        }
+        return grouped.mapValues { (_, counts) -> counts.map { it.key to it.value } }
+    }
+
+    suspend fun toggleMessageReaction(chatId: String, messageId: String, emoji: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val encodedEmoji = java.net.URLEncoder.encode(emoji, "UTF-8")
+        val filter = "/rest/v1/message_reactions?message_id=eq.${normalizeUuid(messageId)}&user_id=eq.$uid&emoji=eq.$encodedEmoji"
+        val existing = JSONArray(call(filter + "&select=message_id&limit=1"))
+        if (existing.length() > 0) {
+            call(filter, "DELETE", prefer = "return=minimal")
+        } else {
+            call("/rest/v1/message_reactions", "POST",
+                JSONObject().put("message_id", normalizeUuid(messageId))
+                    .put("conversation_id", normalizeUuid(chatId)).put("user_id", uid).put("emoji", emoji).toString(),
+                prefer = "return=minimal")
+        }
+    }
+
+    suspend fun pinnedMessage(chatId: String): String? {
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_pins?select=message_id&conversation_id=eq.${normalizeUuid(chatId)}&limit=1"
+        ))
+        return if (rows.length() == 0) null else rows.getJSONObject(0).optString("message_id").takeIf { it.isNotBlank() }
+    }
+
+    suspend fun setPinnedMessage(chatId: String, messageId: String?) {
+        val conversation = normalizeUuid(chatId)
+        if (messageId == null) {
+            call("/rest/v1/conversation_pins?conversation_id=eq.$conversation", "DELETE", prefer = "return=minimal")
+        } else {
+            val uid = store.userId ?: throw IOException("Сессия истекла")
+            call("/rest/v1/conversation_pins?on_conflict=conversation_id", "POST",
+                JSONObject().put("conversation_id", conversation).put("message_id", normalizeUuid(messageId))
+                    .put("pinned_by", uid).toString(),
+                prefer = "resolution=merge-duplicates,return=minimal")
+        }
+    }
     private suspend fun signedAttachmentUrl(path: String, bucket: String = "chat-attachments"): String {
         val now = System.currentTimeMillis()
         val cacheKey = "$bucket/$path"
