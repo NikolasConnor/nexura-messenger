@@ -1027,7 +1027,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         }
                                                     )
                                                 }
-                                                if (index != groupUsers.lastIndex) HorizontalDivider(color = BorderColor.copy(alpha = 0.55f))
+                                                if (index != groupUsers.lastIndex) Divider(color = SecondaryText.copy(alpha = 0.2f))
                                             }
                                         }
                                     } else {
@@ -1040,7 +1040,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface2).padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.People, null, tint = Accent, modifier = Modifier.size(19.dp))
+                                        Icon(Icons.Default.GroupAdd, null, tint = Accent, modifier = Modifier.size(19.dp))
                                         Text(
                                             "Выбрано: ${selectedGroupUsers.size} из 49 участников",
                                             color = MainText, fontWeight = FontWeight.Medium, fontSize = 13.sp,
