@@ -274,7 +274,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 recordingVoice = true
                 notice = "Идёт запись голосового сообщения"
             } catch (e: Exception) {
-                voiceRecorder?.runCatching { stop(); release() }
+                voiceRecorder?.let { runCatching { it.stop(); it.release() } }
                 voiceRecorder = null
                 voiceFile?.delete()
                 voiceFile = null
@@ -349,6 +349,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (replyTarget == null) replyTarget = submittedReply
                 error = e.message ?: "Не удалось отправить медиа"
             } finally {
+                if (uri.scheme == "file") uri.path?.let(::File)?.delete()
                 sendingImage = false
             }
         }
