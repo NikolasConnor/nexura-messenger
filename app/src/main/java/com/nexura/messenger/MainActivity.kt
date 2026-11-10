@@ -15,6 +15,9 @@ import org.json.JSONObject
 import android.os.Build
 import android.net.Uri
 import android.widget.VideoView
+import android.media.MediaRecorder
+import android.media.MediaPlayer
+import java.io.File
 import android.widget.MediaController
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -45,6 +48,8 @@ import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -173,6 +178,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
+    var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
+    var recordingVoice by remember { mutableStateOf(false) }
+    var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var voiceFile by remember { mutableStateOf<File?>(null) }
     var profileName by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
     var profileBio by remember { mutableStateOf("") }
@@ -245,6 +254,59 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         val shareText = "Привет, ${contact.name}! Давай общаться в Nexura Messenger. Найди Nexura в Google Play: https://play.google.com/store/apps/details?id=com.nexura.messenger"
         val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, shareText) }
         context.startActivity(Intent.createChooser(send, "Пригласить в Nexura"))
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            try {
+                val file = File.createTempFile("nexura-voice-", ".m4a", context.cacheDir)
+                val recorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else MediaRecorder()
+                recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+                recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                recorder.setAudioEncodingBitRate(96_000)
+                recorder.setAudioSamplingRate(44_100)
+                recorder.setOutputFile(file.absolutePath)
+                recorder.prepare()
+                recorder.start()
+                voiceFile = file
+                voiceRecorder = recorder
+                recordingVoice = true
+                notice = "Идёт запись голосового сообщения"
+            } catch (e: Exception) {
+                voiceRecorder?.runCatching { stop(); release() }
+                voiceRecorder = null
+                voiceFile?.delete()
+                voiceFile = null
+                error = e.message ?: "Не удалось начать запись"
+            }
+        } else error = "Разрешите доступ к микрофону для записи голосовых сообщений"
+    }
+
+    fun stopVoiceRecording(chat: ChatItem) {
+        val recorder = voiceRecorder ?: return
+        val file = voiceFile
+        try {
+            recorder.stop()
+            recorder.release()
+            voiceRecorder = null
+            recordingVoice = false
+            if (file == null || !file.exists() || file.length() < 100) {
+                file?.delete()
+                voiceFile = null
+                error = "Запись слишком короткая"
+            } else {
+                sendPendingMedia(chat, Uri.fromFile(file), "", null)
+                voiceFile = null
+            }
+        } catch (e: Exception) {
+            runCatching { recorder.reset(); recorder.release() }
+            voiceRecorder = null
+            recordingVoice = false
+            file?.delete()
+            voiceFile = null
+            error = "Не удалось завершить запись. Попробуйте ещё раз."
+        }
     }
 
     fun sendPickedMedia(uri: Uri?) {
@@ -1040,6 +1102,53 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             onDismiss = { showCallDialog = false; pendingCallAction = "show" }
                         )
                     }
+                    if (chatGallery != null) {
+                        Dialog(onDismissRequest = { chatGallery = null }) {
+                            Surface(shape = RoundedCornerShape(22.dp), color = Surface1, modifier = Modifier.fillMaxWidth().fillMaxHeight(0.82f)) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Медиа чата", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                        IconButton(onClick = { chatGallery = null }) { Icon(Icons.Default.Close, "Закрыть", tint = SecondaryText) }
+                                    }
+                                    Text("Фото, видео и голосовые сообщения с E2EE", color = SecondaryText, fontSize = 12.sp)
+                                    Spacer(Modifier.height(10.dp))
+                                    val galleryItems = chatGallery.orEmpty()
+                                    if (galleryItems.isEmpty()) {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("В этом чате пока нет медиа", color = SecondaryText) }
+                                    } else {
+                                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            items(galleryItems, key = { it.id }) { item ->
+                                                Row(
+                                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface2)
+                                                        .clickable {
+                                                            when (item.mediaKind) {
+                                                                "video", "image" -> {
+                                                                    mediaViewerUri = Uri.parse(item.content)
+                                                                    mediaViewerType = item.mediaKind ?: "image"
+                                                                    chatGallery = null
+                                                                }
+                                                                "audio" -> notice = "Откройте голосовое сообщение в переписке для прослушивания"
+                                                            }
+                                                        }.padding(10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    when (item.mediaKind) {
+                                                        "image" -> AsyncImage(model = item.content, contentDescription = "Фото", modifier = Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                                                        "video" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black), contentAlignment = Alignment.Center) { Icon(Icons.Default.PlayArrow, "Видео", tint = Color.White) }
+                                                        else -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Mic, "Голосовое", tint = Accent) }
+                                                    }
+                                                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                                        Text(when(item.mediaKind) { "audio" -> "Голосовое сообщение"; "video" -> "Видео"; else -> "Фотография" }, color = MainText, fontWeight = FontWeight.Medium)
+                                                        Text(item.mediaCaption ?: messageTimeLabel(item.createdAt), color = SecondaryText, fontSize = 12.sp, maxLines = 2)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if (mediaViewerUri != null) {
                         Dialog(
                             onDismissRequest = { mediaViewerUri = null },
@@ -1273,6 +1382,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }) {
                                 Icon(Icons.Default.Lock, if (chat.kind == "group") "Проверить устройства группы" else "Проверить устройство", tint = Accent)
                             }
+                            IconButton(onClick = {
+                                scope.launch {
+                                    try { chatGallery = api.messages(chat.id, e2eeClient, mediaOnly = true).asReversed() }
+                                    catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
+                                }
+                            }) {
+                                Icon(Icons.Default.Image, "Медиа чата", tint = if (chatGallery != null) Accent else SecondaryText)
+                            }
                             IconButton(onClick = { chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }) {
                                 Icon(Icons.Default.Search, "Поиск по переписке", tint = if (chatSearchOpen) Accent else SecondaryText)
                             }
@@ -1404,7 +1521,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 }
                                             } else if (msg.messageType == "media" && msg.encrypted) {
                                                 val mediaUri = Uri.parse(msg.content)
-                                                if (msg.mediaKind == "video") {
+                                                if (msg.mediaKind == "audio") {
+                                                    AudioMessagePlayer(mediaUri, msg.mediaCaption)
+                                                } else if (msg.mediaKind == "video") {
                                                     Box(
                                                         Modifier.width(230.dp).height(150.dp).clip(RoundedCornerShape(12.dp))
                                                             .background(Color.Black).clickable { mediaViewerUri = mediaUri; mediaViewerType = "video" },
@@ -1541,6 +1660,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         }
+                        if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                         Column(
                             Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)
@@ -1583,6 +1703,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { if (recordingVoice) stopVoiceRecording(chat) else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                    enabled = !sendingImage,
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(if (recordingVoice) Icons.Default.Stop else Icons.Default.Mic,
+                                        if (recordingVoice) "Остановить запись" else "Записать голосовое",
+                                        tint = if (recordingVoice) Danger else Accent)
+                                }
                                 IconButton(
                                     onClick = { mediaPicker.launch(arrayOf("image/*", "video/*")) },
                                     enabled = !sendingImage,
