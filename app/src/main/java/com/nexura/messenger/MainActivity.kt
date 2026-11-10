@@ -1076,36 +1076,78 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         if (homeTab == "contacts") {
                             Column(Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp)) {
-                                Text("Контакты", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                                Text("Найдём знакомых, которые уже используют Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
-                                Card(colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                                    Column(Modifier.padding(14.dp)) {
-                                        Text("Синхронизация адресной книги", color = MainText, fontWeight = FontWeight.SemiBold)
-                                        Text("Номера используются только для поиска совпадений. Они не публикуются в профиле.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
-                                        Button(onClick = {
-                                            if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED) syncContacts()
-                                            else contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-                                        }, enabled = !syncingContacts, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), shape = RoundedCornerShape(12.dp)) {
-                                            Text(if (syncingContacts) "Синхронизируем…" else if (contactsSynced) "Обновить контакты" else "Найти контакты")
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Контакты", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
+                                        Text("Люди, с которыми можно общаться в Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                                    }
+                                    Box(
+                                        Modifier.size(42.dp).clip(RoundedCornerShape(14.dp))
+                                            .background(Brush.linearGradient(listOf(Accent, Accent2))),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp))
+                                    }
+                                }
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Surface1),
+                                    shape = RoundedCornerShape(22.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                                ) {
+                                    Column(Modifier.padding(16.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Refresh, null, tint = Accent, modifier = Modifier.size(19.dp))
+                                            Text("Синхронизация контактов", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 9.dp))
+                                        }
+                                        Text(
+                                            "Найдём знакомых из адресной книги, которые уже зарегистрированы. Номера не отображаются в профиле.",
+                                            color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 7.dp)
+                                        )
+                                        Button(
+                                            onClick = {
+                                                if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED) syncContacts()
+                                                else contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                                            },
+                                            enabled = !syncingContacts,
+                                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp),
+                                            shape = RoundedCornerShape(15.dp)
+                                        ) {
+                                            Text(if (syncingContacts) "Синхронизируем…" else if (contactsSynced) "Обновить контакты" else "Найти знакомых")
                                         }
                                     }
                                 }
                                 if (contactsError.isNotBlank()) Text(contactsError, color = if (contactsSynced) SecondaryText else Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
                                 if (contactsSynced) {
                                     val registered = deviceContacts.count { it.match != null }
-                                    Text("В Nexura: $registered · Не зарегистрированы: ${deviceContacts.size - registered}", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Column(
+                                            Modifier.weight(1f).clip(RoundedCornerShape(15.dp)).background(Surface1).padding(12.dp)
+                                        ) {
+                                            Text("$registered", color = Success, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                                            Text("В Nexura", color = SecondaryText, fontSize = 11.sp)
+                                        }
+                                        Column(
+                                            Modifier.weight(1f).clip(RoundedCornerShape(15.dp)).background(Surface1).padding(12.dp)
+                                        ) {
+                                            Text("${deviceContacts.size - registered}", color = MainText, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                                            Text("Можно пригласить", color = SecondaryText, fontSize = 11.sp)
+                                        }
+                                    }
                                     LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
                                         items(deviceContacts, key = { it.phone }) { person ->
                                             Row(
                                                 Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                                    .clip(RoundedCornerShape(16.dp)).background(Surface1)
-                                                    .padding(horizontal = 11.dp, vertical = 10.dp),
+                                                    .clip(RoundedCornerShape(17.dp)).background(Surface1)
+                                                    .padding(horizontal = 12.dp, vertical = 11.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 if (person.match != null) Avatar(person.match.displayName, person.match.avatar) else Avatar(person.name, "👤")
                                                 Column(Modifier.weight(1f).padding(start = 11.dp, end = 4.dp)) {
                                                     Text(person.match?.displayName ?: person.name, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
-                                                    Text(if (person.match != null) "Уже в Nexura" else "Можно пригласить", color = if (person.match != null) Success else SecondaryText, fontSize = 11.sp)
+                                                    Text(if (person.match != null) "Уже в Nexura" else "Ещё не зарегистрирован", color = if (person.match != null) Success else SecondaryText, fontSize = 11.sp)
                                                 }
                                                 if (person.match != null) {
                                                     TextButton(onClick = {
