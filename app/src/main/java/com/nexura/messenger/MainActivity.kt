@@ -297,32 +297,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         } else error = "Разрешите доступ к микрофону для записи голосовых сообщений"
     }
 
-    fun stopVoiceRecording(chat: ChatItem) {
-        val recorder = voiceRecorder ?: return
-        val file = voiceFile
-        try {
-            recorder.stop()
-            recorder.release()
-            voiceRecorder = null
-            recordingVoice = false
-            if (file == null || !file.exists() || file.length() < 100) {
-                file?.delete()
-                voiceFile = null
-                error = "Запись слишком короткая"
-            } else {
-                sendPendingMedia(chat, Uri.fromFile(file), "", null)
-                voiceFile = null
-            }
-        } catch (e: Exception) {
-            runCatching { recorder.reset(); recorder.release() }
-            voiceRecorder = null
-            recordingVoice = false
-            file?.delete()
-            voiceFile = null
-            error = "Не удалось завершить запись. Попробуйте ещё раз."
-        }
-    }
-
     fun sendPickedMedia(uri: Uri?) {
         if (uri == null) return
         runCatching {
@@ -366,6 +340,32 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (uri.scheme == "file") uri.path?.let(::File)?.delete()
                 sendingImage = false
             }
+        }
+    }
+
+    fun stopVoiceRecording(chat: ChatItem) {
+        val recorder = voiceRecorder ?: return
+        val file = voiceFile
+        try {
+            recorder.stop()
+            recorder.release()
+            voiceRecorder = null
+            recordingVoice = false
+            if (file == null || !file.exists() || file.length() < 100) {
+                file?.delete()
+                voiceFile = null
+                error = "Запись слишком короткая"
+            } else {
+                sendPendingMedia(chat, Uri.fromFile(file), "", null)
+                voiceFile = null
+            }
+        } catch (e: Exception) {
+            runCatching { recorder.reset(); recorder.release() }
+            voiceRecorder = null
+            recordingVoice = false
+            file?.delete()
+            voiceFile = null
+            error = "Не удалось завершить запись. Попробуйте ещё раз."
         }
     }
 
