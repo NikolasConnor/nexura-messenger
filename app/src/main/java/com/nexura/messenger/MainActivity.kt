@@ -1233,7 +1233,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(onClick = { chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }) {
                                 Icon(Icons.Default.Search, "Поиск по переписке", tint = if (chatSearchOpen) Accent else SecondaryText)
                             }
-                            IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id, e2eeClient) } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" } } }) {
+                            IconButton(onClick = {
+                                scope.launch {
+                                    try {
+                                        messages = api.messages(chat.id, e2eeClient)
+                                        messageReactions = api.messageReactions(chat.id)
+                                        pinnedMessageId = api.pinnedMessage(chat.id)
+                                        canManagePins = api.canManageConversation(chat.id)
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" }
+                                }
+                            }) {
                                 Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
                             }
                         }
