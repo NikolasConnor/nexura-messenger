@@ -1243,6 +1243,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 )
                             )
                         }
+                        if (pinnedMessageId != null) {
+                            val pinned = messages.firstOrNull { it.id == pinnedMessageId }
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .clip(RoundedCornerShape(10.dp)).background(Surface2).padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("📌", fontSize = 16.sp)
+                                Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                    Text("Закреплённое сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(pinned?.content?.take(90) ?: "Откройте чат, чтобы загрузить сообщение", color = MainText, fontSize = 12.sp, maxLines = 1)
+                                }
+                                if (canManagePins) {
+                                    TextButton(onClick = {
+                                        scope.launch {
+                                            try {
+                                                api.setPinnedMessage(chat.id, null)
+                                                pinnedMessageId = null
+                                            } catch (e: Exception) { error = e.message ?: "Не удалось открепить" }
+                                        }
+                                    }) { Text("Снять", color = Accent) }
+                                }
+                            }
+                        }
                         HorizontalDivider(color = Surface2)
                         val visibleMessages = remember(messages, chatSearchQuery) {
                             if (chatSearchQuery.isBlank()) messages
@@ -1357,6 +1381,34 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         onDismissRequest = { openMessageMenu = null }
                                                     ) {
                                                         DropdownMenuItem(text = { Text("Ответить") }, onClick = { replyTarget = msg; openMessageMenu = null })
+                                                        listOf("👍", "❤️", "😂", "😮", "🔥", "👏").forEach { emoji ->
+                                                            DropdownMenuItem(
+                                                                text = { Text("$emoji Реакция") },
+                                                                onClick = {
+                                                                    openMessageMenu = null
+                                                                    scope.launch {
+                                                                        try {
+                                                                            api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                            messageReactions = api.messageReactions(chat.id)
+                                                                        } catch (e: Exception) { error = e.message ?: "Не удалось поставить реакцию" }
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
+                                                        if (canManagePins) {
+                                                            DropdownMenuItem(
+                                                                text = { Text(if (pinnedMessageId == msg.id) "Открепить" else "Закрепить в чате") },
+                                                                onClick = {
+                                                                    openMessageMenu = null
+                                                                    scope.launch {
+                                                                        try {
+                                                                            api.setPinnedMessage(chat.id, if (pinnedMessageId == msg.id) null else msg.id)
+                                                                            pinnedMessageId = api.pinnedMessage(chat.id)
+                                                                        } catch (e: Exception) { error = e.message ?: "Не удалось изменить закрепление" }
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
                                                         if (mine && msg.messageType == "text" && !msg.encrypted) {
                                                             DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
                                                             DropdownMenuItem(
