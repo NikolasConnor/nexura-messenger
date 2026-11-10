@@ -140,3 +140,16 @@ revoke all on function public.update_my_privacy_settings(boolean, boolean) from 
 grant execute on function public.update_my_privacy_settings(boolean, boolean) to authenticated;
 
 create index if not exists user_blocks_blocked_id_idx on public.user_blocks(blocked_id, blocker_id);
+
+drop policy if exists "Users manage own presence" on public.user_presence;
+drop policy if exists "Visible presence is readable" on public.user_presence;
+create policy "Presence rows readable by owner or visible peers" on public.user_presence
+ for select to authenticated using (
+   user_id = (select auth.uid())
+   or (show_online_status = true and not (select private.is_user_blocked(user_id)))
+ );
+create policy "Users insert own presence" on public.user_presence
+ for insert to authenticated with check (user_id = (select auth.uid()));
+create policy "Users update own presence" on public.user_presence
+ for update to authenticated using (user_id = (select auth.uid()))
+ with check (user_id = (select auth.uid()));
