@@ -1129,18 +1129,24 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                     chatGallery = null
                                                                 }
                                                                 "audio" -> notice = "Откройте голосовое сообщение в переписке для прослушивания"
+                                                                else -> {
+                                                                    val url = Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).find(item.content)?.value
+                                                                    if (url != null) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                                                }
                                                             }
                                                         }.padding(10.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
+                                                    val linkUrl = if (item.mediaKind == null) Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).find(item.content)?.value else null
                                                     when (item.mediaKind) {
                                                         "image" -> AsyncImage(model = item.content, contentDescription = "Фото", modifier = Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                                                         "video" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black), contentAlignment = Alignment.Center) { Icon(Icons.Default.PlayArrow, "Видео", tint = Color.White) }
-                                                        else -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Mic, "Голосовое", tint = Accent) }
+                                                        "audio" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Mic, "Голосовое", tint = Accent) }
+                                                        else -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.ChatBubbleOutline, "Ссылка", tint = Accent) }
                                                     }
                                                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                                        Text(when(item.mediaKind) { "audio" -> "Голосовое сообщение"; "video" -> "Видео"; else -> "Фотография" }, color = MainText, fontWeight = FontWeight.Medium)
-                                                        Text(item.mediaCaption ?: messageTimeLabel(item.createdAt), color = SecondaryText, fontSize = 12.sp, maxLines = 2)
+                                                        Text(when(item.mediaKind) { "audio" -> "Голосовое сообщение"; "video" -> "Видео"; "image" -> "Фотография"; else -> "Ссылка" }, color = MainText, fontWeight = FontWeight.Medium)
+                                                        Text(linkUrl ?: item.mediaCaption ?: messageTimeLabel(item.createdAt), color = SecondaryText, fontSize = 12.sp, maxLines = 2)
                                                     }
                                                 }
                                             }
@@ -1385,8 +1391,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             IconButton(onClick = {
                                 scope.launch {
-                                    try { chatGallery = api.messages(chat.id, e2eeClient, mediaOnly = true).asReversed() }
-                                    catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
+                                    try {
+                                        val media = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                        val recentLinks = api.messages(chat.id, e2eeClient).filter {
+                                            it.messageType == "text" && Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).containsMatchIn(it.content)
+                                        }
+                                        chatGallery = (media + recentLinks).distinctBy { it.id }.sortedBy { it.createdAt }
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
                                 }
                             }) {
                                 Icon(Icons.Default.Image, "Медиа чата", tint = if (chatGallery != null) Accent else SecondaryText)
