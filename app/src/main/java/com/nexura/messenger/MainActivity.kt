@@ -44,6 +44,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -152,6 +154,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var contactsSynced by remember { mutableStateOf(false) }
     var contactsError by remember { mutableStateOf("") }
     var chatFilter by remember { mutableStateOf("") }
+    var chatListFilter by remember { mutableStateOf("all") }
+    val favoriteChatIds = remember(store.userId) {
+        val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", 0)
+        mutableStateListOf<String>().apply { addAll(prefs.getStringSet("favorite_chat_ids", emptySet()).orEmpty()) }
+    }
+    val chatDrafts = remember { mutableStateMapOf<String, String>() }
     var showChatFilter by remember { mutableStateOf(false) }
     var openMessageMenu by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -285,7 +293,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         profilePhotoUri = uri
     }
 
-    val visibleChats = chats.filter { it.title.contains(chatFilter, ignoreCase = true) }
+    val visibleChats = chats
+        .filter { it.title.contains(chatFilter, ignoreCase = true) }
+        .filter {
+            when (chatListFilter) {
+                "unread" -> it.unreadCount > 0
+                "favorites" -> favoriteChatIds.contains(it.id)
+                else -> true
+            }
+        }
+        .sortedWith(compareByDescending<ChatItem> { favoriteChatIds.contains(it.id) }.thenByDescending { it.updated.orEmpty() })
 
     fun loadChats() {
         scope.launch {
@@ -300,7 +317,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
     fun openChat(chat: ChatItem) {
+        selected?.let { previous -> chatDrafts[previous.id] = draft }
         selected = chat
+        draft = chatDrafts[chat.id].orEmpty()
         messages = emptyList()
         lastSyncedMessageTimestamp = null
         messageReactions = emptyMap()
@@ -875,6 +894,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Text("Сообщения", color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             Text("${visibleChats.size}", color = SecondaryText, fontSize = 12.sp)
                         }
+                        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = chatListFilter == "all", onClick = { chatListFilter = "all" }, label = { Text("Все") })
+                            FilterChip(selected = chatListFilter == "unread", onClick = { chatListFilter = "unread" }, label = { Text("Непрочитанные") })
+                            FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранное") })
+                        }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         if (visibleChats.isEmpty()) {
                             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -899,7 +923,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
-                                        Column(Modifier.weight(1f).padding(start = 13.dp, end = 8.dp)) {
+                                        Column(Modifier.weight(1f).padding(start = 13.dp, end = 4.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
                                                 Text(chatTimeLabel(chat.updated), color = if (chat.unreadCount > 0) Accent else SecondaryText, fontSize = 11.sp)
@@ -914,6 +938,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }
                                                 }
                                             }
+                                        }
+                                        IconButton(onClick = {
+                                            if (favoriteChatIds.contains(chat.id)) favoriteChatIds.remove(chat.id) else favoriteChatIds.add(chat.id)
+                                            context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", 0)
+                                                .edit().putStringSet("favorite_chat_ids", favoriteChatIds.toSet()).apply()
+                                        }) {
+                                            Icon(
+                                                if (favoriteChatIds.contains(chat.id)) Icons.Default.Star else Icons.Default.StarBorder,
+                                                contentDescription = if (favoriteChatIds.contains(chat.id)) "Убрать из избранного" else "В избранное",
+                                                tint = if (favoriteChatIds.contains(chat.id)) Accent else SecondaryText
+                                            )
                                         }
                                     }
                                     HorizontalDivider(color = Surface1.copy(alpha = 0.9f), modifier = Modifier.padding(start = 72.dp))
