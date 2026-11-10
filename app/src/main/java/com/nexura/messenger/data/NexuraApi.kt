@@ -287,8 +287,8 @@ class NexuraApi(private val store: SessionStore) {
         val beforeFilter = beforeCreatedAt?.let {
             "&created_at=lte.${java.net.URLEncoder.encode(it, "UTF-8")}"
         }.orEmpty()
-        val limit = if (afterCreatedAt == null && beforeCreatedAt == null) 50 else 100
-        val mediaFilter = if (mediaOnly) "&message_type=in.(media,image)" else ""
+        val limit = if (mediaOnly) 1000 else if (afterCreatedAt == null && beforeCreatedAt == null) 50 else 100
+        val mediaFilter = if (mediaOnly) "&message_type=in.(media,image,file)" else ""
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
                 "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
@@ -380,7 +380,7 @@ class NexuraApi(private val store: SessionStore) {
                     mediaMimeType = mediaJson?.optString("mime")?.takeIf { it.isNotBlank() }
                 )
             } else {
-                val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
+                val rendered = if (type in setOf("image", "file") && content.isNotBlank()) signedAttachmentUrl(content) else content
                 MessageItem(
                     id, senderId, rendered, m.optString("created_at"), type, replyTo, edited,
                     encrypted = false,
@@ -1201,7 +1201,7 @@ class NexuraApi(private val store: SessionStore) {
         val chat = normalizeUuid(chatId)
         val fileId = UUID.randomUUID().toString()
         val path = "$chat/$uid/$fileId.enc"
-        val mediaType = when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; else -> "image" }
+        val mediaType = when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; encryptedMedia.mimeType.startsWith("image/") -> "image"; else -> "file" }
         val uploadRequest = Request.Builder()
             .url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
             .header("apikey", PUBLIC_KEY)
@@ -1277,7 +1277,7 @@ class NexuraApi(private val store: SessionStore) {
             .put("schema", "nexura-media-v1")
             .put("path", path)
             .put("mime", encryptedMedia.mimeType)
-            .put("media_type", when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; else -> "image" })
+            .put("media_type", when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; encryptedMedia.mimeType.startsWith("image/") -> "image"; else -> "file" })
             .put("name", encryptedMedia.fileName)
             .put("size", encryptedMedia.plainSize)
             .put("key", encryptedMedia.keyBase64)
