@@ -1003,7 +1003,7 @@ class NexuraApi(private val store: SessionStore) {
         }
         val replacementId = UUID.randomUUID().toString()
         if (isGroup) {
-            sendEncryptedGroupMessage(chatId, e2ee, replacementId, newText.trim(), "text", "text", replyToId)
+            sendEncryptedGroupMessage(chatId, e2ee, replacementId, newText.trim(), "text", replyToId)
         } else {
             sendEncryptedDirectMessage(chatId, e2ee, replacementId, newText.trim(), replyToId, "text")
         }
