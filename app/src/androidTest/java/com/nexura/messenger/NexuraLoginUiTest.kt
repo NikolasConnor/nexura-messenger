@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.rule.GrantPermissionRule
 import org.junit.Rule
 import org.junit.Test
@@ -29,8 +30,8 @@ class NexuraLoginUiTest {
     @Test
     fun registrationToggleShowsNameFieldAndRegistrationAction() {
         activity.onNodeWithText("Создать аккаунт").performClick()
-        activity.onNodeWithText("Ваше имя").assertIsDisplayed()
-        activity.onNodeWithText("Как к вам обращаться").assertIsDisplayed()
-        activity.onNodeWithText("Создать аккаунт").assertIsDisplayed()
+        activity.onNodeWithText("Ваше имя").performScrollTo().assertIsDisplayed()
+        activity.onNodeWithText("Как к вам обращаться").performScrollTo().assertIsDisplayed()
+        activity.onNodeWithText("Создать аккаунт").performScrollTo().assertIsDisplayed()
     }
 }
