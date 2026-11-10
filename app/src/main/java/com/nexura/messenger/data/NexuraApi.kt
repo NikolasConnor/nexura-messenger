@@ -49,6 +49,12 @@ data class E2eeRemoteDevice(
     val bundleVersion: Int
 )
 
+data class TurnIceServerConfig(
+    val urls: List<String>,
+    val username: String?,
+    val credential: String?
+)
+
 class NexuraApi(private val store: SessionStore) {
     companion object {
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
@@ -175,8 +181,40 @@ class NexuraApi(private val store: SessionStore) {
         call("/auth/v1/logout?scope=others", "POST", "{}", auth = true)
     }
 
-    /** Requests short-lived TURN credentials from the authenticated Supabase Edge Function. */
-    suspend fun turnIctore.mediaCacheDir.listFiles()?.forEach { it.delete() }
+    /** Fetches TURN relay credentials from our authenticated Supabase Edge Function. */
+    suspend fun turnIceServers(callId: String, initiatorId: String, receiverId: String): List<TurnIceServerConfig> {
+        val payload = JSONObject()
+            .put("room", callId)
+            .put("initiator_client", initiatorId)
+            .put("receiver_client", receiverId)
+        val response = JSONObject(call("/functions/v1/turn-credentials", "POST", payload.toString(), auth = true))
+        val servers = response.optJSONArray("iceServers")
+            ?: throw IOException(response.optString("error").ifBlank { "TURN-сервер не вернул ICE-конфигурацию" })
+        val result = mutableListOf<TurnIceServerConfig>()
+        for (i in 0 until servers.length()) {
+            val item = servers.optJSONObject(i) ?: continue
+            val urls = when (val raw = item.opt("urls")) {
+                is JSONArray -> (0 until raw.length()).mapNotNull { raw.optString(it).takeIf(String::isNotBlank) }
+                is String -> listOf(raw).filter(String::isNotBlank)
+                else -> emptyList()
+            }
+            if (urls.isNotEmpty()) {
+                result += TurnIceServerConfig(
+                    urls = urls,
+                    username = item.optString("username").takeIf { it.isNotBlank() && it != "null" },
+                    credential = item.optString("credential").takeIf { it.isNotBlank() && it != "null" }
+                )
+            }
+        }
+        if (result.none { server -> server.urls.any { it.startsWith("turn:") || it.startsWith("turns:") } }) {
+            throw IOException("TURN-сервер не выдал relay-адреса. Проверьте настройки Metered.")
+        }
+        return result
+    }
+
+    suspend fun signOut() {
+        try { call("/auth/v1/logout", "POST", "{}", auth = true) } finally {
+            store.mediaCacheDir.listFiles()?.forEach { it.delete() }
             store.clear()
         }
     }
