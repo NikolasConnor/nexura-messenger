@@ -208,14 +208,22 @@ fun NexuraCallDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Column(
-            Modifier.fillMaxSize().background(Color(0xFF0D1118)).padding(horizontal = 24.dp, vertical = 28.dp),
+            Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF182538), Color(0xFF0D1118), Color(0xFF090D14)))).padding(horizontal = 22.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(if (ui.video) "Видеозвонок" else "Аудиозвонок", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (ui.video) "Видеозвонок" else "Аудиозвонок", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                    Text(if (ui.incoming) "Входящий вызов" else if (ui.active) "Защищённое соединение Nexura" else "Личный звонок Nexura", color = Color(0xFFA4AFBF), fontSize = 12.sp)
+                }
+                Box(Modifier.background(Color(0xFF263B50), androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(horizontal = 11.dp, vertical = 7.dp)) {
+                    Text("NEXURA", color = Color(0xFFB8D6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                }
+            }
             if (ui.video && ui.active) {
                 Box(
-                    Modifier.fillMaxWidth().weight(1f).background(Color.Black, MaterialTheme.shapes.extraLarge)
+                    Modifier.fillMaxWidth().weight(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(28.dp)).background(Color.Black)
                 ) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
@@ -266,7 +274,7 @@ fun NexuraCallDialog(
                     it.startsWith("https://") || it.startsWith("http://")
                 }
                 Box(
-                    Modifier.size(112.dp).background(Color(0xFF28364A), CircleShape),
+                    Modifier.size(124.dp).background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF5279A8), Color(0xFF28364A))), CircleShape).padding(5.dp).background(Color(0xFF182538), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     if (avatarUrl != null) {
@@ -281,13 +289,20 @@ fun NexuraCallDialog(
                     }
                 }
             }
-            Text(chat.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                if (ui.connected) String.format("%02d:%02d", callSeconds / 60, callSeconds % 60) else ui.status,
-                color = if (ui.connected) Color(0xFF72D6A2) else Color(0xFFA4AFBF),
-                fontSize = if (ui.connected) 18.sp else 14.sp,
-                fontWeight = if (ui.connected) FontWeight.SemiBold else FontWeight.Normal
-            )
+            Text(chat.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Box(
+                Modifier.background(
+                    if (ui.connected) Color(0xFF173B32) else Color(0xFF202B3A),
+                    androidx.compose.foundation.shape.RoundedCornerShape(50)
+                ).padding(horizontal = 16.dp, vertical = 9.dp)
+            ) {
+                Text(
+                    if (ui.connected) String.format("%02d:%02d", callSeconds / 60, callSeconds % 60) else ui.status,
+                    color = if (ui.connected) Color(0xFF8DE0B5) else Color(0xFFD0D9E6),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
             if (!ui.error.isNullOrBlank()) Text(ui.error!!, color = Color(0xFFFF858D), fontSize = 12.sp)
             if (ui.incoming) {
                 Row(horizontalArrangement = Arrangement.spacedBy(52.dp), verticalAlignment = Alignment.CenterVertically) {
