@@ -283,6 +283,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             } catch (e: Exception) {
                 encrypted?.file?.delete()
                 if (draft.isBlank()) draft = submittedCaption
+                chatDrafts[chat.id] = draft
                 if (replyTarget == null) replyTarget = submittedReply
                 error = e.message ?: "Не удалось отправить медиа"
             } finally {
