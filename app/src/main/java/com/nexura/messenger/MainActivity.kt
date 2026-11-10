@@ -1058,14 +1058,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         }
                         if (homeTab == "chats") {
-                        Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Сообщения", color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            Text("${visibleChats.size}", color = SecondaryText, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Сообщения", color = MainText, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.35).sp)
+                                Text("Ваши личные и групповые чаты", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                            }
+                            Surface(shape = RoundedCornerShape(12.dp), color = Surface1) {
+                                Text("${visibleChats.size}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
+                            }
                         }
-                        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = chatListFilter == "all", onClick = { chatListFilter = "all" }, label = { Text("Все") })
-                            FilterChip(selected = chatListFilter == "unread", onClick = { chatListFilter = "unread" }, label = { Text("Непрочитанные") })
-                            FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранное") })
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(end = 4.dp)
+                        ) {
+                            item { FilterChip(selected = chatListFilter == "all", onClick = { chatListFilter = "all" }, label = { Text("Все чаты") }) }
+                            item { FilterChip(selected = chatListFilter == "unread", onClick = { chatListFilter = "unread" }, label = { Text("Непрочитанные") }) }
+                            item { FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранное") }) }
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         if (visibleChats.isEmpty()) {
@@ -1085,23 +1094,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
                                 items(visibleChats, key = { it.id }) { chat ->
                                     Row(
-                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                                        Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                            .clip(RoundedCornerShape(19.dp))
+                                            .background(Surface1)
                                             .clickable { openChat(chat) }
-                                            .padding(horizontal = 8.dp, vertical = 11.dp),
+                                            .padding(start = 12.dp, end = 7.dp, top = 11.dp, bottom = 11.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
-                                        Column(Modifier.weight(1f).padding(start = 13.dp, end = 4.dp)) {
+                                        Column(Modifier.weight(1f).padding(start = 12.dp, end = 5.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
-                                                Text(chatTimeLabel(chat.updated), color = if (chat.unreadCount > 0) Accent else SecondaryText, fontSize = 11.sp)
+                                                if (chat.updated != null) {
+                                                    Text(chatTimeLabel(chat.updated), color = if (chat.unreadCount > 0) Accent else SecondaryText, fontSize = 11.sp)
+                                                }
                                             }
-                                            Row(Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
                                                 Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp), maxLines = 1)
                                                 Spacer(Modifier.weight(1f))
                                                 if (chat.unreadCount > 0) {
-                                                    Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 21.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
+                                                    Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
                                                         Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                 }
@@ -1119,7 +1132,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             )
                                         }
                                     }
-                                    HorizontalDivider(color = Surface1.copy(alpha = 0.9f), modifier = Modifier.padding(start = 72.dp))
                                 }
                             }
                         }
