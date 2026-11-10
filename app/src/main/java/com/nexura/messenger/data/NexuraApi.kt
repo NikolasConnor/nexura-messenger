@@ -40,7 +40,9 @@ data class MessageItem(
     val encrypted: Boolean = false,
     val securityWarning: Boolean = false,
     val mediaKind: String? = null,
-    val mediaCaption: String? = null
+    val mediaCaption: String? = null,
+    val mediaFileName: String? = null,
+    val mediaMimeType: String? = null
 )
 data class E2eeRemoteDevice(
     val userId: String,
@@ -277,16 +279,19 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
     }
-    suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null, mediaOnly: Boolean = false): List<MessageItem> {
+    suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null, mediaOnly: Boolean = false, beforeCreatedAt: String? = null): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val afterFilter = afterCreatedAt?.let {
             "&created_at=gte.${java.net.URLEncoder.encode(it, "UTF-8")}"
         }.orEmpty()
-        val limit = if (afterCreatedAt == null) 50 else 100
+        val beforeFilter = beforeCreatedAt?.let {
+            "&created_at=lte.${java.net.URLEncoder.encode(it, "UTF-8")}"
+        }.orEmpty()
+        val limit = if (afterCreatedAt == null && beforeCreatedAt == null) 50 else 100
         val mediaFilter = if (mediaOnly) "&message_type=in.(media,image)" else ""
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
-                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$mediaFilter"
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
         ))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
@@ -370,7 +375,9 @@ class NexuraApi(private val store: SessionStore) {
                     encrypted = decrypted != null && (type != "media" || mediaUri != null),
                     securityWarning = decrypted == null || (type == "media" && mediaUri == null),
                     mediaKind = mediaJson?.optString("media_type"),
-                    mediaCaption = mediaJson?.optString("caption")?.takeIf { it.isNotBlank() }
+                    mediaCaption = mediaJson?.optString("caption")?.takeIf { it.isNotBlank() },
+                    mediaFileName = mediaJson?.optString("name")?.takeIf { it.isNotBlank() },
+                    mediaMimeType = mediaJson?.optString("mime")?.takeIf { it.isNotBlank() }
                 )
             } else {
                 val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
