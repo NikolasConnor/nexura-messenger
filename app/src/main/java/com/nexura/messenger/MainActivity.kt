@@ -1643,7 +1643,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         val recentLinks = api.messages(chat.id, e2eeClient).filter {
                                             it.messageType == "text" && Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).containsMatchIn(it.content)
                                         }
-                                        chatGallery = (media + recentLinks).distinctBy { it.id }.sortedBy { it.createdAt }
+                                        chatGallery = (media + recentLinks).distinctBy { it.id }.sortedByDescending { it.createdAt }
                                     } catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
                                 }
                             }) {
