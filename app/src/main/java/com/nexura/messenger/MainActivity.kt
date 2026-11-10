@@ -427,7 +427,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     pinnedMessageId = api.pinnedMessage(chat.id)
                     canManagePins = api.canManageConversation(chat.id)
                 }
-                api.markChatRead(chat.id)
+                api.markChatRead(chat.id, runCatching { api.privacySettings().readReceiptsEnabled }.getOrDefault(true))
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
             } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
         }
@@ -1372,6 +1372,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         )
                     }
+                    confirmBlockProfile?.let { profile ->
+                        AlertDialog(
+                            onDismissRequest = { confirmBlockProfile = null },
+                            title = { Text("Заблокировать пользователя?") },
+                            text = { Text("${profile.displayName} не сможет писать вам в личном чате. Вы также не сможете отправлять ему сообщения, а существующая переписка будет скрыта.") },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    confirmBlockProfile = null
+                                    scope.launch {
+                                        try {
+                                            api.blockUser(profile.id)
+                                            viewedProfile = null
+                                            viewedPresence = null
+                                            selected = null
+                                            messages = emptyList()
+                                            chats = api.chats()
+                                            notice = "Пользователь заблокирован."
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось заблокировать пользователя" }
+                                    }
+                                }) { Text("Заблокировать", color = Danger) }
+                            },
+                            dismissButton = { TextButton(onClick = { confirmBlockProfile = null }) { Text("Отмена") } }
+                        )
+                    }
                     viewedProfile?.let { profile ->
                         Dialog(onDismissRequest = { viewedProfile = null; profileMedia = emptyList() }) {
                             Card(
@@ -1387,8 +1411,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Avatar(profile.displayName, profile.avatar)
                                     Text(profile.displayName, color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
                                     if (profile.username.isNotBlank()) Text("@${profile.username}", color = SecondaryText, fontSize = 13.sp)
+                                    viewedPresence?.takeIf { it.isVisible }?.let { presence ->
+                                        Text(if (presence.isOnline) "● В сети" else if (presence.lastSeenAt != null) "Был(а) недавно" else "Не в сети",
+                                            color = if (presence.isOnline) Success else SecondaryText, fontSize = 12.sp,
+                                            modifier = Modifier.padding(top = 4.dp))
+                                    }
                                     if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
                                     Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                                    OutlinedButton(onClick = { confirmBlockProfile = profile }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) {
+                                        Icon(Icons.Default.Block, null, modifier = Modifier.size(17.dp))
+                                        Spacer(Modifier.width(7.dp))
+                                        Text("Заблокировать пользователя")
+                                    }
                                     HorizontalDivider(Modifier.padding(vertical = 16.dp), color = Surface2)
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                         Text("Медиа из чата", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -1440,6 +1475,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         scope.launch {
                                             try {
                                                 viewedProfile = api.userProfile(peerId)
+                                                viewedPresence = api.userPresence(peerId)
                                                 profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
                                             finally { loadingProfile = false }
@@ -1454,6 +1490,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     scope.launch {
                                         try {
                                             viewedProfile = api.userProfile(peerId)
+                                                viewedPresence = api.userPresence(peerId)
                                             profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
                                         } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
                                         finally { loadingProfile = false }
