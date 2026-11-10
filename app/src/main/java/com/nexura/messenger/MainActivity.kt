@@ -1540,6 +1540,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                        }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                         Column(
                             Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)
