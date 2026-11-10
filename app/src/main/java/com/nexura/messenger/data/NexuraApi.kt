@@ -207,7 +207,7 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
         if (result.none { server -> server.urls.any { it.startsWith("turn:") || it.startsWith("turns:") } }) {
-            throw IOException("TURN-сервер не выдал relay-адреса. Проверьте настройки Metered.")
+            throw IOException("TURN-сервер не выдал relay-адреса. Проверьте настройки Turnix.")
         }
         return result
     }
