@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -39,6 +40,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubbleOutline
@@ -184,6 +188,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
+    var galleryCategory by remember { mutableStateOf("Все") }
+    var scrollToMessageId by remember { mutableStateOf<String?>(null) }
     var chatThemeOpen by remember { mutableStateOf(false) }
     var chatWallpaperColor by remember { mutableStateOf(Color(0xFF0D1118)) }
     var chatBubbleColor by remember { mutableStateOf(Color(0xFF304B83)) }
@@ -1251,14 +1257,38 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Text("Медиа чата", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                                         IconButton(onClick = { chatGallery = null }) { Icon(Icons.Default.Close, "Закрыть", tint = SecondaryText) }
                                     }
-                                    Text("Фото, видео и голосовые сообщения с E2EE", color = SecondaryText, fontSize = 12.sp)
+                                    Text("Все вложения и ссылки в одном месте", color = SecondaryText, fontSize = 12.sp)
                                     Spacer(Modifier.height(10.dp))
-                                    val galleryItems = chatGallery.orEmpty()
+                                    val allGalleryItems = chatGallery.orEmpty()
+                                    val galleryCategories = listOf("Все", "Фото", "Видео", "Голосовые", "Файлы", "Ссылки")
+                                    val galleryItems = allGalleryItems.filter { item ->
+                                        val isLink = item.mediaKind == null && Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).containsMatchIn(item.content)
+                                        when (galleryCategory) {
+                                            "Фото" -> item.mediaKind == "image"
+                                            "Видео" -> item.mediaKind == "video"
+                                            "Голосовые" -> item.mediaKind == "audio"
+                                            "Файлы" -> item.mediaKind == "file" || item.messageType == "file"
+                                            "Ссылки" -> isLink
+                                            else -> item.mediaKind in setOf("image", "video", "audio", "file") || item.messageType == "file" || isLink
+                                        }
+                                    }
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+                                        items(galleryCategories) { category ->
+                                            FilterChip(
+                                                selected = galleryCategory == category,
+                                                onClick = { galleryCategory = category },
+                                                label = { Text(category, fontSize = 12.sp) }
+                                            )
+                                        }
+                                    }
                                     if (galleryItems.isEmpty()) {
-                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("В этом чате пока нет медиа", color = SecondaryText) }
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            Text(if (allGalleryItems.isEmpty()) "В этом чате пока нет вложений" else "В этой категории пока пусто", color = SecondaryText)
+                                        }
                                     } else {
                                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                             items(galleryItems, key = { it.id }) { item ->
+                                                val linkUrl = if (item.mediaKind == null) Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).find(item.content)?.value else null
                                                 Row(
                                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface2)
                                                         .clickable {
@@ -1268,26 +1298,55 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                     mediaViewerType = item.mediaKind ?: "image"
                                                                     chatGallery = null
                                                                 }
-                                                                "audio" -> notice = "Откройте голосовое сообщение в переписке для прослушивания"
-                                                                else -> {
-                                                                    val url = Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).find(item.content)?.value
-                                                                    if (url != null) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                                                "audio" -> {
+                                                                    chatGallery = null
+                                                                    scrollToMessageId = item.id
+                                                                    scope.launch {
+                                                                        try {
+                                                                            if (messages.none { it.id == item.id }) {
+                                                                                messages = (messages + api.messages(chat.id, e2eeClient, beforeCreatedAt = item.createdAt)).distinctBy { it.id }.sortedBy { it.createdAt }
+                                                                            }
+                                                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть сообщение" }
+                                                                    }
                                                                 }
+                                                                "file" -> {
+                                                                    try {
+                                                                        val local = File(Uri.parse(item.content).path ?: throw IOException("Файл недоступен"))
+                                                                        val contentUri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", local)
+                                                                        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, item.mediaMimeType ?: "*/*")
+                                                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                                        context.startActivity(intent)
+                                                                    } catch (e: Exception) {
+                                                                        notice = "Не найдено приложение для открытия файла или файл недоступен"
+                                                                    }
+                                                                }
+                                                                else -> if (linkUrl != null) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl))) }
                                                             }
                                                         }.padding(10.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    val linkUrl = if (item.mediaKind == null) Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).find(item.content)?.value else null
                                                     when (item.mediaKind) {
                                                         "image" -> AsyncImage(model = item.content, contentDescription = "Фото", modifier = Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                                                         "video" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black), contentAlignment = Alignment.Center) { Icon(Icons.Default.PlayArrow, "Видео", tint = Color.White) }
                                                         "audio" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Mic, "Голосовое", tint = Accent) }
-                                                        else -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.ChatBubbleOutline, "Ссылка", tint = Accent) }
+                                                        "file" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Description, "Документ", tint = Accent) }
+                                                        else -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Link, "Ссылка", tint = Accent) }
                                                     }
                                                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                                        Text(when(item.mediaKind) { "audio" -> "Голосовое сообщение"; "video" -> "Видео"; "image" -> "Фотография"; else -> "Ссылка" }, color = MainText, fontWeight = FontWeight.Medium)
+                                                        Text(when(item.mediaKind) { "audio" -> "Голосовое сообщение"; "video" -> "Видео"; "image" -> "Фотография"; "file" -> item.mediaFileName ?: "Документ"; else -> "Ссылка" }, color = MainText, fontWeight = FontWeight.Medium, maxLines = 1)
                                                         Text(linkUrl ?: item.mediaCaption ?: messageTimeLabel(item.createdAt), color = SecondaryText, fontSize = 12.sp, maxLines = 2)
                                                     }
+                                                    IconButton(onClick = {
+                                                        chatGallery = null
+                                                        scrollToMessageId = item.id
+                                                        scope.launch {
+                                                            try {
+                                                                if (messages.none { it.id == item.id }) {
+                                                                    messages = (messages + api.messages(chat.id, e2eeClient, beforeCreatedAt = item.createdAt)).distinctBy { it.id }.sortedBy { it.createdAt }
+                                                                }
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось открыть сообщение" }
+                                                        }
+                                                    }) { Icon(Icons.Default.ArrowForward, "Перейти к сообщению", tint = SecondaryText) }
                                                 }
                                             }
                                         }
@@ -1661,8 +1720,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             } else {
                                 val messageListState = rememberLazyListState()
-                                LaunchedEffect(chat.id, visibleMessages.size, chatSearchQuery) {
-                                    if (visibleMessages.isNotEmpty()) messageListState.animateScrollToItem(visibleMessages.lastIndex)
+                                LaunchedEffect(chat.id, visibleMessages.size, chatSearchQuery, scrollToMessageId) {
+                                    if (visibleMessages.isNotEmpty()) {
+                                        val targetIndex = scrollToMessageId?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
+                                        messageListState.animateScrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
+                                        if (targetIndex >= 0) scrollToMessageId = null
+                                    }
                                 }
                                 LazyColumn(
                                     state = messageListState,
