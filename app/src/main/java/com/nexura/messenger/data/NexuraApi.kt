@@ -997,9 +997,13 @@ class NexuraApi(private val store: SessionStore) {
         replyToId: String? = null
     ) {
         if (newText.isBlank()) throw IOException("Сообщение не может быть пустым")
+        val wasPinned = pinnedMessage(chatId) == normalizeUuid(oldMessageId)
+        if (wasPinned && !canManageConversation(chatId)) {
+            throw IOException("Закреплённое сообщение может изменить только администратор чата")
+        }
         val replacementId = UUID.randomUUID().toString()
         if (isGroup) {
-            sendEncryptedGroupMessage(chatId, e2ee, replacementId, newText.trim(), "text", replyToId)
+            sendEncryptedGroupMessage(chatId, e2ee, replacementId, newText.trim(), "text", "text", replyToId)
         } else {
             sendEncryptedDirectMessage(chatId, e2ee, replacementId, newText.trim(), replyToId, "text")
         }
@@ -1009,6 +1013,7 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("edited_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal"
         )
+        if (wasPinned) setPinnedMessage(chatId, replacementId)
         deleteMessage(oldMessageId)
     }
 
