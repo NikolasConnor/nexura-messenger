@@ -932,24 +932,145 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             )
                         }
                         if (createGroupOpen) {
-                            Card(Modifier.fillMaxWidth().padding(top = 12.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
-                                Column(Modifier.padding(14.dp)) {
+                            Card(
+                                Modifier.fillMaxWidth().padding(top = 12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Surface1),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("Новая группа", color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
-                                        TextButton(onClick = { createGroupOpen = false }) { Text("Закрыть") }
-                                    }
-                                    OutlinedTextField(value = groupTitle, onValueChange = { groupTitle = it.take(60) }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Название группы") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
-                                    OutlinedTextField(value = groupSearch, onValueChange = { groupSearch = it }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), singleLine = true, label = { Text("Найти участников") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }))
-                                    TextButton(onClick = { if (groupSearch.length >= 2) scope.launch { try { groupUsers = api.findUsers(groupSearch) } catch (e: Exception) { error = e.message ?: "Не удалось найти участников" } } }) { Text("Искать") }
-                                    groupUsers.forEach { person ->
-                                        Row(Modifier.fillMaxWidth().clickable { selectedGroupUsers = if (person.id in selectedGroupUsers) selectedGroupUsers - person.id else if (selectedGroupUsers.size >= 49) { error = "В группе может быть не более 50 участников вместе с вами"; selectedGroupUsers } else selectedGroupUsers + person.id }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(checked = person.id in selectedGroupUsers, onCheckedChange = { checked -> selectedGroupUsers = if (checked) selectedGroupUsers + person.id else selectedGroupUsers - person.id })
-                                            Avatar(person.displayName, person.avatar)
-                                            Text(person.displayName, color = MainText, modifier = Modifier.padding(start = 10.dp).weight(1f))
+                                        Box(
+                                            Modifier.size(44.dp).clip(RoundedCornerShape(15.dp))
+                                                .background(Brush.linearGradient(listOf(Accent, Accent2))),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                                        }
+                                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                            Text("Новая группа", color = MainText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                            Text("Общий чат для ваших людей", color = SecondaryText, fontSize = 12.sp)
+                                        }
+                                        IconButton(onClick = { createGroupOpen = false }) {
+                                            Icon(Icons.Default.Close, "Закрыть", tint = SecondaryText)
                                         }
                                     }
-                                    Text("Выбрано: ${selectedGroupUsers.size} из 49 участников (вы будете владельцем)", color = SecondaryText, fontSize = 12.sp)
-                                    Button(onClick = { scope.launch { creatingGroup = true; error = ""; try { val id = api.createGroup(groupTitle, selectedGroupUsers.toList()); val chat = ChatItem(id, groupTitle.trim(), "group", null); createGroupOpen = false; selected = chat; messages = emptyList(); chats = api.chats() } catch (e: Exception) { error = e.message ?: "Не удалось создать группу" } finally { creatingGroup = false } } }, enabled = !creatingGroup && groupTitle.trim().length in 2..60 && selectedGroupUsers.size in 1..49, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text(if (creatingGroup) "Создаём…" else "Создать группу") }
+                                    OutlinedTextField(
+                                        value = groupTitle,
+                                        onValueChange = { groupTitle = it.take(60) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        label = { Text("Название группы") },
+                                        placeholder = { Text("Например, Друзья") },
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = authFieldColors()
+                                    )
+                                    Text("Добавить участников", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedTextField(
+                                            value = groupSearch,
+                                            onValueChange = { groupSearch = it },
+                                            modifier = Modifier.weight(1f),
+                                            singleLine = true,
+                                            placeholder = { Text("Имя или username") },
+                                            leadingIcon = { Icon(Icons.Default.Search, null, tint = SecondaryText) },
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = authFieldColors(),
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                            keyboardActions = KeyboardActions(onSearch = {
+                                                if (groupSearch.length >= 2) scope.launch {
+                                                    try { groupUsers = api.findUsers(groupSearch) }
+                                                    catch (e: Exception) { error = e.message ?: "Не удалось найти участников" }
+                                                }
+                                            })
+                                        )
+                                        IconButton(
+                                            onClick = {
+                                                if (groupSearch.length >= 2) scope.launch {
+                                                    try { groupUsers = api.findUsers(groupSearch) }
+                                                    catch (e: Exception) { error = e.message ?: "Не удалось найти участников" }
+                                                }
+                                            },
+                                            enabled = groupSearch.length >= 2 && !searching
+                                        ) {
+                                            Icon(Icons.Default.Search, "Найти", tint = Accent)
+                                        }
+                                    }
+                                    if (groupUsers.isNotEmpty()) {
+                                        Column(
+                                            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surface2)
+                                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            groupUsers.forEachIndexed { index, person ->
+                                                Row(
+                                                    Modifier.fillMaxWidth().clickable {
+                                                        selectedGroupUsers = if (person.id in selectedGroupUsers) {
+                                                            selectedGroupUsers - person.id
+                                                        } else if (selectedGroupUsers.size >= 49) {
+                                                            error = "В группе может быть не более 50 участников вместе с вами"
+                                                            selectedGroupUsers
+                                                        } else selectedGroupUsers + person.id
+                                                    }.padding(vertical = 9.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Avatar(person.displayName, person.avatar)
+                                                    Column(Modifier.weight(1f).padding(start = 11.dp)) {
+                                                        Text(person.displayName, color = MainText, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                                        Text(if (person.id in selectedGroupUsers) "Добавлен в группу" else "Пользователь Nexura", color = SecondaryText, fontSize = 11.sp)
+                                                    }
+                                                    Checkbox(
+                                                        checked = person.id in selectedGroupUsers,
+                                                        onCheckedChange = { checked ->
+                                                            selectedGroupUsers = if (checked) {
+                                                                if (selectedGroupUsers.size < 49) selectedGroupUsers + person.id
+                                                                else { error = "В группе может быть не более 50 участников вместе с вами"; selectedGroupUsers }
+                                                            } else selectedGroupUsers - person.id
+                                                        }
+                                                    )
+                                                }
+                                                if (index != groupUsers.lastIndex) HorizontalDivider(color = BorderColor.copy(alpha = 0.55f))
+                                            }
+                                        }
+                                    } else {
+                                        Text(
+                                            "Найдите людей по имени или username и отметьте тех, кого хотите добавить.",
+                                            color = SecondaryText, fontSize = 12.sp
+                                        )
+                                    }
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface2).padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.People, null, tint = Accent, modifier = Modifier.size(19.dp))
+                                        Text(
+                                            "Выбрано: ${selectedGroupUsers.size} из 49 участников",
+                                            color = MainText, fontWeight = FontWeight.Medium, fontSize = 13.sp,
+                                            modifier = Modifier.padding(start = 9.dp).weight(1f)
+                                        )
+                                        Text("Вы — владелец", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                creatingGroup = true
+                                                error = ""
+                                                try {
+                                                    val id = api.createGroup(groupTitle, selectedGroupUsers.toList())
+                                                    val chat = ChatItem(id, groupTitle.trim(), "group", null)
+                                                    createGroupOpen = false
+                                                    selected = chat
+                                                    messages = emptyList()
+                                                    chats = api.chats()
+                                                } catch (e: Exception) {
+                                                    error = e.message ?: "Не удалось создать группу"
+                                                } finally { creatingGroup = false }
+                                            }
+                                        },
+                                        enabled = !creatingGroup && groupTitle.trim().length in 2..60 && selectedGroupUsers.size in 1..49,
+                                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Text(if (creatingGroup) "Создаём группу…" else "Создать группу", fontWeight = FontWeight.SemiBold)
+                                    }
                                 }
                             }
                         }
