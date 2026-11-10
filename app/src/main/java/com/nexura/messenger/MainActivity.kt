@@ -194,6 +194,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var profileAge by remember { mutableStateOf("") }
     var profilePhotoUri by remember { mutableStateOf<Uri?>(null) }
     var savingProfile by remember { mutableStateOf(false) }
+    var showOnlineStatus by remember { mutableStateOf(true) }
+    var readReceiptsEnabled by remember { mutableStateOf(true) }
+    var blockedUsers by remember { mutableStateOf(emptyList<UserItem>()) }
+    var viewedPresence by remember { mutableStateOf<UserPresence?>(null) }
+    var confirmBlockProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var savingPrivacy by remember { mutableStateOf(false) }
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
     var loadingProfile by remember { mutableStateOf(false) }
@@ -506,6 +512,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     LaunchedEffect(signedIn) {
         if (signedIn) {
+            launch {
+                while (true) {
+                    runCatching { api.updatePresenceHeartbeat() }
+                    delay(60_000)
+                }
+            }
             try {
                 if (store.accessToken.isNullOrBlank()) api.refreshSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
@@ -745,6 +757,59 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
                             }
                         }
+                        Text("ПРИВАТНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Показывать статус «В сети»", color = MainText, fontWeight = FontWeight.Medium)
+                                        Text("Если выключить, другие не увидят время последнего посещения.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(checked = showOnlineStatus, enabled = !savingPrivacy, onCheckedChange = { enabled ->
+                                        val old = showOnlineStatus
+                                        showOnlineStatus = enabled
+                                        scope.launch {
+                                            savingPrivacy = true
+                                            try { api.updatePrivacySettings(enabled, readReceiptsEnabled); notice = "Настройки приватности сохранены." }
+                                            catch (e: Exception) { showOnlineStatus = old; error = e.message ?: "Не удалось сохранить приватность" }
+                                            finally { savingPrivacy = false }
+                                        }
+                                    })
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Отчёты о прочтении", color = MainText, fontWeight = FontWeight.Medium)
+                                        Text("При отключении собеседник не увидит, что вы прочитали сообщения.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(checked = readReceiptsEnabled, enabled = !savingPrivacy, onCheckedChange = { enabled ->
+                                        val old = readReceiptsEnabled
+                                        readReceiptsEnabled = enabled
+                                        scope.launch {
+                                            savingPrivacy = true
+                                            try { api.updatePrivacySettings(showOnlineStatus, enabled); notice = "Настройки приватности сохранены." }
+                                            catch (e: Exception) { readReceiptsEnabled = old; error = e.message ?: "Не удалось сохранить приватность" }
+                                            finally { savingPrivacy = false }
+                                        }
+                                    })
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Text("Заблокированные пользователи", color = MainText, fontWeight = FontWeight.SemiBold)
+                                if (blockedUsers.isEmpty()) Text("Список пуст", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                                else blockedUsers.forEach { blocked ->
+                                    Row(Modifier.fillMaxWidth().padding(top = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Avatar(blocked.displayName, blocked.avatar)
+                                        Text(blocked.displayName, color = MainText, modifier = Modifier.weight(1f).padding(start = 10.dp), maxLines = 1)
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                try { api.unblockUser(blocked.id); blockedUsers = blockedUsers.filterNot { it.id == blocked.id }; notice = "Пользователь разблокирован." }
+                                                catch (e: Exception) { error = e.message ?: "Не удалось разблокировать" }
+                                            }
+                                        }) { Text("Разблокировать") }
+                                    }
+                                }
+                            }
+                        }
                         Text("СЕАНС И БЕЗОПАСНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
@@ -826,7 +891,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
