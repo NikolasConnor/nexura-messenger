@@ -2,6 +2,10 @@ package com.nexura.messenger
 
 import android.Manifest
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
@@ -257,6 +261,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         val submittedCaption = caption
         val submittedReply = replyTarget
         draft = ""
+        chatDrafts[chat.id] = ""
         replyTarget = null
         scope.launch {
             error = ""
@@ -358,6 +363,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         val submittedReply = replyTarget
         // Clear the composer immediately; restore the text only if delivery fails.
         draft = ""
+        chatDrafts[chat.id] = ""
         replyTarget = null
         val optimistic = MessageItem(
             messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
@@ -379,6 +385,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             } catch (e: Exception) {
                 messages = messages.filterNot { it.id == messageId }
                 if (draft.isBlank()) draft = text
+                chatDrafts[chat.id] = draft
                 if (replyTarget == null) replyTarget = submittedReply
                 error = e.message ?: "Не удалось отправить защищённое сообщение"
             } finally {
@@ -1442,6 +1449,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         onDismissRequest = { openMessageMenu = null }
                                                     ) {
                                                         DropdownMenuItem(text = { Text("Ответить") }, onClick = { replyTarget = msg; openMessageMenu = null })
+                                                        DropdownMenuItem(
+                                                            text = { Text("Копировать текст") },
+                                                            onClick = {
+                                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                                clipboard.setPrimaryClip(ClipData.newPlainText("Nexura message", msg.content))
+                                                                Toast.makeText(context, "Текст скопирован", Toast.LENGTH_SHORT).show()
+                                                                openMessageMenu = null
+                                                            }
+                                                        )
                                                         listOf("👍", "❤️", "😂", "😮", "🔥", "👏").forEach { emoji ->
                                                             DropdownMenuItem(
                                                                 text = { Text("$emoji Реакция") },
@@ -1574,7 +1590,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     else Icon(Icons.Default.Add, "Прикрепить фото или видео", tint = Accent)
                                 }
                                 OutlinedTextField(
-                                    value = draft, onValueChange = { draft = it },
+                                    value = draft, onValueChange = {
+                                        draft = it
+                                        chatDrafts[chat.id] = it
+                                    },
                                     modifier = Modifier.weight(1f),
                                     placeholder = { Text("Написать сообщение", fontSize = 14.sp) },
                                     maxLines = 5, shape = RoundedCornerShape(24.dp), colors = authFieldColors(),
