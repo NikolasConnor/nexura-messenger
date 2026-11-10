@@ -339,8 +339,8 @@ class E2eeClient(context: Context, userId: String) {
         val canonicalDevices = keys
             .map { (curve, ed) -> "$curve:$ed" }
             .sorted()
-        val canonical = "nexura-conversation-safety-number:v1\\n" +
-            canonicalDevices.joinToString("\\n")
+        val canonical = "nexura-conversation-safety-number:v1\n" +
+            canonicalDevices.joinToString("\n")
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(canonical.toByteArray(StandardCharsets.UTF_8))
         return digest.joinToString("") { "%02X".format(it) }.chunked(4).joinToString("-")
