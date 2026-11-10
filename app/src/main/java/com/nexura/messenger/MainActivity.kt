@@ -240,6 +240,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     fun sendPendingMedia(chat: ChatItem, uri: Uri, caption: String, replyToId: String?) {
         if (sendingImage) return
         sendingImage = true
+        val submittedCaption = caption
+        val submittedReply = replyTarget
+        draft = ""
+        replyTarget = null
         scope.launch {
             error = ""
             var encrypted: EncryptedMediaFile? = null
@@ -259,6 +263,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 notice = "Медиа отправлено с E2EE-шифрованием"
             } catch (e: Exception) {
                 encrypted?.file?.delete()
+                if (draft.isBlank()) draft = submittedCaption
+                if (replyTarget == null) replyTarget = submittedReply
                 error = e.message ?: "Не удалось отправить медиа"
             } finally {
                 sendingImage = false
@@ -316,6 +322,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             pendingSecureMessageText = text
         }
         sendingMessage = true
+        val submittedReply = replyTarget
+        // Clear the composer immediately; restore the text only if delivery fails.
+        draft = ""
+        replyTarget = null
         val optimistic = MessageItem(
             messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
             "text", replyToId, encrypted = true, securityWarning = false
@@ -330,13 +340,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 } else {
                     api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
                 }
-                draft = ""
-                replyTarget = null
                 pendingSecureMessageId = null
                 pendingSecureMessageText = null
                 // The message is already visible; successful persistence confirms it.
             } catch (e: Exception) {
                 messages = messages.filterNot { it.id == messageId }
+                if (draft.isBlank()) draft = text
+                if (replyTarget == null) replyTarget = submittedReply
                 error = e.message ?: "Не удалось отправить защищённое сообщение"
             } finally {
                 sendingMessage = false
