@@ -244,8 +244,22 @@ object E2eeMediaCrypto {
         val hash = json.optString("cipher_sha256")
         val uuid = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
         require(path.matches(Regex("^$uuid/$uuid/$uuid\\.enc$")))
-        require(mime in setOf("image/jpeg", "image/png", "image/webp", "video/mp4", "audio/mp4"))
-        require(kind == when { mime.startsWith("video/") -> "video"; mime.startsWith("audio/") -> "audio"; else -> "image" })
+        val allowedMime = mime in setOf(
+            "image/jpeg", "image/png", "image/webp",
+            "video/mp4", "video/quicktime", "video/webm", "audio/mp4",
+            "application/pdf", "text/plain", "application/rtf",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/zip", "application/json", "text/csv"
+        )
+        require(allowedMime)
+        require(kind == when {
+            mime.startsWith("video/") -> "video"
+            mime.startsWith("audio/") -> "audio"
+            mime.startsWith("image/") -> "image"
+            else -> "file"
+        })
         require(key.isNotBlank() && iv.isNotBlank() && hash.matches(Regex("^[0-9a-f]{64}$")))
         require(Base64.decode(key, Base64.NO_WRAP).size == 32)
         require(Base64.decode(iv, Base64.NO_WRAP).size == 12)
