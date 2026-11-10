@@ -942,7 +942,24 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             onDismissRequest = { editingTarget = null },
                             title = { Text("Изменить сообщение") },
                             text = { OutlinedTextField(value = editDraft, onValueChange = { editDraft = it }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5) },
-                            confirmButton = { TextButton(onClick = { val target = editingTarget!!; scope.launch { try { api.editMessage(target.id, editDraft); messages = api.messages(selected!!.id, e2eeClient); editingTarget = null } catch (e: Exception) { error = e.message ?: "Не удалось изменить сообщение" } } }) { Text("Сохранить") } },
+                            confirmButton = { TextButton(onClick = {
+                                val target = editingTarget!!
+                                val chat = selected!!
+                                scope.launch {
+                                    try {
+                                        if (target.encrypted) {
+                                            val crypto = e2eeClient ?: throw IllegalStateException("Защищённое устройство недоступно")
+                                            api.editEncryptedMessage(chat.id, crypto, target.id, editDraft, chat.kind == "group", target.replyToId)
+                                        } else {
+                                            api.editMessage(target.id, editDraft)
+                                        }
+                                        messages = api.messages(chat.id, e2eeClient)
+                                        messageReactions = api.messageReactions(chat.id)
+                                        pinnedMessageId = api.pinnedMessage(chat.id)
+                                        editingTarget = null
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось изменить сообщение" }
+                                }
+                            }) { Text("Сохранить") } },
                             dismissButton = { TextButton(onClick = { editingTarget = null }) { Text("Отмена") } }
                         )
                     }
@@ -1410,7 +1427,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             )
                                                         }
                                                         if (mine && msg.messageType == "text") {
-                                                            if (!msg.encrypted) {
+                                                            if (!msg.securityWarning) {
                                                                 DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
                                                             }
                                                             DropdownMenuItem(
