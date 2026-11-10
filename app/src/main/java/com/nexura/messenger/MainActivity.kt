@@ -1577,24 +1577,34 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         val remote = trustCandidate!!
                         val client = e2eeClient
                         val ownBundle = runCatching { JSONObject(client?.ensureDevice() ?: "{}") }.getOrNull()
+                        val ownCurve = ownBundle?.optString("curve25519").orEmpty()
+                        val ownEd = ownBundle?.optString("ed25519").orEmpty()
+                        val sharedFingerprint = if (client != null && ownCurve.isNotBlank() && ownEd.isNotBlank()) {
+                            runCatching {
+                                client.conversationFingerprint(
+                                    ownCurve, ownEd, remote.curve25519Key, remote.ed25519Key
+                                )
+                            }.getOrElse { "Недоступен" }
+                        } else "Недоступен"
                         val remoteFingerprint = client?.deviceFingerprint(remote.curve25519Key, remote.ed25519Key) ?: "Недоступен"
-                        val ownFingerprint = if (ownBundle != null && ownBundle.has("curve25519") && ownBundle.has("ed25519")) {
-                            client?.deviceFingerprint(ownBundle.getString("curve25519"), ownBundle.getString("ed25519")) ?: "Недоступен"
+                        val ownFingerprint = if (ownCurve.isNotBlank() && ownEd.isNotBlank()) {
+                            client?.deviceFingerprint(ownCurve, ownEd) ?: "Недоступен"
                         } else "Недоступен"
                         AlertDialog(
                             onDismissRequest = { trustCandidate = null; trustPeerId = null; groupTrustQueue = emptyList() },
                             title = { Text("Проверка устройства") },
                             text = {
                                 Column {
-                                    Text("Сравните отпечаток собеседника с отпечатком его устройства по другому доверенному каналу — например, лично или по видеосвязи. Не подтверждайте ключ, если сравнить его не удалось.")
+                                    Text("Этот общий код безопасности должен полностью совпадать у вас и собеседника в одном и том же чате. Сверьте его лично или по видеосвязи. Если код отличается — не подтверждайте устройство.")
+                                    Text("ОБЩИЙ КОД ЧАТА", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 14.dp))
+                                    Text(sharedFingerprint, color = Accent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     Text(
-                                        if (groupTrustQueue.isNotEmpty()) "Устройство участника: ${trustPeerId}" else "Устройство собеседника",
-                                        color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp)
+                                        if (groupTrustQueue.isNotEmpty()) "Устройство участника: ${trustPeerId}" else "Отпечаток устройства собеседника",
+                                        color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp)
                                     )
-                                    Text(remoteFingerprint, color = MainText, fontWeight = FontWeight.Bold)
-                                    Text("Ваш отпечаток", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-                                    Text(ownFingerprint, color = MainText, fontWeight = FontWeight.Bold)
-                                    Text("Собеседник должен увидеть ваш отпечаток у себя и сравнить его с тем, что показывается на его устройстве.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                                    Text(remoteFingerprint, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                    Text("Отпечаток вашего устройства", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                                    Text(ownFingerprint, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                                 }
                             },
                             confirmButton = {
