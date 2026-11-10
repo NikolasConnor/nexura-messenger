@@ -1027,6 +1027,13 @@ class NexuraApi(private val store: SessionStore) {
             prefer = "return=minimal")
     }
 
+    suspend fun peerReadReceiptAt(chatId: String, peerUserId: String?): String? {
+        if (peerUserId.isNullOrBlank()) return null
+        val rows = JSONArray(call("/rest/v1/conversation_members?select=last_receipt_at&conversation_id=eq.${normalizeUuid(chatId)}&user_id=eq.${normalizeUuid(peerUserId)}&limit=1"))
+        if (rows.length() == 0) return null
+        return rows.getJSONObject(0).optString("last_receipt_at").takeIf { it.isNotBlank() && it != "null" }
+    }
+
     suspend fun markChatRead(chatId: String, shareReadReceipt: Boolean = true) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val now = java.time.Instant.now().toString()
