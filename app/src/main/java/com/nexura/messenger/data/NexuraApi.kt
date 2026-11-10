@@ -971,14 +971,9 @@ class NexuraApi(private val store: SessionStore) {
     }
 
     suspend fun updatePrivacySettings(showOnlineStatus: Boolean, readReceiptsEnabled: Boolean) {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        call("/rest/v1/user_presence?on_conflict=user_id", "POST",
-            JSONObject().put("user_id", uid).put("show_online_status", showOnlineStatus)
-                .put("last_seen_at", java.time.Instant.now().toString()).toString(),
-            prefer = "resolution=merge-duplicates,return=minimal")
-        call("/rest/v1/profiles?id=eq.$uid", "PATCH",
-            JSONObject().put("read_receipts_enabled", readReceiptsEnabled).toString(),
-            prefer = "return=minimal")
+        call("/rest/v1/rpc/update_my_privacy_settings", "POST",
+            JSONObject().put("p_show_online_status", showOnlineStatus)
+                .put("p_read_receipts_enabled", readReceiptsEnabled).toString())
     }
 
     suspend fun updatePresenceHeartbeat() {
