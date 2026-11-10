@@ -52,14 +52,22 @@ object E2eeMediaCrypto {
             else throw IOException("Не удалось определить формат файла")
         val isImage = mime.startsWith("image/")
         val isAudio = mime.startsWith("audio/")
-        if (!isImage && mime != "video/mp4" && mime != "audio/mp4") {
-            throw IOException("Поддерживаются изображения, видео MP4 и аудио M4A")
+        val isVideo = mime.startsWith("video/") && mime in setOf("video/mp4", "video/quicktime", "video/webm")
+        val isDocument = mime in setOf(
+            "application/pdf", "text/plain", "application/rtf",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/zip", "application/json", "text/csv"
+        )
+        if (!isImage && !isVideo && !isAudio && !isDocument) {
+            throw IOException("Этот тип файла нельзя отправить. Поддерживаются фото, видео, аудио, PDF, Office, TXT, CSV и ZIP.")
         }
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }?.takeIf { it.isNotBlank() }?.replace(Regex("[^A-Za-z0-9._ -]"), "_")?.take(100)
             ?: localFile?.name?.take(100)
-            ?: when { mime == "video/mp4" -> "video.mp4"; isAudio -> "voice.m4a"; else -> "photo" }
+            ?: when { isVideo -> "video"; isAudio -> "voice.m4a"; isDocument -> "document"; else -> "photo" }
 
         val key = ByteArray(32).also(SecureRandom()::nextBytes)
         val iv = ByteArray(12).also(SecureRandom()::nextBytes)
