@@ -30,8 +30,9 @@ class NexuraLoginUiTest {
     @Test
     fun registrationToggleShowsNameFieldAndRegistrationAction() {
         activity.onNodeWithText("Создать аккаунт").performClick()
+        // The placeholder is not exposed as a stable semantics node by OutlinedTextField.
+        // Verify the actual field label and registration action instead.
         activity.onNodeWithText("Ваше имя").performScrollTo().assertIsDisplayed()
-        activity.onNodeWithText("Как к вам обращаться").performScrollTo().assertIsDisplayed()
         activity.onNodeWithText("Создать аккаунт").performScrollTo().assertIsDisplayed()
     }
 }
