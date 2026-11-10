@@ -984,6 +984,34 @@ class NexuraApi(private val store: SessionStore) {
             prefer = "return=minimal")
     }
 
+    /**
+     * Replaces an E2EE message by sending a freshly encrypted message, then
+     * soft-deleting the old row. Plaintext is never PATCHed to Postgres.
+     */
+    suspend fun editEncryptedMessage(
+        chatId: String,
+        e2ee: E2eeClient,
+        oldMessageId: String,
+        newText: String,
+        isGroup: Boolean,
+        replyToId: String? = null
+    ) {
+        if (newText.isBlank()) throw IOException("Сообщение не может быть пустым")
+        val replacementId = UUID.randomUUID().toString()
+        if (isGroup) {
+            sendEncryptedGroupMessage(chatId, e2ee, replacementId, newText.trim(), "text", replyToId)
+        } else {
+            sendEncryptedDirectMessage(chatId, e2ee, replacementId, newText.trim(), replyToId, "text")
+        }
+        call(
+            "/rest/v1/messages?id=eq.${normalizeUuid(replacementId)}",
+            "PATCH",
+            JSONObject().put("edited_at", java.time.Instant.now().toString()).toString(),
+            prefer = "return=minimal"
+        )
+        deleteMessage(oldMessageId)
+    }
+
     suspend fun messageReactions(chatId: String): Map<String, List<Pair<String, Int>>> {
         val rows = JSONArray(call(
             "/rest/v1/message_reactions?select=message_id,user_id,emoji&conversation_id=eq.${normalizeUuid(chatId)}"
