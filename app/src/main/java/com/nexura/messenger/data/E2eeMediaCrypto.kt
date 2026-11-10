@@ -48,7 +48,7 @@ object E2eeMediaCrypto {
         val fileUri = uri.scheme == "file"
         val localFile = if (fileUri) uri.path?.let(::File) else null
         val mime = resolver.getType(uri)?.lowercase()
-            ?: if (localFile?.extension?.lowercase() in setOf("m4a", "aac")) "audio/mp4"
+            ?: if (localFile?.extension?.lowercase() == "m4a" || localFile?.extension?.lowercase() == "aac") "audio/mp4"
             else throw IOException("Не удалось определить формат файла")
         val isImage = mime.startsWith("image/")
         val isAudio = mime.startsWith("audio/")
