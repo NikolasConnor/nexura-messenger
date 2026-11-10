@@ -137,6 +137,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var lastSyncedMessageTimestamp by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
+    var chatSearchOpen by remember { mutableStateOf(false) }
+    var chatSearchQuery by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -298,6 +300,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         messages = emptyList()
         lastSyncedMessageTimestamp = null
         replyTarget = null
+        chatSearchOpen = false
+        chatSearchQuery = ""
         scope.launch {
             try {
                 val loadedMessages = api.messages(chat.id, e2eeClient)
@@ -1199,26 +1203,61 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }) {
                                 Icon(Icons.Default.Lock, if (chat.kind == "group") "Проверить устройства группы" else "Проверить устройство", tint = Accent)
                             }
+                            IconButton(onClick = { chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }) {
+                                Icon(Icons.Default.Search, "Поиск по переписке", tint = if (chatSearchOpen) Accent else SecondaryText)
+                            }
                             IconButton(onClick = { scope.launch { try { messages = api.messages(chat.id, e2eeClient) } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" } } }) {
                                 Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
                             }
                         }
+                        if (chatSearchOpen) {
+                            OutlinedTextField(
+                                value = chatSearchQuery,
+                                onValueChange = { chatSearchQuery = it },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                placeholder = { Text("Найти сообщение в этом чате") },
+                                singleLine = true,
+                                leadingIcon = { Icon(Icons.Default.Search, null) },
+                                trailingIcon = {
+                                    if (chatSearchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { chatSearchQuery = "" }) {
+                                            Icon(Icons.Default.Close, "Очистить поиск")
+                                        }
+                                    }
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MainText,
+                                    unfocusedTextColor = MainText,
+                                    focusedBorderColor = Accent,
+                                    unfocusedBorderColor = Surface2
+                                )
+                            )
+                        }
                         HorizontalDivider(color = Surface2)
+                        val visibleMessages = remember(messages, chatSearchQuery) {
+                            if (chatSearchQuery.isBlank()) messages
+                            else messages.filter { it.content.contains(chatSearchQuery.trim(), ignoreCase = true) }
+                        }
                         if (messages.isEmpty()) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Text(if (busy) "Загружаем сообщения…" else "Напишите первое сообщение 👋", color = SecondaryText, fontSize = 13.sp)
                             }
                         } else {
-                            val messageListState = rememberLazyListState()
-                            LaunchedEffect(chat.id, messages.size) {
-                                if (messages.isNotEmpty()) messageListState.animateScrollToItem(messages.lastIndex)
-                            }
-                            LazyColumn(
-                                state = messageListState,
-                                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                                contentPadding = PaddingValues(bottom = 10.dp)
-                            ) {
-                                items(messages, key = { it.id }) { msg ->
+                            if (visibleMessages.isEmpty()) {
+                                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    Text("Ничего не найдено", color = SecondaryText, fontSize = 13.sp)
+                                }
+                            } else {
+                                val messageListState = rememberLazyListState()
+                                LaunchedEffect(chat.id, visibleMessages.size, chatSearchQuery) {
+                                    if (visibleMessages.isNotEmpty()) messageListState.animateScrollToItem(visibleMessages.lastIndex)
+                                }
+                                LazyColumn(
+                                    state = messageListState,
+                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                                    contentPadding = PaddingValues(bottom = 10.dp)
+                                ) {
+                                    items(visibleMessages, key = { it.id }) { msg ->
                                     val mine = msg.senderId == store.userId
                                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                                         Column(
