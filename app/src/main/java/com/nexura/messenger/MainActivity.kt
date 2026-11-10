@@ -1409,15 +1409,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 }
                                                             )
                                                         }
-                                                        if (mine && msg.messageType == "text" && !msg.encrypted) {
-                                                            DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
+                                                        if (mine && msg.messageType == "text") {
+                                                            if (!msg.encrypted) {
+                                                                DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
+                                                            }
                                                             DropdownMenuItem(
                                                                 text = { Text("Удалить", color = Danger) },
                                                                 onClick = {
                                                                     openMessageMenu = null
                                                                     scope.launch {
-                                                                        try { api.deleteMessage(msg.id); messages = messages.filterNot { it.id == msg.id } }
-                                                                        catch (e: Exception) { error = e.message ?: "Не удалось удалить" }
+                                                                        try {
+                                                                            api.deleteMessage(msg.id)
+                                                                            messages = messages.filterNot { it.id == msg.id }
+                                                                            messageReactions = messageReactions - msg.id
+                                                                            if (pinnedMessageId == msg.id) pinnedMessageId = null
+                                                                        } catch (e: Exception) { error = e.message ?: "Не удалось удалить" }
                                                                     }
                                                                 }
                                                             )
