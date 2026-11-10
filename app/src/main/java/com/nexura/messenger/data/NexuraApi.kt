@@ -1,12 +1,20 @@
 package com.nexura.messenger.data
 
 import android.net.Uri
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import java.io.File
+import java.io.FileOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -15,11 +23,41 @@ import java.util.concurrent.TimeUnit
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂")
-data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
+data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null)
+data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
+data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
+data class UserPresence(val isVisible: Boolean, val isOnline: Boolean, val lastSeenAt: String?)
 data class ContactMatch(val phone: String, val userId: String, val displayName: String, val avatar: String)
-data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text", val replyToId: String? = null, val editedAt: String? = null)
+data class MessageItem(
+    val id: String,
+    val senderId: String,
+    val content: String,
+    val createdAt: String,
+    val messageType: String = "text",
+    val replyToId: String? = null,
+    val editedAt: String? = null,
+    val encrypted: Boolean = false,
+    val securityWarning: Boolean = false,
+    val mediaKind: String? = null,
+    val mediaCaption: String? = null,
+    val mediaFileName: String? = null,
+    val mediaMimeType: String? = null
+)
+data class E2eeRemoteDevice(
+    val userId: String,
+    val deviceId: String,
+    val curve25519Key: String,
+    val ed25519Key: String,
+    val protocol: String,
+    val bundleVersion: Int
+)
+
+data class TurnIceServerConfig(
+    val urls: List<String>,
+    val username: String?,
+    val credential: String?
+)
 
 class NexuraApi(private val store: SessionStore) {
     companion object {
@@ -35,6 +73,7 @@ class NexuraApi(private val store: SessionStore) {
         .retryOnConnectionFailure(true)
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
+    private val remoteDeviceCache = ConcurrentHashMap<String, Pair<E2eeRemoteDevice, Long>>()
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
@@ -141,22 +180,74 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("type", "signup").put("email", email.trim()).toString(),
             auth = false)
     }
+    /** Revokes every refresh-token session except the one currently used by this device. */
+    suspend fun signOutOtherSessions() {
+        call("/auth/v1/logout?scope=others", "POST", "{}", auth = true)
+    }
+
+    /** Fetches TURN relay credentials from our authenticated Supabase Edge Function. */
+    suspend fun turnIceServers(callId: String, initiatorId: String, receiverId: String): List<TurnIceServerConfig> {
+        val payload = JSONObject()
+            .put("room", callId)
+            .put("initiator_client", initiatorId)
+            .put("receiver_client", receiverId)
+        val response = JSONObject(call("/functions/v1/turn-credentials", "POST", payload.toString(), auth = true))
+        val servers = response.optJSONArray("iceServers")
+            ?: throw IOException(response.optString("error").ifBlank { "TURN-сервер не вернул ICE-конфигурацию" })
+        val result = mutableListOf<TurnIceServerConfig>()
+        for (i in 0 until servers.length()) {
+            val item = servers.optJSONObject(i) ?: continue
+            val urls = when (val raw = item.opt("urls")) {
+                is JSONArray -> (0 until raw.length()).mapNotNull { raw.optString(it).takeIf(String::isNotBlank) }
+                is String -> listOf(raw).filter(String::isNotBlank)
+                else -> emptyList()
+            }
+            if (urls.isNotEmpty()) {
+                result += TurnIceServerConfig(
+                    urls = urls,
+                    username = item.optString("username").takeIf { it.isNotBlank() && it != "null" },
+                    credential = item.optString("credential").takeIf { it.isNotBlank() && it != "null" }
+                )
+            }
+        }
+        if (result.none { server -> server.urls.any { it.startsWith("turn:") || it.startsWith("turns:") } }) {
+            throw IOException("TURN-сервер не выдал relay-адреса. Проверьте настройки Turnix.")
+        }
+        return result
+    }
+
     suspend fun signOut() {
-        try { call("/auth/v1/logout", "POST", "{}", auth = true) } finally { store.clear() }
+        try { call("/auth/v1/logout", "POST", "{}", auth = true) } finally {
+            store.mediaCacheDir.listFiles()?.forEach { it.delete() }
+            store.clear()
+        }
     }
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
-        val raw = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,last_read_at,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc"))
+        // Fetch memberships and the aggregate unread counters concurrently.
+        val (membershipJson, unreadJson) = coroutineScope {
+            val memberships = async {
+                call("/rest/v1/conversation_members?select=conversation_id,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc")
+            }
+            val unread = async { call("/rest/v1/rpc/get_my_unread_counts", "POST", "{}") }
+            memberships.await() to unread.await()
+        }
+        val raw = JSONArray(membershipJson)
+        // Aggregate unread counts in Postgres; do not download thousands of message rows.
+        val unreadRows = JSONArray(unreadJson)
+        val unreadByChat = mutableMapOf<String, Int>()
+        for (i in 0 until unreadRows.length()) {
+            val row = unreadRows.optJSONObject(i) ?: continue
+            val id = row.optString("conversation_id")
+            if (id.isNotBlank() && id != "null") unreadByChat[id] = row.optInt("unread_count")
+        }
+
         val base = (0 until raw.length()).mapNotNull { i ->
             val membership = raw.optJSONObject(i) ?: return@mapNotNull null
             val c = membership.optJSONObject("conversations") ?: return@mapNotNull null
             val id = c.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
             val kind = c.optString("kind").takeIf { it != "null" } ?: "direct"
-            val lastRead = membership.optString("last_read_at").takeIf { it.isNotBlank() && it != "null" } ?: "1970-01-01T00:00:00Z"
-            val unread = try {
-                val encoded = java.net.URLEncoder.encode(lastRead, "UTF-8")
-                JSONArray(call("/rest/v1/messages?select=id&conversation_id=eq.$id&sender_id=neq.$uid&created_at=gt.$encoded&deleted_at=is.null&limit=100")).length()
-            } catch (_: Exception) { 0 }
+            val unread = unreadByChat[id] ?: 0
             val title = c.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: if (kind == "direct") "Пользователь" else "Группа"
             ChatItem(id, title, kind, c.optString("last_message_at").takeIf { it.isNotBlank() && it != "null" }, unread)
         }
@@ -184,52 +275,791 @@ class NexuraApi(private val store: SessionStore) {
         return base.map { chat ->
             if (chat.kind != "direct") chat else {
                 val profile = profiles[peerByChat[chat.id]]
-                chat.copy(title = profile?.first ?: "Пользователь", avatar = profile?.second ?: "🙂")
+                chat.copy(title = profile?.first ?: "Пользователь", avatar = profile?.second ?: "🙂", peerUserId = peerByChat[chat.id])
             }
         }
     }
-    suspend fun messages(chatId: String): List<MessageItem> {
-        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=150"))
+    suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null, mediaOnly: Boolean = false, beforeCreatedAt: String? = null): List<MessageItem> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val afterFilter = afterCreatedAt?.let {
+            "&created_at=gte.${java.net.URLEncoder.encode(it, "UTF-8")}"
+        }.orEmpty()
+        val beforeFilter = beforeCreatedAt?.let {
+            "&created_at=lte.${java.net.URLEncoder.encode(it, "UTF-8")}"
+        }.orEmpty()
+        val limit = if (mediaOnly) 1000 else if (afterCreatedAt == null && beforeCreatedAt == null) 50 else 100
+        val mediaFilter = if (mediaOnly) "&message_type=in.(media,image,file)" else ""
+        val raw = JSONArray(call(
+            "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
+        ))
         return (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
+            val id = m.getString("id")
+            val senderId = m.optString("sender_id")
             val type = m.optString("message_type", "text")
             val content = m.optString("content")
-            val rendered = if (type == "image" && content.isNotBlank()) signedAttachmentUrl(content) else content
-            MessageItem(m.getString("id"), m.optString("sender_id"), rendered, m.optString("created_at"), type,
-                m.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" },
-                m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" })
+            val replyTo = m.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }
+            val edited = m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" }
+
+            if (type in setOf("text", "media", "call") &&
+                (E2eeMessageEnvelope.isEnvelope(content) || E2eeGroupMessageEnvelope.isEnvelope(content))) {
+                val decrypted = if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
+                    runCatching {
+                        val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
+                        decryptGroupEnvelope(content, chatId, id, senderId, client)
+                    }.getOrNull()
+                } else try {
+
+                    val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
+                    val envelope = E2eeMessageEnvelope.decode(content)
+                    if (envelope.conversationId != normalizeUuid(chatId)) throw IOException("Конверт относится к другому чату")
+                    if (senderId == uid) {
+                        if (envelope.senderDeviceId != client.deviceId()) throw IOException("Сообщение отправлено с другого устройства")
+                        client.cachedMessage(chatId, id)?.toString(Charsets.UTF_8)
+                            ?: throw IOException("Локальная копия сообщения недоступна")
+                    } else {
+                        if (envelope.recipientDeviceId != client.deviceId()) throw IOException("Сообщение адресовано другому устройству")
+                        val deviceCacheKey = "$senderId:${envelope.senderDeviceId}"
+                        val now = System.currentTimeMillis()
+                        val cachedDevice = remoteDeviceCache[deviceCacheKey]
+                        val device = if (cachedDevice != null && cachedDevice.second > now) {
+                            cachedDevice.first
+                        } else {
+                            val deviceRows = JSONArray(call(
+                                "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
+                                    "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
+                            ))
+                            if (deviceRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
+                            val row = deviceRows.getJSONObject(0)
+                            E2eeRemoteDevice(
+                                senderId, envelope.senderDeviceId, row.optString("curve25519_key"),
+                                row.optString("ed25519_key"), row.optString("protocol"), row.optInt("bundle_version")
+                            ).also { remoteDeviceCache[deviceCacheKey] = it to (now + 60_000L) }
+                        }
+                        val curve = device.curve25519Key
+                        val ed = device.ed25519Key
+                        if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
+                            throw IOException("Версия протокола устройства не поддерживается")
+                        }
+                        if (curve != envelope.senderCurve25519) throw IOException("Идентичность отправителя не совпадает")
+                        client.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, curve, ed)
+                        val cached = client.cachedMessage(chatId, id)
+                        val plaintext = cached ?: when (envelope.kind) {
+                            E2eeMessageEnvelope.Kind.PRE_KEY -> client.acceptDirectSession(
+                                chatId, envelope.senderCurve25519, envelope.ciphertext, id
+                            )
+                            E2eeMessageEnvelope.Kind.NORMAL -> client.decryptDirectMessage(
+                                chatId, envelope.ciphertext, id
+                            )
+                        }
+                        plaintext.toString(Charsets.UTF_8)
+                    }
+
+                } catch (error: Exception) {
+                    null
+                }
+                val mediaJson = if (type == "media" && decrypted != null) E2eeMediaCrypto.parsePayload(decrypted) else null
+                val mediaUri = if (mediaJson != null) {
+                    runCatching { downloadAndDecryptMedia(mediaJson, id, chatId, senderId) }.getOrNull()
+                } else null
+                MessageItem(
+                    id, senderId,
+                    when {
+                        decrypted == null -> "🔒 Сообщение зашифровано. Проверьте устройство или восстановите защищённую сессию."
+                        type == "media" && mediaUri == null -> "⚠ Не удалось проверить или открыть медиафайл"
+                        type == "media" -> mediaUri!!
+                        else -> decrypted
+                    },
+                    m.optString("created_at"), type, replyTo, edited,
+                    encrypted = decrypted != null && (type != "media" || mediaUri != null),
+                    securityWarning = decrypted == null || (type == "media" && mediaUri == null),
+                    mediaKind = mediaJson?.optString("media_type"),
+                    mediaCaption = mediaJson?.optString("caption")?.takeIf { it.isNotBlank() },
+                    mediaFileName = mediaJson?.optString("name")?.takeIf { it.isNotBlank() },
+                    mediaMimeType = mediaJson?.optString("mime")?.takeIf { it.isNotBlank() }
+                )
+            } else {
+                val rendered = if (type in setOf("image", "file") && content.isNotBlank()) signedAttachmentUrl(content) else content
+                MessageItem(
+                    id, senderId, rendered, m.optString("created_at"), type, replyTo, edited,
+                    encrypted = false,
+                    securityWarning = type == "text" || type == "image" || type == "file"
+                )
+            }
+        }.sortedBy { it.createdAt }
+    }
+    /**
+     * Publishes only public E2EE material. Idempotent inserts let the client
+     * retry after network failures without replacing an established identity.
+     */
+    suspend fun publishE2eeDevice(e2ee: E2eeClient): Int {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val bundle = JSONObject(e2ee.ensureDevice())
+        val deviceId = bundle.getString("device_id")
+        val curveKey = bundle.getString("curve25519")
+        val edKey = bundle.getString("ed25519")
+
+        val devicePayload = JSONObject()
+            .put("user_id", uid)
+            .put("device_id", deviceId)
+            .put("curve25519_key", curveKey)
+            .put("ed25519_key", edKey)
+            .put("protocol", bundle.optString("protocol", "olm-v1"))
+            .put("bundle_version", bundle.optInt("bundle_version", 1))
+            .put("is_active", true)
+        call(
+            "/rest/v1/e2ee_devices?on_conflict=user_id,device_id",
+            "POST",
+            devicePayload.toString(),
+            prefer = "resolution=ignore-duplicates,return=minimal"
+        )
+
+        val existingDevice = JSONArray(call(
+            "/rest/v1/e2ee_devices?select=curve25519_key,ed25519_key,protocol,bundle_version,is_active" +
+                "&user_id=eq.$uid&device_id=eq.$deviceId&limit=1"
+        ))
+        if (existingDevice.length() != 1) throw IOException("Не удалось подтвердить регистрацию E2EE-устройства")
+        val storedDevice = existingDevice.getJSONObject(0)
+        if (storedDevice.optString("curve25519_key") != curveKey ||
+            storedDevice.optString("ed25519_key") != edKey ||
+            storedDevice.optString("protocol") != bundle.optString("protocol", "olm-v1") ||
+            storedDevice.optInt("bundle_version") != bundle.optInt("bundle_version", 1) ||
+            !storedDevice.optBoolean("is_active")) {
+            throw IOException("Ключи E2EE-устройства не совпадают с сохранённой регистрацией")
+        }
+
+        suspend fun uploadPendingKeys() {
+            val pending = JSONArray(e2ee.pendingOneTimeKeysJson())
+            if (pending.length() == 0) return
+            val keyIds = mutableListOf<String>()
+            val rows = JSONArray()
+            for (index in 0 until pending.length()) {
+                val key = pending.getJSONObject(index)
+                val keyId = key.getString("key_id")
+                keyIds += keyId
+                rows.put(
+                    JSONObject()
+                        .put("user_id", uid)
+                        .put("device_id", deviceId)
+                        .put("key_id", keyId)
+                        .put("curve25519_key", key.getString("key"))
+                        .put("signature", key.getString("signature"))
+                )
+            }
+
+            call(
+                "/rest/v1/e2ee_one_time_keys?on_conflict=user_id,device_id,key_id",
+                "POST",
+                rows.toString(),
+                prefer = "resolution=ignore-duplicates,return=minimal"
+            )
+
+            val filter = keyIds.joinToString(",")
+            val storedKeys = JSONArray(call(
+                "/rest/v1/e2ee_one_time_keys?select=key_id,curve25519_key,signature" +
+                    "&user_id=eq.$uid&device_id=eq.$deviceId&key_id=in.($filter)"
+            ))
+            val storedById = (0 until storedKeys.length()).associate { index ->
+                val row = storedKeys.getJSONObject(index)
+                row.getString("key_id") to row
+            }
+            for (index in 0 until pending.length()) {
+                val expected = pending.getJSONObject(index)
+                val actual = storedById[expected.getString("key_id")]
+                    ?: throw IOException("Supabase не подтвердил сохранение одноразового E2EE-ключа")
+                if (actual.optString("curve25519_key") != expected.optString("key") ||
+                    actual.optString("signature") != expected.optString("signature")) {
+                    throw IOException("Одноразовый E2EE-ключ на сервере не совпадает с устройством")
+                }
+            }
+            e2ee.markPublicKeysPublished(keyIds)
+        }
+
+        uploadPendingKeys()
+
+        var available = countAvailableE2eeKeys(uid, deviceId)
+        if (available < 10) {
+            e2ee.replenishOneTimeKeys(20)
+            uploadPendingKeys()
+            available = countAvailableE2eeKeys(uid, deviceId)
+        }
+        return available
+    }
+
+    private suspend fun countAvailableE2eeKeys(userId: String, deviceId: String): Int {
+        val rows = JSONArray(call(
+            "/rest/v1/e2ee_one_time_keys?select=key_id" +
+                "&user_id=eq.$userId&device_id=eq.$deviceId&consumed_at=is.null&limit=100"
+        ))
+        return rows.length()
+    }
+
+    /**
+     * Creates an Olm pre-key envelope only when the fetched device identity
+     * matches a fingerprint the caller has already verified out of band.
+     * This does not send or persist the envelope.
+     */
+    suspend fun createVerifiedE2eePreKeyEnvelope(
+        e2ee: E2eeClient,
+        conversationId: String,
+        recipientUserId: String,
+        recipientDeviceId: String,
+        verifiedRecipientEd25519Key: String,
+        firstPlaintext: ByteArray,
+        messageId: String = UUID.randomUUID().toString()
+    ): String {
+        if (verifiedRecipientEd25519Key.isBlank()) {
+            throw IOException("Сначала подтвердите цифровой отпечаток устройства собеседника")
+        }
+        val preKey = consumeE2eePreKey(conversationId, recipientUserId, recipientDeviceId)
+        if (preKey.optString("device_id") != recipientDeviceId) {
+            throw IOException("Сервер вернул ключ другого устройства")
+        }
+        val identityKey = preKey.optString("ed25519_key")
+        if (identityKey != verifiedRecipientEd25519Key) {
+            throw IOException("Цифровой отпечаток устройства изменился. Отправка остановлена")
+        }
+        val oneTimeKey = preKey.optString("one_time_key")
+        val signature = preKey.optString("one_time_key_signature")
+        if (oneTimeKey.isBlank() || signature.isBlank() ||
+            !e2ee.verifyPublishedOneTimeKey(identityKey, preKey.optString("curve25519_key"), oneTimeKey, signature)) {
+            throw IOException("Подпись одноразового E2EE-ключа недействительна")
+        }
+        return e2ee.startDirectSession(
+            conversationId = normalizeUuid(conversationId),
+            recipientCurve25519 = preKey.getString("curve25519_key"),
+            recipientEd25519 = identityKey,
+            recipientOneTimeKey = oneTimeKey,
+            recipientOneTimeKeySignature = signature,
+            firstPlaintext = firstPlaintext,
+            messageId = messageId
+        )
+    }
+
+    /** Atomically consumes a group member device OTK after verifying both users belong to the group. */
+    suspend fun consumeGroupE2eePreKey(
+        conversationId: String,
+        recipientUserId: String,
+        recipientDeviceId: String
+    ): JSONObject {
+        val rows = JSONArray(call(
+            "/rest/v1/rpc/consume_group_e2ee_one_time_key",
+            "POST",
+            JSONObject()
+                .put("p_conversation_id", normalizeUuid(conversationId))
+                .put("p_recipient_user_id", normalizeUuid(recipientUserId))
+                .put("p_device_id", normalizeUuid(recipientDeviceId))
+                .toString()
+        ))
+        if (rows.length() != 1) throw IOException("Не удалось получить одноразовый групповой E2EE-ключ")
+        return rows.getJSONObject(0)
+    }
+
+    /** Atomically consumes one recipient OTK only when both users share this chat. */
+    suspend fun consumeE2eePreKey(
+        conversationId: String,
+        recipientUserId: String,
+        recipientDeviceId: String
+    ): JSONObject {
+        val rows = JSONArray(call(
+            "/rest/v1/rpc/consume_e2ee_one_time_key",
+            "POST",
+            JSONObject()
+                .put("p_conversation_id", normalizeUuid(conversationId))
+                .put("p_recipient_user_id", normalizeUuid(recipientUserId))
+                .put("p_device_id", normalizeUuid(recipientDeviceId))
+                .toString()
+        ))
+        if (rows.length() != 1) throw IOException("Не удалось получить одноразовый E2EE-ключ собеседника")
+        return rows.getJSONObject(0)
+    }
+
+    /** Atomically consumes a pre-key only from another active device owned by the authenticated account. */
+    suspend fun consumeOwnE2eePreKey(
+        conversationId: String,
+        deviceId: String
+    ): JSONObject {
+        val rows = JSONArray(call(
+            "/rest/v1/rpc/consume_own_e2ee_one_time_key",
+            "POST",
+            JSONObject()
+                .put("p_conversation_id", normalizeUuid(conversationId))
+                .put("p_device_id", normalizeUuid(deviceId))
+                .toString()
+        ))
+        if (rows.length() != 1) throw IOException("Не удалось получить одноразовый ключ собственного устройства")
+        return rows.getJSONObject(0)
+    }
+    suspend fun groupMemberIds(conversationId: String): List<String> {
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(conversationId)}&order=joined_at.asc"
+        ))
+        val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("user_id") }.distinct()
+        if (ids.size !in 2..E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
+            throw IOException("В группе должно быть от 2 до ${E2eeGroupMessageEnvelope.MAX_RECIPIENTS} участников")
+        }
+        return ids
+    }
+
+    suspend fun sendEncryptedGroupMessage(
+        conversationId: String,
+        e2ee: E2eeClient,
+        messageId: String,
+        plaintext: String,
+        messageType: String = "text",
+        replyToId: String? = null
+    ) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val chatId = normalizeUuid(conversationId)
+        if (plaintext.isBlank() || plaintext.toByteArray(Charsets.UTF_8).size > 12_000) {
+            throw IOException("Сообщение пустое или слишком большое для защищённого конверта")
+        }
+        val members = groupMemberIds(chatId)
+        if (uid !in members) throw IOException("Вы больше не состоите в этой группе")
+        val own = JSONObject(e2ee.ensureDevice())
+        val ownDeviceId = own.getString("device_id")
+        val devicesByUser = activeE2eeDevicesForUsers(members).groupBy { it.userId }
+        val publishedOwnDevice = (devicesByUser[uid] ?: emptyList()).singleOrNull { it.deviceId == ownDeviceId }
+            ?: throw IOException("Ваше E2EE-устройство не зарегистрировано на сервере. Повторите инициализацию защиты.")
+        if (publishedOwnDevice.curve25519Key != own.getString("curve25519") ||
+            publishedOwnDevice.ed25519Key != own.getString("ed25519")) {
+            throw IOException("Ключи вашего E2EE-устройства не совпадают с регистрацией сервера")
+        }
+        val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
+        for (memberId in members) {
+            val devices = (devicesByUser[memberId] ?: emptyList()).filterNot { memberId == uid && it.deviceId == ownDeviceId }
+            if (devices.isEmpty()) {
+                if (memberId == uid) continue
+                throw IOException("У участника $memberId нет активного E2EE-устройства. Отправка остановлена.")
+            }
+            for (device in devices) {
+                if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
+                    throw IOException("Устройство участника использует неподдерживаемый протокол")
+                }
+                e2ee.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
+                val pending = e2ee.pendingGroupEnvelope(chatId, messageId, memberId, device.deviceId)
+                if (pending != null) {
+                    val cached = e2ee.cachedMessage(chatId, messageId)
+                        ?: throw IOException("Не найдена локальная копия ожидающего группового сообщения")
+                    if (!cached.contentEquals(plaintext.toByteArray(Charsets.UTF_8))) {
+                        throw IOException("Текст не совпадает с ожидающим групповым E2EE-сообщением")
+                    }
+                    recipients += pending
+                } else if (e2ee.hasGroupSession(chatId, memberId, device.deviceId)) {
+                    val ciphertext = e2ee.encryptGroupMessage(
+                        chatId, memberId, device.deviceId, plaintext.toByteArray(Charsets.UTF_8), messageId
+                    )
+                    recipients += E2eeGroupRecipientEnvelope(
+                        memberId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, ciphertext
+                    )
+                } else {
+                    val preKey = consumeGroupE2eePreKey(chatId, memberId, device.deviceId)
+                    if (preKey.optString("ed25519_key") != device.ed25519Key ||
+                        preKey.optString("curve25519_key") != device.curve25519Key) {
+                        throw IOException("Ключ устройства участника изменился. Отправка отменена.")
+                    }
+                    val otk = preKey.optString("one_time_key")
+                    val signature = preKey.optString("one_time_key_signature")
+                    if (!e2ee.verifyPublishedOneTimeKey(device.ed25519Key, device.curve25519Key, otk, signature)) {
+                        throw IOException("Подпись одноразового ключа участника недействительна")
+                    }
+                    val ciphertext = e2ee.startGroupSession(
+                        chatId, memberId, device.deviceId, device.curve25519Key, device.ed25519Key,
+                        otk, signature, plaintext.toByteArray(Charsets.UTF_8), messageId
+                    )
+                    recipients += E2eeGroupRecipientEnvelope(
+                        memberId, device.deviceId, E2eeMessageEnvelope.Kind.PRE_KEY, ciphertext
+                    )
+                }
+            }
+        }
+        val currentMembers = groupMemberIds(chatId)
+        if (currentMembers.toSet() != members.toSet()) {
+            throw IOException("Состав группы изменился во время отправки. Повторите отправку.")
+        }
+        val currentDevicesByUser = activeE2eeDevicesForUsers(members).groupBy { it.userId }
+        for (memberId in members) {
+            val currentDevices = (currentDevicesByUser[memberId] ?: emptyList())
+                .filterNot { memberId == uid && it.deviceId == ownDeviceId }
+            val sentDevices = recipients.filter { it.userId == memberId }
+            if (currentDevices.map { it.deviceId }.toSet() != sentDevices.map { it.deviceId }.toSet() ||
+                currentDevices.any { device ->
+                    runCatching { e2ee.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key) }.isFailure
+                }) {
+                throw IOException("Список устройств или ключи участника изменились во время отправки. Повторите отправку.")
+            }
+        }
+        val envelope = E2eeGroupMessageEnvelope(
+            chatId, uid, ownDeviceId, own.getString("curve25519"), recipients
+        ).encode()
+        val payload = JSONObject()
+            .put("id", normalizeUuid(messageId))
+            .put("conversation_id", chatId)
+            .put("sender_id", uid)
+            .put("message_type", messageType)
+            .put("content", envelope)
+        if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
+        val inserted = JSONArray(call(
+            "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
+            prefer = "resolution=ignore-duplicates,return=representation"
+        ))
+        // Normal sends are verified by the INSERT response in one round trip.
+        // Only an idempotent retry that hit an existing ID needs a follow-up read.
+        val saved = if (inserted.length() == 1) inserted else JSONArray(call(
+            "/rest/v1/messages?select=id,sender_id,content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
+        ))
+        if (saved.length() != 1 || saved.getJSONObject(0).optString("sender_id") != uid ||
+            saved.getJSONObject(0).optString("content") != envelope) {
+            throw IOException("Сервер не подтвердил сохранение группового E2EE-сообщения")
+        }
+        e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
+        notifyChatPush(chatId)
+    }
+
+    private suspend fun decryptGroupEnvelope(
+        raw: String,
+        chatId: String,
+        messageId: String,
+        senderId: String,
+        e2ee: E2eeClient
+    ): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val envelope = E2eeGroupMessageEnvelope.decode(raw)
+        if (envelope.conversationId != normalizeUuid(chatId) || envelope.senderUserId != senderId) {
+            throw IOException("Групповой конверт не соответствует чату или отправителю")
+        }
+        val members = groupMemberIds(chatId)
+        if (senderId !in members || uid !in members) throw IOException("Отправитель или получатель не состоит в группе")
+        val senderRows = JSONArray(call(
+            "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
+                "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
+        ))
+        if (senderRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
+        val sender = senderRows.getJSONObject(0)
+        if (sender.optString("curve25519_key") != envelope.senderCurve25519 ||
+            sender.optString("protocol") != "olm-v1" || sender.optInt("bundle_version") != 1) {
+            throw IOException("Идентичность отправителя группы не подтверждена")
+        }
+        val myDeviceId = e2ee.deviceId()
+        if (senderId == uid && envelope.senderDeviceId == myDeviceId) {
+            val own = JSONObject(e2ee.ensureDevice())
+            if (sender.optString("curve25519_key") != own.optString("curve25519") ||
+                sender.optString("ed25519_key") != own.optString("ed25519")) {
+                throw IOException("Идентичность отправляющего устройства не совпадает")
+            }
+            return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
+                ?: throw IOException("Локальная копия группового сообщения недоступна")
+        }
+        e2ee.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, sender.optString("curve25519_key"), sender.optString("ed25519_key"))
+        val recipient = envelope.recipients.singleOrNull {
+            it.userId == uid && it.deviceId == myDeviceId
+        } ?: throw IOException("Это групповое сообщение не адресовано данному устройству")
+        val cached = e2ee.cachedMessage(chatId, messageId)
+        val plaintext = cached ?: when (recipient.kind) {
+            E2eeMessageEnvelope.Kind.PRE_KEY -> e2ee.acceptGroupSession(
+                chatId, senderId, envelope.senderDeviceId, envelope.senderCurve25519,
+                recipient.ciphertext, messageId
+            )
+            E2eeMessageEnvelope.Kind.NORMAL -> e2ee.decryptGroupMessage(
+                chatId, senderId, envelope.senderDeviceId, recipient.ciphertext, messageId
+            )
+        }
+        return plaintext.toString(Charsets.UTF_8)
+    }
+
+    /** Resolve the sole peer in a direct conversation; group chats are rejected. */
+    suspend fun directPeerUserId(conversationId: String): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(conversationId)}&user_id=neq.$uid"
+        ))
+        if (rows.length() != 1) throw IOException("E2EE сейчас поддерживает только личные чаты с одним собеседником")
+        return rows.getJSONObject(0).getString("user_id")
+    }
+
+    suspend fun activeE2eeDevices(userId: String): List<E2eeRemoteDevice> =
+        activeE2eeDevicesForUsers(listOf(userId))
+
+    private suspend fun activeE2eeDevicesForUsers(userIds: Collection<String>): List<E2eeRemoteDevice> {
+        val ids = userIds.map { normalizeUuid(it) }.distinct()
+        if (ids.isEmpty()) return emptyList()
+        val rows = JSONArray(call(
+            "/rest/v1/e2ee_devices?select=user_id,device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
+                "&user_id=in.(${ids.joinToString(",")})&is_active=eq.true&order=created_at.asc"
+        ))
+        return (0 until rows.length()).map { index ->
+            val row = rows.getJSONObject(index)
+            E2eeRemoteDevice(
+                row.getString("user_id"), row.getString("device_id"),
+                row.getString("curve25519_key"), row.getString("ed25519_key"),
+                row.getString("protocol"), row.getInt("bundle_version")
+            )
         }
     }
-    suspend fun registerPushToken(token: String) {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        val payload = JSONObject().put("user_id", uid).put("token", token).put("platform", "android").put("updated_at", java.time.Instant.now().toString())
-        call("/rest/v1/device_tokens?on_conflict=token", "POST", payload.toString(), prefer = "resolution=merge-duplicates,return=minimal")
-    }
 
-    private suspend fun notifyChatPush(chatId: String, preview: String) {
-        try {
-            call("/functions/v1/send-chat-push", "POST", JSONObject().put("conversation_id", normalizeUuid(chatId)).put("preview", preview.take(180)).toString())
-        } catch (_: Exception) { }
-    }
-
-    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null) {
+    /**
+     * Direct-message E2EE send path. The encrypted envelope is persisted locally
+     * before network I/O; retries with the same message ID reuse the same ratchet
+     * ciphertext. No plaintext fallback is permitted.
+     */
+    /**
+     * Direct-message fan-out: create a distinct Olm ciphertext for every active
+     * device belonging to the peer account. The persisted envelope is the same
+     * per-device format used by group chats, so every logged-in device can decrypt
+     * its own copy while the server only stores ciphertext.
+     */
+    suspend fun sendEncryptedDirectMessage(
+        conversationId: String,
+        e2ee: E2eeClient,
+        messageId: String,
+        plaintext: String,
+        replyToId: String? = null,
+        messageType: String = "text"
+    ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val payload = JSONObject().put("conversation_id", chatId).put("sender_id", uid)
-            .put("message_type", "text").put("content", text)
+        val chatId = normalizeUuid(conversationId)
+        val bytes = plaintext.toByteArray(Charsets.UTF_8)
+        if (plaintext.isBlank() || bytes.size > 12_000) {
+            throw IOException("Сообщение пустое или слишком большое для защищённого конверта")
+        }
+        val peerId = directPeerUserId(chatId)
+        if (peerId == uid) throw IOException("Нельзя отправить сообщение самому себе")
+
+        val ownBundle = JSONObject(e2ee.ensureDevice())
+        val ownDeviceId = ownBundle.getString("device_id")
+        val (ownDevices, peerDevices) = coroutineScope {
+            val own = async { activeE2eeDevices(uid) }
+            val peer = async { activeE2eeDevices(peerId) }
+            own.await() to peer.await()
+        }
+        val ownPublished = ownDevices.singleOrNull { it.deviceId == ownDeviceId }
+            ?: throw IOException("Ваше E2EE-устройство не зарегистрировано на сервере. Повторите инициализацию защиты.")
+        if (ownPublished.curve25519Key != ownBundle.getString("curve25519") ||
+            ownPublished.ed25519Key != ownBundle.getString("ed25519")) {
+            throw IOException("Ключи вашего E2EE-устройства не совпадают с регистрацией сервера")
+        }
+        if (peerDevices.isEmpty()) throw IOException("У собеседника пока нет активных устройств Nexura")
+        val ownOtherDevices = ownDevices.filterNot { it.deviceId == ownDeviceId }
+        val allTargets = (peerDevices + ownOtherDevices).distinctBy { "${it.userId}:${it.deviceId}" }
+        if (allTargets.size > E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
+            throw IOException("Слишком много активных устройств для одной защищённой отправки")
+        }
+
+        val pending = e2ee.cachedMessage(chatId, messageId)
+        if (pending != null && !pending.contentEquals(bytes)) {
+            throw IOException("Текст не совпадает с ожидающим зашифрованным сообщением")
+        }
+
+        val recipients = mutableListOf<E2eeGroupRecipientEnvelope>()
+        for (device in allTargets) {
+            if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
+                throw IOException("Одно из устройств собеседника использует неподдерживаемый протокол")
+            }
+            e2ee.trustRemoteDeviceOnFirstUse(device.userId, device.deviceId, device.curve25519Key, device.ed25519Key)
+            val saved = e2ee.pendingGroupEnvelope(chatId, messageId, device.userId, device.deviceId)
+            if (saved != null) {
+                val cached = e2ee.cachedMessage(chatId, messageId)
+                    ?: throw IOException("Не найдена локальная копия ожидающего сообщения")
+                if (!cached.contentEquals(bytes)) throw IOException("Текст не совпадает с ожидающим сообщением")
+                recipients += saved
+            } else if (e2ee.hasGroupSession(chatId, device.userId, device.deviceId)) {
+                val cipher = e2ee.encryptGroupMessage(chatId, device.userId, device.deviceId, bytes, messageId)
+                recipients += E2eeGroupRecipientEnvelope(device.userId, device.deviceId, E2eeMessageEnvelope.Kind.NORMAL, cipher)
+            } else {
+                val preKey = if (device.userId == uid) {
+                    consumeOwnE2eePreKey(chatId, device.deviceId)
+                } else {
+                    consumeE2eePreKey(chatId, device.userId, device.deviceId)
+                }
+                if (preKey.optString("ed25519_key") != device.ed25519Key ||
+                    preKey.optString("curve25519_key") != device.curve25519Key) {
+                    throw IOException("Ключ одного из устройств собеседника изменился. Отправка отменена.")
+                }
+                val otk = preKey.optString("one_time_key")
+                val signature = preKey.optString("one_time_key_signature")
+                if (!e2ee.verifyPublishedOneTimeKey(device.ed25519Key, device.curve25519Key, otk, signature)) {
+                    throw IOException("Подпись одноразового ключа одного из устройств недействительна")
+                }
+                val cipher = e2ee.startGroupSession(
+                    chatId, device.userId, device.deviceId, device.curve25519Key, device.ed25519Key,
+                    otk, signature, bytes, messageId
+                )
+                recipients += E2eeGroupRecipientEnvelope(device.userId, device.deviceId, E2eeMessageEnvelope.Kind.PRE_KEY, cipher)
+            }
+        }
+
+        val (latestPeerDevices, latestOwnDevicesRaw) = coroutineScope {
+            val peer = async { activeE2eeDevices(peerId) }
+            val own = async { activeE2eeDevices(uid) }
+            peer.await() to own.await()
+        }
+        val latestOwnDevices = latestOwnDevicesRaw.filterNot { it.deviceId == ownDeviceId }
+        val latestTargets = (latestPeerDevices + latestOwnDevices).distinctBy { "${it.userId}:${it.deviceId}" }
+        if (latestTargets.map { "${it.userId}:${it.deviceId}" }.toSet() != allTargets.map { "${it.userId}:${it.deviceId}" }.toSet()) {
+            throw IOException("Список устройств одного из участников изменился во время отправки. Повторите отправку.")
+        }
+        val envelope = E2eeGroupMessageEnvelope(
+            chatId, uid, ownDeviceId, ownBundle.getString("curve25519"), recipients
+        ).encode()
+        val payload = JSONObject()
+            .put("id", normalizeUuid(messageId))
+            .put("conversation_id", chatId)
+            .put("sender_id", uid)
+            .put("message_type", messageType)
+            .put("content", envelope)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
-        call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
-        notifyChatPush(chatId, text)
+        val inserted = JSONArray(call(
+            "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
+            prefer = "resolution=ignore-duplicates,return=representation"
+        ))
+        // Normal sends are verified by the INSERT response in one round trip.
+        // Only an idempotent retry that hit an existing ID needs a follow-up read.
+        val saved = if (inserted.length() == 1) inserted else JSONArray(call(
+            "/rest/v1/messages?select=id,sender_id,content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
+        ))
+        if (saved.length() != 1 || saved.getJSONObject(0).optString("sender_id") != uid ||
+            saved.getJSONObject(0).optString("content") != envelope) {
+            throw IOException("Сервер не подтвердил сохранение именно этого зашифрованного сообщения")
+        }
+        e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
+        notifyChatPush(chatId)
     }
 
-    suspend fun markChatRead(chatId: String) {
+
+    suspend fun notifyIncomingCall(conversationId: String, recipientUserId: String, callId: String, video: Boolean) {
+        call(
+            "/functions/v1/send-call-push",
+            "POST",
+            JSONObject()
+                .put("conversation_id", normalizeUuid(conversationId))
+                .put("recipient_user_id", normalizeUuid(recipientUserId))
+                .put("call_id", callId)
+                .put("video", video)
+                .toString()
+        )
+    }
+
+    suspend fun registerPushToken(token: String) {
+        if (store.userId.isNullOrBlank()) throw IOException("Сессия истекла")
+        if (token.length !in 20..4096) throw IOException("Некорректный токен уведомлений")
+        call(
+            "/rest/v1/rpc/register_own_device_token",
+            "POST",
+            JSONObject().put("p_token", token).toString()
+        )
+    }
+
+    // Push notifications must never contain message text, sender names, or media details.
+    private fun notifyChatPush(chatId: String) {
+        // Push is secondary to message persistence. Do not hold the sender UI
+        // while the Edge Function starts or waits on FCM delivery.
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                call("/functions/v1/send-chat-push", "POST",
+                    JSONObject().put("conversation_id", normalizeUuid(chatId)).toString())
+            } catch (_: Exception) { }
+        }
+    }
+
+    @Deprecated("Use sendEncryptedDirectMessage; plaintext transport is disabled in this branch.")
+    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null): Nothing {
+        throw IOException("Отправка открытого текста отключена. Используйте подтверждённое E2EE-устройство.")
+    }
+
+    suspend fun privacySettings(): PrivacySettings {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        call("/rest/v1/conversation_members?conversation_id=eq.$chatId&user_id=eq.$uid", "PATCH",
-            JSONObject().put("last_read_at", java.time.Instant.now().toString()).toString(),
+        val profile = JSONArray(call("/rest/v1/profiles?select=read_receipts_enabled&id=eq.$uid&limit=1"))
+        val presence = JSONArray(call("/rest/v1/user_presence?select=show_online_status&user_id=eq.$uid&limit=1"))
+        return PrivacySettings(
+            showOnlineStatus = if (presence.length() > 0) presence.getJSONObject(0).optBoolean("show_online_status", true) else true,
+            readReceiptsEnabled = if (profile.length() > 0) profile.getJSONObject(0).optBoolean("read_receipts_enabled", true) else true
+        )
+    }
+
+    suspend fun updatePrivacySettings(showOnlineStatus: Boolean, readReceiptsEnabled: Boolean) {
+        call("/rest/v1/rpc/update_my_privacy_settings", "POST",
+            JSONObject().put("p_show_online_status", showOnlineStatus)
+                .put("p_read_receipts_enabled", readReceiptsEnabled).toString())
+    }
+
+    suspend fun updatePresenceHeartbeat() {
+        val uid = store.userId ?: return
+        val now = java.time.Instant.now().toString()
+        val existing = JSONArray(call("/rest/v1/user_presence?select=user_id&user_id=eq.$uid&limit=1"))
+        if (existing.length() > 0) {
+            call("/rest/v1/user_presence?user_id=eq.$uid", "PATCH",
+                JSONObject().put("last_seen_at", now).toString(), prefer = "return=minimal")
+        } else {
+            call("/rest/v1/user_presence", "POST",
+                JSONObject().put("user_id", uid).put("last_seen_at", now).toString(),
+                prefer = "return=minimal")
+        }
+    }
+
+    suspend fun userPresence(userId: String): UserPresence {
+        val id = normalizeUuid(userId)
+        val rows = JSONArray(call("/rest/v1/rpc/get_user_presence", "POST",
+            JSONObject().put("p_user_id", id).toString()))
+        if (rows.length() == 0) return UserPresence(false, false, null)
+        val row = rows.getJSONObject(0)
+        return UserPresence(row.optBoolean("is_visible"), row.optBoolean("is_online"),
+            row.optString("last_seen_at").takeIf { it.isNotBlank() && it != "null" })
+    }
+
+    suspend fun blockedUsers(): List<UserItem> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val blocks = JSONArray(call("/rest/v1/user_blocks?select=blocked_id&blocker_id=eq.$uid&order=created_at.desc"))
+        val ids = (0 until blocks.length()).mapNotNull { blocks.optJSONObject(it)?.optString("blocked_id")?.takeIf { id -> id.isNotBlank() } }
+        if (ids.isEmpty()) return emptyList()
+        val rows = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=in.(" + ids.joinToString(",") + ")"))
+        val users = (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            UserItem(row.optString("id"), row.optString("display_name").ifBlank { row.optString("username").ifBlank { "Пользователь" } },
+                row.optString("avatar_url").ifBlank { "🙂" })
+        }
+        return ids.mapNotNull { id -> users.firstOrNull { it.id == id } }
+    }
+
+    suspend fun blockUser(userId: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val blocked = normalizeUuid(userId)
+        if (blocked == uid) throw IOException("Нельзя заблокировать собственный аккаунт")
+        call("/rest/v1/user_blocks?on_conflict=blocker_id,blocked_id", "POST",
+            JSONObject().put("blocker_id", uid).put("blocked_id", blocked).toString(),
+            prefer = "resolution=ignore-duplicates,return=minimal")
+    }
+
+    suspend fun unblockUser(userId: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        call("/rest/v1/user_blocks?blocker_id=eq.$uid&blocked_id=eq." + normalizeUuid(userId), "DELETE",
             prefer = "return=minimal")
+    }
+
+    suspend fun peerReadReceiptAt(chatId: String, peerUserId: String?): String? {
+        if (peerUserId.isNullOrBlank()) return null
+        val rows = JSONArray(call("/rest/v1/conversation_members?select=last_receipt_at&conversation_id=eq.${normalizeUuid(chatId)}&user_id=eq.${normalizeUuid(peerUserId)}&limit=1"))
+        if (rows.length() == 0) return null
+        return rows.getJSONObject(0).optString("last_receipt_at").takeIf { it.isNotBlank() && it != "null" }
+    }
+
+    suspend fun markChatRead(chatId: String, shareReadReceipt: Boolean = true) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val now = java.time.Instant.now().toString()
+        val payload = JSONObject().put("last_read_at", now)
+        if (shareReadReceipt) payload.put("last_receipt_at", now)
+        call("/rest/v1/conversation_members?conversation_id=eq.$chatId&user_id=eq.$uid", "PATCH",
+            payload.toString(), prefer = "return=minimal")
     }
 
     suspend fun editMessage(messageId: String, newText: String) {
         if (newText.isBlank()) throw IOException("Сообщение не может быть пустым")
+        val rows = JSONArray(call(
+            "/rest/v1/messages?select=content&id=eq.${normalizeUuid(messageId)}&limit=1"
+        ))
+        if (rows.length() == 1 && E2eeMessageEnvelope.isEnvelope(rows.getJSONObject(0).optString("content"))) {
+            throw IOException("Зашифрованное сообщение нельзя редактировать открытым PATCH. Отправьте исправление новым E2EE-сообщением.")
+        }
         call("/rest/v1/messages?id=eq.${normalizeUuid(messageId)}&message_type=eq.text", "PATCH",
             JSONObject().put("content", newText.trim()).put("edited_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
@@ -240,51 +1070,299 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("deleted_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
     }
-    private suspend fun signedAttachmentUrl(path: String): String {
+
+    /**
+     * Replaces an E2EE message by sending a freshly encrypted message, then
+     * soft-deleting the old row. Plaintext is never PATCHed to Postgres.
+     */
+    suspend fun editEncryptedMessage(
+        chatId: String,
+        e2ee: E2eeClient,
+        oldMessageId: String,
+        newText: String,
+        isGroup: Boolean,
+        replyToId: String? = null
+    ) {
+        if (newText.isBlank()) throw IOException("Сообщение не может быть пустым")
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val normalizedOldId = normalizeUuid(oldMessageId)
+        val oldRows = JSONArray(call(
+            "/rest/v1/messages?select=created_at&id=eq.$normalizedOldId&conversation_id=eq.${normalizeUuid(chatId)}&sender_id=eq.$uid&limit=1"
+        ))
+        if (oldRows.length() != 1) throw IOException("Сообщение не найдено или больше недоступно для изменения")
+        val originalCreatedAt = oldRows.getJSONObject(0).optString("created_at")
+        val wasPinned = pinnedMessage(chatId) == normalizedOldId
+        if (wasPinned && !canManageConversation(chatId)) {
+            throw IOException("Закреплённое сообщение может изменить только администратор чата")
+        }
+        val replacementId = UUID.randomUUID().toString()
+        if (isGroup) {
+            sendEncryptedGroupMessage(chatId, e2ee, replacementId, newText.trim(), "text", replyToId)
+        } else {
+            sendEncryptedDirectMessage(chatId, e2ee, replacementId, newText.trim(), replyToId, "text")
+        }
+        call(
+            "/rest/v1/messages?id=eq.${normalizeUuid(replacementId)}",
+            "PATCH",
+            JSONObject()
+                .put("edited_at", java.time.Instant.now().toString())
+                .put("created_at", originalCreatedAt)
+                .toString(),
+            prefer = "return=minimal"
+        )
+        if (wasPinned) setPinnedMessage(chatId, replacementId)
+        deleteMessage(oldMessageId)
+    }
+
+    suspend fun messageReactions(chatId: String): Map<String, List<Pair<String, Int>>> {
+        val rows = JSONArray(call(
+            "/rest/v1/message_reactions?select=message_id,user_id,emoji&conversation_id=eq.${normalizeUuid(chatId)}"
+        ))
+        val grouped = linkedMapOf<String, MutableMap<String, Int>>()
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val messageId = row.optString("message_id")
+            val emoji = row.optString("emoji")
+            val counts = grouped.getOrPut(messageId) { linkedMapOf() }
+            counts[emoji] = (counts[emoji] ?: 0) + 1
+        }
+        return grouped.mapValues { (_, counts) -> counts.map { it.key to it.value } }
+    }
+
+    suspend fun toggleMessageReaction(chatId: String, messageId: String, emoji: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val encodedEmoji = java.net.URLEncoder.encode(emoji, "UTF-8")
+        val filter = "/rest/v1/message_reactions?message_id=eq.${normalizeUuid(messageId)}&user_id=eq.$uid&emoji=eq.$encodedEmoji"
+        val existing = JSONArray(call(filter + "&select=message_id&limit=1"))
+        if (existing.length() > 0) {
+            call(filter, "DELETE", prefer = "return=minimal")
+        } else {
+            call("/rest/v1/message_reactions", "POST",
+                JSONObject().put("message_id", normalizeUuid(messageId))
+                    .put("conversation_id", normalizeUuid(chatId)).put("user_id", uid).put("emoji", emoji).toString(),
+                prefer = "return=minimal")
+        }
+    }
+
+    suspend fun canManageConversation(chatId: String): Boolean {
+        val uid = store.userId ?: return false
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=member_role&conversation_id=eq.${normalizeUuid(chatId)}&user_id=eq.$uid&limit=1"
+        ))
+        if (rows.length() != 1) return false
+        return rows.getJSONObject(0).optString("member_role") in setOf("owner", "admin")
+    }
+
+    suspend fun pinnedMessage(chatId: String): String? {
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_pins?select=message_id&conversation_id=eq.${normalizeUuid(chatId)}&limit=1"
+        ))
+        return if (rows.length() == 0) null else rows.getJSONObject(0).optString("message_id").takeIf { it.isNotBlank() }
+    }
+
+    suspend fun setPinnedMessage(chatId: String, messageId: String?) {
+        val conversation = normalizeUuid(chatId)
+        if (messageId == null) {
+            call("/rest/v1/conversation_pins?conversation_id=eq.$conversation", "DELETE", prefer = "return=minimal")
+        } else {
+            val uid = store.userId ?: throw IOException("Сессия истекла")
+            call("/rest/v1/conversation_pins?on_conflict=conversation_id", "POST",
+                JSONObject().put("conversation_id", conversation).put("message_id", normalizeUuid(messageId))
+                    .put("pinned_by", uid).toString(),
+                prefer = "resolution=merge-duplicates,return=minimal")
+        }
+    }
+    private suspend fun signedAttachmentUrl(path: String, bucket: String = "chat-attachments"): String {
         val now = System.currentTimeMillis()
-        signedUrlCache[path]?.let { cached ->
+        val cacheKey = "$bucket/$path"
+        signedUrlCache[cacheKey]?.let { cached ->
             if (cached.second > now) return cached.first
-            signedUrlCache.remove(path, cached)
+            signedUrlCache.remove(cacheKey, cached)
         }
         val payload = JSONObject().put("expiresIn", 3600)
-        val result = JSONObject(call("/storage/v1/object/sign/chat-attachments/$path", "POST", payload.toString()))
+        val result = JSONObject(call("/storage/v1/object/sign/$bucket/$path", "POST", payload.toString()))
         val signed = result.optString("signedURL").ifBlank { result.optString("signedUrl") }
-        if (signed.isBlank()) throw IOException("Не удалось получить ссылку на изображение")
+        if (signed.isBlank()) throw IOException("Не удалось получить ссылку на медиафайл")
         val url = if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
         if (signedUrlCache.size > 500) signedUrlCache.clear()
-        signedUrlCache[path] = url to (now + 55 * 60 * 1000L)
+        signedUrlCache[cacheKey] = url to (now + 55 * 60 * 1000L)
         return url
     }
 
-    suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String) {
+    suspend fun sendEncryptedMediaMessage(
+        chatId: String,
+        e2ee: E2eeClient,
+        encryptedMedia: EncryptedMediaFile,
+        caption: String = "",
+        replyToId: String? = null
+    ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        if (mimeType !in listOf("image/jpeg", "image/png", "image/webp", "image/gif")) {
-            throw IOException("Поддерживаются JPG, PNG, WEBP и GIF")
+        if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) throw IOException("Зашифрованный файл превышает лимит Storage")
+        val chat = normalizeUuid(chatId)
+        val fileId = UUID.randomUUID().toString()
+        val path = "$chat/$uid/$fileId.enc"
+        val mediaType = when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; encryptedMedia.mimeType.startsWith("image/") -> "image"; else -> "file" }
+        val uploadRequest = Request.Builder()
+            .url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: throw IOException("Сессия истекла")}")
+            .header("x-upsert", "false")
+            .post(encryptedMedia.file.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
+            .build()
+        val mediaClient = client.newBuilder()
+            .writeTimeout(2, TimeUnit.MINUTES)
+            .readTimeout(2, TimeUnit.MINUTES)
+            .callTimeout(3, TimeUnit.MINUTES)
+            .build()
+        val upload = withContext(Dispatchers.IO) { mediaClient.newCall(uploadRequest).execute() }
+        upload.use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить зашифрованное медиа (HTTP ${it.code})")
         }
-        if (bytes.size > 20 * 1024 * 1024) throw IOException("Максимальный размер изображения — 20 МБ")
-        val extension = when (mimeType) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
-        val path = "$chatId/${UUID.randomUUID()}.$extension"
-        withContext(Dispatchers.IO) {
-            val request = Request.Builder()
-                .url("$BASE_URL/storage/v1/object/chat-attachments/$path")
-                .header("apikey", PUBLIC_KEY)
-                .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
-                .header("Content-Type", mimeType)
-                .post(bytes.toRequestBody(mimeType.toMediaType()))
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException(response.body?.string().orEmpty().ifBlank { "Не удалось загрузить изображение" })
+
+        val payload = JSONObject()
+            .put("schema", "nexura-media-v1")
+            .put("path", path)
+            .put("mime", encryptedMedia.mimeType)
+            .put("media_type", mediaType)
+            .put("name", encryptedMedia.fileName)
+            .put("size", encryptedMedia.plainSize)
+            .put("key", encryptedMedia.keyBase64)
+            .put("iv", encryptedMedia.ivBase64)
+            .put("cipher_sha256", encryptedMedia.cipherSha256)
+            .put("caption", caption.trim())
+            .toString()
+        val messageId = UUID.randomUUID().toString()
+        try {
+            // If the POST committed but its read-back confirmation was interrupted,
+            // keep the ciphertext object: deleting it could break a valid message.
+            sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media")
+        } finally {
+            encryptedMedia.file.delete()
+        }
+    }
+
+    suspend fun sendEncryptedGroupMediaMessage(
+        chatId: String,
+        e2ee: E2eeClient,
+        encryptedMedia: EncryptedMediaFile,
+        caption: String = "",
+        replyToId: String? = null
+    ) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) {
+            throw IOException("Зашифрованный файл превышает лимит Storage")
+        }
+        val chat = normalizeUuid(chatId)
+        val members = groupMemberIds(chat)
+        if (uid !in members) throw IOException("Вы больше не состоите в этой группе")
+        val fileId = UUID.randomUUID().toString()
+        val path = "$chat/$uid/$fileId.enc"
+        val uploadRequest = Request.Builder()
+            .url("$BASE_URL/storage/v1/object/nexura-chat-media/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: throw IOException("Сессия истекла")}")
+            .header("x-upsert", "false")
+            .post(encryptedMedia.file.asRequestBody("application/octet-stream".toMediaTypeOrNull()))
+            .build()
+        val mediaClient = client.newBuilder()
+            .writeTimeout(2, TimeUnit.MINUTES)
+            .readTimeout(2, TimeUnit.MINUTES)
+            .callTimeout(3, TimeUnit.MINUTES)
+            .build()
+        val upload = withContext(Dispatchers.IO) { mediaClient.newCall(uploadRequest).execute() }
+        upload.use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить зашифрованное медиа (HTTP ${it.code})")
+        }
+        val payload = JSONObject()
+            .put("schema", "nexura-media-v1")
+            .put("path", path)
+            .put("mime", encryptedMedia.mimeType)
+            .put("media_type", when { encryptedMedia.mimeType.startsWith("video/") -> "video"; encryptedMedia.mimeType.startsWith("audio/") -> "audio"; encryptedMedia.mimeType.startsWith("image/") -> "image"; else -> "file" })
+            .put("name", encryptedMedia.fileName)
+            .put("size", encryptedMedia.plainSize)
+            .put("key", encryptedMedia.keyBase64)
+            .put("iv", encryptedMedia.ivBase64)
+            .put("cipher_sha256", encryptedMedia.cipherSha256)
+            .put("caption", caption.trim())
+            .toString()
+        try {
+            sendEncryptedGroupMessage(chat, e2ee, UUID.randomUUID().toString(), payload, "media", replyToId)
+        } finally {
+            encryptedMedia.file.delete()
+        }
+    }
+
+    private suspend fun downloadAndDecryptMedia(
+        payload: JSONObject,
+        messageId: String,
+        conversationId: String,
+        senderId: String
+    ): String {
+        val path = payload.getString("path")
+        val pathParts = path.split("/")
+        if (pathParts.size != 3 || pathParts[0] != normalizeUuid(conversationId) ||
+            pathParts[1] != normalizeUuid(senderId)) {
+            throw IOException("Медиафайл не привязан к отправителю и этому чату")
+        }
+        val cached = File(storeMediaCacheDir(), "$messageId.dec")
+        if (cached.exists() && cached.length() > 0) return android.net.Uri.fromFile(cached).toString()
+        val url = signedAttachmentUrl(path, "nexura-chat-media")
+        val request = Request.Builder().url(url).get().build()
+        val mediaClient = client.newBuilder()
+            .readTimeout(2, TimeUnit.MINUTES)
+            .callTimeout(3, TimeUnit.MINUTES)
+            .build()
+        val response = withContext(Dispatchers.IO) { mediaClient.newCall(request).execute() }
+        val encrypted = File.createTempFile("nexura-download-", ".enc", storeMediaCacheDir())
+        try {
+            response.use {
+                if (!it.isSuccessful) throw IOException("Не удалось скачать медиа (HTTP ${it.code})")
+                val body = it.body ?: throw IOException("Пустой ответ Storage")
+                withContext(Dispatchers.IO) {
+                    body.byteStream().use { input ->
+                        FileOutputStream(encrypted).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            var total = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                total += read
+                                if (total > 25L * 1024L * 1024L) throw IOException("Зашифрованный файл слишком большой")
+                                output.write(buffer, 0, read)
+                            }
+                        }
+                    }
+                }
             }
+            withContext(Dispatchers.IO) {
+                E2eeMediaCrypto.decryptFile(
+                    encrypted, cached, payload.getString("key"), payload.getString("iv"),
+                    payload.getString("cipher_sha256")
+                )
+                if (cached.length() != payload.optLong("size", -1L)) {
+                    cached.delete()
+                    throw IOException("Размер расшифрованного медиа не совпадает с метаданными")
+                }
+            }
+            return android.net.Uri.fromFile(cached).toString()
+        } catch (error: Exception) {
+            cached.delete()
+            throw error
+        } finally {
+            encrypted.delete()
         }
-        call("/rest/v1/messages", "POST",
-            JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "image").put("content", path).toString(),
-            prefer = "return=minimal")
-        notifyChatPush(chatId, "📷 Фото")
+    }
+
+    private fun storeMediaCacheDir(): File = store.mediaCacheDir
+
+    @Deprecated("Use sendEncryptedMediaMessage; plaintext media uploads are disabled.")
+    suspend fun sendImageMessage(chatId: String, bytes: ByteArray, mimeType: String): Nothing {
+        throw IOException("Открытая загрузка медиа отключена. Используйте E2EE.")
     }
 
     suspend fun myProfile(): UserProfile {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=eq.$uid&limit=1"))
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$uid&limit=1"))
         if (raw.length() == 0) {
             val authUser = JSONObject(call("/auth/v1/user", auth = true))
             val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
@@ -293,16 +1371,59 @@ class NexuraApi(private val store: SessionStore) {
             call("/rest/v1/profiles", "POST",
                 JSONObject().put("id", uid).put("display_name", display).put("avatar_url", "🙂").toString(),
                 prefer = "return=minimal")
-            return UserProfile(uid, display, "", "🙂")
+            return UserProfile(uid, display, "", "🙂", "", null)
         }
         val p = raw.getJSONObject(0)
-        return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"))
+        return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
     }
 
-    suspend fun updateMyProfile(displayName: String, avatar: String) {
+    suspend fun updateMyProfile(displayName: String, avatar: String, bio: String = "", age: Int? = null) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val payload = JSONObject().put("display_name", displayName.trim()).put("avatar_url", avatar)
+        if (age != null && age !in 13..120) throw IOException("Возраст должен быть от 13 до 120 лет")
+        val payload = JSONObject()
+            .put("display_name", displayName.trim())
+            .put("avatar_url", avatar)
+            .put("bio", bio.trim().take(160))
+            .put("age", age ?: JSONObject.NULL)
         call("/rest/v1/profiles?id=eq.$uid", "PATCH", payload.toString(), prefer = "return=minimal")
+    }
+
+    suspend fun userProfile(userId: String): UserProfile {
+        val id = normalizeUuid(userId)
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$id&limit=1"))
+        if (raw.length() == 0) throw IOException("Профиль пользователя не найден")
+        val p = raw.getJSONObject(0)
+        return UserProfile(
+            p.optString("id"),
+            p.optString("display_name").ifBlank { p.optString("username").ifBlank { "Пользователь" } },
+            p.optString("username"),
+            p.optString("avatar_url").ifBlank { "🙂" },
+            p.optString("bio"),
+            if (p.isNull("age")) null else p.optInt("age")
+        )
+    }
+
+    suspend fun uploadAvatar(bytes: ByteArray, mimeType: String): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) throw IOException("Фото должно быть не больше 5 МБ")
+        val ext = when (mimeType.lowercase()) {
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            else -> "jpg"
+        }
+        val path = "$uid/avatar-${UUID.randomUUID()}.$ext"
+        val request = Request.Builder()
+            .url("$BASE_URL/storage/v1/object/nexura-avatars/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
+            .header("Content-Type", mimeType)
+            .header("x-upsert", "true")
+            .post(bytes.toRequestBody(mimeType.toMediaType()))
+            .build()
+        client.newCall(request).execute().use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить фото профиля (HTTP ${it.code})")
+        }
+        return "$BASE_URL/storage/v1/object/public/nexura-avatars/$path"
     }
 
     suspend fun matchContacts(phoneNumbers: List<String>): List<ContactMatch> {
@@ -347,9 +1468,21 @@ class NexuraApi(private val store: SessionStore) {
     }
 
     suspend fun createGroup(title: String, memberIds: List<String>): String {
+        val cleanTitle = title.trim()
+        if (cleanTitle.length !in 2..60) {
+            throw IOException("Название группы должно содержать от 2 до 60 символов")
+        }
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val normalizedMembers = memberIds
+            .map { normalizeUuid(it) }
+            .filterNot { it == uid }
+            .distinct()
+        if (normalizedMembers.size !in 1..49) {
+            throw IOException("Выберите от 1 до 49 других участников")
+        }
         val ids = JSONArray()
-        memberIds.distinct().forEach { ids.put(normalizeUuid(it)) }
-        val payload = JSONObject().put("p_title", title.trim()).put("p_member_ids", ids)
+        normalizedMembers.forEach { ids.put(it) }
+        val payload = JSONObject().put("p_title", cleanTitle).put("p_member_ids", ids)
         return normalizeUuid(call("/rest/v1/rpc/create_group_conversation", "POST", payload.toString()))
     }
 

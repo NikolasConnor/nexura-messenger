@@ -1,0 +1,31 @@
+name: Nexura crypto core tests
+
+on:
+  push:
+    branches: [ security/e2ee-phase-2 ]
+    paths:
+      - "crypto-core/**"
+      - "crypto-jni/**"
+      - ".github/workflows/crypto-core-tests.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "crypto-core/**"
+      - "crypto-jni/**"
+      - ".github/workflows/crypto-core-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run crypto protocol tests
+        working-directory: crypto-core
+        run: cargo test
+      - name: Check Android JNI bridge on host
+        run: cargo check --manifest-path crypto-jni/Cargo.toml
