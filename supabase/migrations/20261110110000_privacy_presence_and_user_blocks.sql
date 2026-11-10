@@ -85,3 +85,5 @@ as $$
 $$;
 revoke all on function public.get_user_presence(uuid) from public, anon;
 grant execute on function public.get_user_presence(uuid) to authenticated;
+
+alter table public.conversation_members add column if not exists last_receipt_at timestamptz;
