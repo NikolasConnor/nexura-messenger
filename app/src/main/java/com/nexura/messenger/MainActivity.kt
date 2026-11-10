@@ -135,6 +135,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chats by remember { mutableStateOf(emptyList<ChatItem>()) }
     var selected by remember { mutableStateOf<ChatItem?>(null) }
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var messageReactions by remember { mutableStateOf(emptyMap<String, List<Pair<String, Int>>>()) }
+    var pinnedMessageId by remember { mutableStateOf<String?>(null) }
+    var canManagePins by remember { mutableStateOf(false) }
     var lastSyncedMessageTimestamp by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
@@ -300,6 +303,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         selected = chat
         messages = emptyList()
         lastSyncedMessageTimestamp = null
+        messageReactions = emptyMap()
+        pinnedMessageId = null
+        canManagePins = false
         replyTarget = null
         chatSearchOpen = false
         chatSearchQuery = ""
@@ -309,6 +315,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (selected?.id == chat.id) {
                     messages = loadedMessages
                     lastSyncedMessageTimestamp = loadedMessages.maxOfOrNull { it.createdAt } ?: "1970-01-01T00:00:00Z"
+                    messageReactions = api.messageReactions(chat.id)
+                    pinnedMessageId = api.pinnedMessage(chat.id)
+                    canManagePins = api.canManageConversation(chat.id)
                 }
                 api.markChatRead(chat.id)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
