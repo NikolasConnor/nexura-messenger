@@ -1424,7 +1424,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Text(profile.displayName, color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
                                     if (profile.username.isNotBlank()) Text("@${profile.username}", color = SecondaryText, fontSize = 13.sp)
                                     viewedPresence?.takeIf { it.isVisible }?.let { presence ->
-                                        Text(if (presence.isOnline) "● В сети" else if (presence.lastSeenAt != null) "Был(а) недавно" else "Не в сети",
+                                        Text(if (presence.isOnline) "● В сети" else if (presence.lastSeenAt != null) "Был(а) в ${messageTimeLabel(presence.lastSeenAt)}" else "Не в сети",
                                             color = if (presence.isOnline) Success else SecondaryText, fontSize = 12.sp,
                                             modifier = Modifier.padding(top = 4.dp))
                                     }
