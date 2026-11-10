@@ -997,7 +997,14 @@ class NexuraApi(private val store: SessionStore) {
         replyToId: String? = null
     ) {
         if (newText.isBlank()) throw IOException("Сообщение не может быть пустым")
-        val wasPinned = pinnedMessage(chatId) == normalizeUuid(oldMessageId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val normalizedOldId = normalizeUuid(oldMessageId)
+        val oldRows = JSONArray(call(
+            "/rest/v1/messages?select=created_at&id=eq.$normalizedOldId&conversation_id=eq.${normalizeUuid(chatId)}&sender_id=eq.$uid&limit=1"
+        ))
+        if (oldRows.length() != 1) throw IOException("Сообщение не найдено или больше недоступно для изменения")
+        val originalCreatedAt = oldRows.getJSONObject(0).optString("created_at")
+        val wasPinned = pinnedMessage(chatId) == normalizedOldId
         if (wasPinned && !canManageConversation(chatId)) {
             throw IOException("Закреплённое сообщение может изменить только администратор чата")
         }
@@ -1010,7 +1017,10 @@ class NexuraApi(private val store: SessionStore) {
         call(
             "/rest/v1/messages?id=eq.${normalizeUuid(replacementId)}",
             "PATCH",
-            JSONObject().put("edited_at", java.time.Instant.now().toString()).toString(),
+            JSONObject()
+                .put("edited_at", java.time.Instant.now().toString())
+                .put("created_at", originalCreatedAt)
+                .toString(),
             prefer = "return=minimal"
         )
         if (wasPinned) setPinnedMessage(chatId, replacementId)
