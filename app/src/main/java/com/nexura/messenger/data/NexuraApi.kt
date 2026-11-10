@@ -978,9 +978,16 @@ class NexuraApi(private val store: SessionStore) {
 
     suspend fun updatePresenceHeartbeat() {
         val uid = store.userId ?: return
-        call("/rest/v1/user_presence?on_conflict=user_id", "POST",
-            JSONObject().put("user_id", uid).put("last_seen_at", java.time.Instant.now().toString()).toString(),
-            prefer = "resolution=merge-duplicates,return=minimal")
+        val now = java.time.Instant.now().toString()
+        val existing = JSONArray(call("/rest/v1/user_presence?select=user_id&user_id=eq.$uid&limit=1"))
+        if (existing.length() > 0) {
+            call("/rest/v1/user_presence?user_id=eq.$uid", "PATCH",
+                JSONObject().put("last_seen_at", now).toString(), prefer = "return=minimal")
+        } else {
+            call("/rest/v1/user_presence", "POST",
+                JSONObject().put("user_id", uid).put("last_seen_at", now).toString(),
+                prefer = "return=minimal")
+        }
     }
 
     suspend fun userPresence(userId: String): UserPresence {
