@@ -1436,7 +1436,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             )
                                                         }
                                                         if (mine && msg.messageType == "text") {
-                                                            if (!msg.securityWarning) {
+                                                            if (!msg.securityWarning && (pinnedMessageId != msg.id || canManagePins)) {
                                                                 DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
                                                             }
                                                             DropdownMenuItem(
