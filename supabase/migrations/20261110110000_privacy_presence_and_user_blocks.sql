@@ -118,3 +118,23 @@ as $$
 $$;
 revoke all on function public.get_user_presence(uuid) from public, anon;
 grant execute on function public.get_user_presence(uuid) to authenticated;
+
+create or replace function public.update_my_privacy_settings(
+ p_show_online_status boolean,
+ p_read_receipts_enabled boolean
+)
+returns void language plpgsql security invoker
+set search_path = pg_catalog, public, auth
+as $$
+declare v_uid uuid := auth.uid();
+begin
+ if v_uid is null then raise exception 'Authentication required'; end if;
+ insert into public.user_presence(user_id, show_online_status, last_seen_at)
+ values (v_uid, p_show_online_status, now())
+ on conflict (user_id) do update
+ set show_online_status = excluded.show_online_status, last_seen_at = now();
+ update public.profiles set read_receipts_enabled = p_read_receipts_enabled where id = v_uid;
+end;
+$$;
+revoke all on function public.update_my_privacy_settings(boolean, boolean) from public, anon;
+grant execute on function public.update_my_privacy_settings(boolean, boolean) to authenticated;
