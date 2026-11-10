@@ -1791,6 +1791,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
                                                         Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
                                                     }
+                                                } else if (msg.mediaKind == "file") {
+                                                    Row(
+                                                        Modifier.width(230.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
+                                                            .clickable {
+                                                                try {
+                                                                    val local = File(mediaUri.path ?: throw IOException("Файл недоступен"))
+                                                                    val contentUri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", local)
+                                                                    context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, msg.mediaMimeType ?: "*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                                                                } catch (_: Exception) { notice = "Не удалось открыть документ. Установите приложение для этого формата." }
+                                                            }.padding(12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(Icons.Default.Description, null, tint = Accent, modifier = Modifier.size(32.dp))
+                                                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                                            Text(msg.mediaFileName ?: "Документ", color = MainText, fontWeight = FontWeight.Medium, maxLines = 1)
+                                                            Text(msg.mediaMimeType ?: "Файл · E2EE", color = SecondaryText, fontSize = 11.sp, maxLines = 1)
+                                                        }
+                                                    }
+                                                    msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
+                                                        Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+                                                    }
                                                 } else {
                                                     AsyncImage(
                                                         model = mediaUri,
@@ -1970,12 +1991,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         tint = if (recordingVoice) Danger else Accent)
                                 }
                                 IconButton(
-                                    onClick = { mediaPicker.launch(arrayOf("image/*", "video/*")) },
+                                    onClick = { mediaPicker.launch(arrayOf("*/*")) },
                                     enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
-                                    else Icon(Icons.Default.Add, "Прикрепить фото или видео", tint = Accent)
+                                    else Icon(Icons.Default.Add, "Прикрепить файл", tint = Accent)
                                 }
                                 OutlinedTextField(
                                     value = draft, onValueChange = {
