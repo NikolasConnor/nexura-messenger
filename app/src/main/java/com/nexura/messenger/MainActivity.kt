@@ -1425,6 +1425,32 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }
                                                 }
                                             }
+                                            val reactionsForMessage = messageReactions[msg.id].orEmpty()
+                                            if (reactionsForMessage.isNotEmpty()) {
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(top = 6.dp),
+                                                    horizontalArrangement = Arrangement.Start,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    reactionsForMessage.forEach { (emoji, count) ->
+                                                        Row(
+                                                            Modifier.padding(end = 5.dp).clip(RoundedCornerShape(14.dp))
+                                                                .background(Surface2).clickable {
+                                                                    scope.launch {
+                                                                        try {
+                                                                            api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                            messageReactions = api.messageReactions(chat.id)
+                                                                        } catch (e: Exception) { error = e.message ?: "Не удалось изменить реакцию" }
+                                                                    }
+                                                                }.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(emoji, fontSize = 12.sp)
+                                                            Text(" $count", color = MainText, fontSize = 11.sp)
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
