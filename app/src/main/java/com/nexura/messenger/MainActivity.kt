@@ -1101,7 +1101,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             .padding(start = 12.dp, end = 7.dp, top = 11.dp, bottom = 11.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        if (chat.kind == "group") GroupAvatar() else Avatar(chat.title, chat.avatar)
+                                        ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0)
                                         Column(Modifier.weight(1f).padding(start = 12.dp, end = 5.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
@@ -2221,6 +2221,59 @@ private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = MainText,
     unfocusedTextColor = MainText
 )
+
+@Composable
+private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean) {
+    val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+    val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
+        ?: name.takeIf { it in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙") }
+    Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(52.dp)
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(Accent.copy(alpha = 0.95f), Accent2.copy(alpha = 0.72f))))
+                .padding(2.dp)
+                .clip(CircleShape)
+                .background(Surface1)
+                .padding(2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            when {
+                isGroup -> Box(
+                    Modifier.fillMaxSize().clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Surface2, Accent.copy(alpha = 0.24f)))),
+                    contentAlignment = Alignment.Center
+                ) { Text("👥", fontSize = 23.sp) }
+                imageUrl != null -> AsyncImage(
+                    model = imageUrl,
+                    contentDescription = "Аватар $name",
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+                !emoji.isNullOrBlank() -> Box(
+                    Modifier.fillMaxSize().clip(CircleShape).background(Surface2),
+                    contentAlignment = Alignment.Center
+                ) { Text(emoji, fontSize = 23.sp) }
+                else -> Box(
+                    Modifier.fillMaxSize().clip(CircleShape).background(Surface2),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(name.trim().firstOrNull()?.uppercase() ?: "N", color = MainText, fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                }
+            }
+        }
+        if (hasUnread) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).size(12.dp)
+                    .clip(CircleShape)
+                    .background(Accent)
+                    .padding(2.dp)
+                    .clip(CircleShape)
+                    .background(Bg)
+            )
+        }
+    }
+}
 
 @Composable
 private fun Avatar(name: String, avatar: String? = null) {
