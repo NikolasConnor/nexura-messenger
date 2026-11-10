@@ -51,7 +51,7 @@ object E2eeMediaCrypto {
             ?: if (localFile?.extension?.lowercase() == "m4a" || localFile?.extension?.lowercase() == "aac") "audio/mp4"
             else throw IOException("Не удалось определить формат файла")
         val isImage = mime.startsWith("image/")
-        val isAudio = mime.startsWith("audio/")
+        val isAudio = mime in setOf("audio/mp4", "audio/aac", "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/3gpp")
         val isVideo = mime.startsWith("video/") && mime in setOf("video/mp4", "video/quicktime", "video/webm")
         val isDocument = mime in setOf(
             "application/pdf", "text/plain", "application/rtf",
@@ -246,7 +246,7 @@ object E2eeMediaCrypto {
         require(path.matches(Regex("^$uuid/$uuid/$uuid\\.enc$")))
         val allowedMime = mime in setOf(
             "image/jpeg", "image/png", "image/webp",
-            "video/mp4", "video/quicktime", "video/webm", "audio/mp4",
+            "video/mp4", "video/quicktime", "video/webm", "audio/mp4", "audio/aac", "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/3gpp",
             "application/pdf", "text/plain", "application/rtf",
             "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
