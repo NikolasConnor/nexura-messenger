@@ -152,6 +152,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
     var messageReactions by remember { mutableStateOf(emptyMap<String, List<Pair<String, Int>>>()) }
     var pinnedMessageId by remember { mutableStateOf<String?>(null) }
+    var peerReadReceiptAt by remember { mutableStateOf<String?>(null) }
     var canManagePins by remember { mutableStateOf(false) }
     var lastSyncedMessageTimestamp by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
@@ -429,6 +430,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     canManagePins = api.canManageConversation(chat.id)
                 }
                 api.markChatRead(chat.id, readReceiptsEnabled)
+                peerReadReceiptAt = api.peerReadReceiptAt(chat.id, chat.peerUserId)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
             } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
         }
@@ -564,6 +566,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     if (currentChat != null) {
                         val lastTimestamp = lastSyncedMessageTimestamp
                         val latest = api.messages(currentChat.id, e2eeClient, lastTimestamp)
+                        if (currentChat.kind == "direct") peerReadReceiptAt = api.peerReadReceiptAt(currentChat.id, currentChat.peerUserId)
                         if (selected?.id == currentChat.id && latest.isNotEmpty()) {
                             messages = (messages + latest).distinctBy { it.id }.sortedBy { it.createdAt }
                             lastSyncedMessageTimestamp = maxOf(
@@ -1663,6 +1666,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 ) {
                                     items(visibleMessages, key = { it.id }) { msg ->
                                     val mine = msg.senderId == store.userId
+                                    val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
                                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                                         Column(
                                             Modifier.widthIn(max = 310.dp).clip(RoundedCornerShape(
@@ -1743,6 +1747,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             ) {
                                                 if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 10.sp)
                                                 Text(messageTimeLabel(msg.createdAt), color = Color(0xFFB7C4D9), fontSize = 10.sp)
+                                                if (mine && chat.kind == "direct") Text(if (isRead) "✓✓" else "✓", color = if (isRead) Accent else Color(0xFFB7C4D9), fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
                                                 Box {
                                                     IconButton(
                                                         onClick = { openMessageMenu = if (openMessageMenu == msg.id) null else msg.id },
