@@ -1320,7 +1320,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                         notice = "Не найдено приложение для открытия файла или файл недоступен"
                                                                     }
                                                                 }
-                                                                else -> if (linkUrl != null) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl))) }
+                                                                else -> if (item.messageType == "file" && item.content.startsWith("http")) {
+                                                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(item.content))) }
+                                                                } else if (linkUrl != null) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl))) }
                                                             }
                                                         }.padding(10.dp),
                                                     verticalAlignment = Alignment.CenterVertically
@@ -1330,10 +1332,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         "video" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black), contentAlignment = Alignment.Center) { Icon(Icons.Default.PlayArrow, "Видео", tint = Color.White) }
                                                         "audio" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Mic, "Голосовое", tint = Accent) }
                                                         "file" -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Description, "Документ", tint = Accent) }
-                                                        else -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) { Icon(Icons.Default.Link, "Ссылка", tint = Accent) }
+                                                        else -> Box(Modifier.size(58.dp).clip(RoundedCornerShape(8.dp)).background(Surface1), contentAlignment = Alignment.Center) {
+                                                            Icon(if (item.messageType == "file") Icons.Default.Description else Icons.Default.Link, if (item.messageType == "file") "Документ" else "Ссылка", tint = Accent)
+                                                        }
                                                     }
                                                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                                        Text(when(item.mediaKind) { "audio" -> "Голосовое сообщение"; "video" -> "Видео"; "image" -> "Фотография"; "file" -> item.mediaFileName ?: "Документ"; else -> "Ссылка" }, color = MainText, fontWeight = FontWeight.Medium, maxLines = 1)
+                                                        Text(when(item.mediaKind) { "audio" -> "Голосовое сообщение"; "video" -> "Видео"; "image" -> "Фотография"; "file" -> item.mediaFileName ?: "Документ"; else -> if (item.messageType == "file") "Документ" else "Ссылка" }, color = MainText, fontWeight = FontWeight.Medium, maxLines = 1)
                                                         Text(linkUrl ?: item.mediaCaption ?: messageTimeLabel(item.createdAt), color = SecondaryText, fontSize = 12.sp, maxLines = 2)
                                                     }
                                                     IconButton(onClick = {
