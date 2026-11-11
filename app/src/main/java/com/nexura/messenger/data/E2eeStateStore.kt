@@ -30,6 +30,7 @@ class E2eeStateStore(context: Context, userNamespace: String) {
     @Volatile private var cachedKey: SecretKey? = null
     private val keyAlias: String
     private val preferences: android.content.SharedPreferences
+    private val userNamespace = userNamespace
 
     init {
         require(userNamespace.isNotBlank()) { "userNamespace must not be blank" }
@@ -58,7 +59,8 @@ class E2eeStateStore(context: Context, userNamespace: String) {
             Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
             Base64.encodeToString(encrypted, Base64.NO_WRAP)
 
-        check(preferences.edit().putString(storageKey(sessionId), encoded).commit()) {
+        val key = storageKey(sessionId)
+        check(preferences.edit().putString(key, encoded).putString(idKey(key), sessionId).commit()) {
             "Unable to persist encrypted E2EE state"
         }
     }
@@ -83,7 +85,9 @@ class E2eeStateStore(context: Context, userNamespace: String) {
             val encoded = VERSION + ":" +
                 Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
                 Base64.encodeToString(encrypted, Base64.NO_WRAP)
-            editor.putString(storageKey(sessionId), encoded)
+            val key = storageKey(sessionId)
+            editor.putString(key, encoded)
+            editor.putString(idKey(key), sessionId)
         }
         check(editor.commit()) { "Unable to persist encrypted E2EE state batch" }
     }
@@ -115,13 +119,21 @@ class E2eeStateStore(context: Context, userNamespace: String) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
         cipher.updateAAD(aad(sessionId))
-        return cipher.doFinal(ciphertext)
+        val plaintext = cipher.doFinal(ciphertext)
+        val key = storageKey(sessionId)
+        if (preferences.getString(idKey(key), null) == null) {
+            check(preferences.edit().putString(idKey(key), sessionId).commit()) {
+                "Unable to index legacy E2EE state"
+            }
+        }
+        return plaintext
     }
 
     @Synchronized
     fun delete(sessionId: String) {
         require(sessionId.isNotBlank()) { "sessionId must not be blank" }
-        check(preferences.edit().remove(storageKey(sessionId)).commit()) {
+        val key = storageKey(sessionId)
+        check(preferences.edit().remove(key).remove(idKey(key)).commit()) {
             "Unable to delete encrypted E2EE state"
         }
     }
@@ -135,6 +147,63 @@ class E2eeStateStore(context: Context, userNamespace: String) {
         if (keyStore.containsAlias(keyAlias)) keyStore.deleteEntry(keyAlias)
         cachedKey = null
     }
+
+
+    /**
+     * Exports every known state. The caller MUST encrypt the returned snapshot
+     * before uploading it. Fail closed rather than silently omit a ratchet.
+     */
+    @Synchronized
+    @Throws(GeneralSecurityException::class)
+    fun exportBackupSnapshot(): ByteArray {
+        val stateKeys = preferences.all.keys.filter { it.startsWith("state_") }
+        val states = org.json.JSONArray()
+        var unmapped = 0
+        for (key in stateKeys) {
+            val sessionId = preferences.getString(idKey(key), null)
+            if (sessionId.isNullOrBlank()) { unmapped++; continue }
+            val encoded = preferences.getString(key, null) ?: continue
+            val parts = encoded.split(":", limit = 3)
+            if (parts.size != 3 || parts[0] != VERSION) throw GeneralSecurityException("Unsupported encrypted E2EE state format")
+            val iv = Base64.decode(parts[1], Base64.NO_WRAP)
+            val ciphertext = Base64.decode(parts[2], Base64.NO_WRAP)
+            if (iv.size != GCM_IV_BYTES || ciphertext.size < GCM_TAG_BITS / 8) throw GeneralSecurityException("Invalid encrypted E2EE state length")
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.updateAAD(aad(sessionId))
+            val plaintext = cipher.doFinal(ciphertext)
+            states.put(org.json.JSONObject().put("id", sessionId).put("value", Base64.encodeToString(plaintext, Base64.NO_WRAP)))
+        }
+        if (unmapped > 0) throw IllegalStateException("Нельзя создать полную копию: $unmapped старых записей ещё не проиндексированы. Откройте старые переписки на этом устройстве и повторите.")
+        return org.json.JSONObject().put("format", 1).put("user", userNamespace).put("states", states)
+            .toString().toByteArray(Charsets.UTF_8)
+    }
+
+    @Synchronized
+    @Throws(GeneralSecurityException::class)
+    fun restoreBackupSnapshot(snapshot: ByteArray) {
+        require(snapshot.isNotEmpty() && snapshot.size <= 12 * 1024 * 1024) { "Invalid E2EE backup snapshot size" }
+        val json = org.json.JSONObject(String(snapshot, Charsets.UTF_8))
+        require(json.optInt("format", -1) == 1 && json.optString("user") == userNamespace) {
+            "Резервная копия относится к другому аккаунту или версии"
+        }
+        val rows = json.getJSONArray("states")
+        require(rows.length() in 1..10000) { "Резервная копия пуста или слишком велика" }
+        val restored = linkedMapOf<String, ByteArray>()
+        for (index in 0 until rows.length()) {
+            val row = rows.getJSONObject(index)
+            val id = row.getString("id")
+            require(id.isNotBlank() && !restored.containsKey(id)) { "Duplicate E2EE backup state" }
+            restored[id] = Base64.decode(row.getString("value"), Base64.NO_WRAP)
+        }
+        restored.entries.chunked(100).forEach { batch -> saveBatch(batch.associate { it.key to it.value }) }
+    }
+
+    @Synchronized
+    fun hasLocalDevice(): Boolean =
+        load("olm-device-account") != null && load("olm-public-device-bundle") != null
+
+    private fun idKey(storageKey: String): String = "id_$storageKey"
 
     private fun getOrCreateKey(): SecretKey {
         cachedKey?.let { return it }
