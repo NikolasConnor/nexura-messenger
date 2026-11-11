@@ -185,7 +185,7 @@ class E2eeStateStore(context: Context, userNamespace: String) {
     @Synchronized
     @Throws(GeneralSecurityException::class)
     fun restoreBackupSnapshot(snapshot: ByteArray) {
-        require(snapshot.isNotEmpty() && snapshot.size <= 12 * 1024 * 1024) { "Invalid E2EE backup snapshot size" }
+        require(snapshot.isNotEmpty() && snapshot.size <= 10 * 1024 * 1024) { "Invalid E2EE backup snapshot size" }
         val json = org.json.JSONObject(String(snapshot, Charsets.UTF_8))
         require(json.optInt("format", -1) == 1 && json.optString("user") == userNamespace) {
             "Резервная копия относится к другому аккаунту или версии"
