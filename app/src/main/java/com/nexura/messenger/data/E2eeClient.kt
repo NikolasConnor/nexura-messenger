@@ -171,6 +171,7 @@ class E2eeClient(context: Context, userId: String) {
                 .put("ciphertext", ciphertext)
                 .toString().toByteArray(StandardCharsets.UTF_8)
         ))
+        invalidateNativeSession(sessionKey(conversationId))
         return ciphertext
     }
 
@@ -193,6 +194,7 @@ class E2eeClient(context: Context, userId: String) {
             states[messageCacheKey(conversationId, messageId)] = result[2]
         }
         store.saveBatch(states)
+        invalidateNativeSession(sessionKey(conversationId))
         return result[2]
     }
 
@@ -232,6 +234,7 @@ class E2eeClient(context: Context, userId: String) {
                 .put("kind", E2eeMessageEnvelope.Kind.PRE_KEY.wireValue)
                 .put("ciphertext", ciphertext).toString().toByteArray(StandardCharsets.UTF_8)
         ))
+        invalidateNativeSession(key)
         return ciphertext
     }
 
@@ -252,6 +255,7 @@ class E2eeClient(context: Context, userId: String) {
             groupSessionKey(conversationId, peerUserId, peerDeviceId) to result[1],
             messageCacheKey(conversationId, messageId) to result[2]
         ))
+        invalidateNativeSession(groupSessionKey(conversationId, peerUserId, peerDeviceId))
         return result[2]
     }
 
