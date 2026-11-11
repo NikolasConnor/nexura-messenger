@@ -121,7 +121,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showChatFilter by remember { mutableStateOf(false) }
     var openMessageMenu by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var sendingMessage by remember { mutableStateOf(false) }
     var sendingImage by remember { mutableStateOf(false) }
     var profileName by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
@@ -725,7 +724,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 10.sp)
                                                 if (mine) {
                                                     Spacer(Modifier.width(4.dp))
-                                                    Text(when (msg.deliveryStatus) { "pending" -> "◷"; "failed" -> "⚠"; else -> "✓" }, color = if (msg.deliveryStatus == "failed") Danger else Color(0xFFB7C4D9), fontSize = 11.sp)
+                                                    Text(
+                                                        when (msg.deliveryStatus) {
+                                                            "pending" -> "◷ Отправляется"
+                                                            "failed" -> "Не отправлено"
+                                                            else -> "✓"
+                                                        },
+                                                        color = if (msg.deliveryStatus == "failed") Danger else Color(0xFFB7C4D9),
+                                                        fontSize = 10.sp
+                                                    )
                                                 }
                                                 Box {
                                                     IconButton(
@@ -780,7 +787,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = { imagePicker.launch("image/*") },
-                                    enabled = !sendingImage && !sendingMessage,
+                                    enabled = !sendingImage,
                                     modifier = Modifier.size(44.dp)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
