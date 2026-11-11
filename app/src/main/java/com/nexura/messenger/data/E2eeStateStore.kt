@@ -177,7 +177,7 @@ class E2eeStateStore(context: Context, userNamespace: String) {
             val plaintext = cipher.doFinal(ciphertext)
             states.put(org.json.JSONObject().put("id", sessionId).put("value", Base64.encodeToString(plaintext, Base64.NO_WRAP)))
         }
-        if (unmapped > 0) throw IllegalStateException("Нельзя создать полную копию: $unmapped старых записей ещё не проиндексированы. Откройте старые переписки на этом устройстве и повторите.")
+        if (unmapped > 0) throw IllegalStateException("Нельзя создать полную копию: $unmapped старых записей ещё не проиндексированы. Откройте старые переписки и пролистайте их историю, затем повторите.")
         return org.json.JSONObject().put("format", 1).put("user", userNamespace).put("states", states)
             .toString().toByteArray(Charsets.UTF_8)
     }
@@ -199,7 +199,8 @@ class E2eeStateStore(context: Context, userNamespace: String) {
             require(id.isNotBlank() && !restored.containsKey(id)) { "Duplicate E2EE backup state" }
             restored[id] = Base64.decode(row.getString("value"), Base64.NO_WRAP)
         }
-        restored.entries.chunked(100).forEach { batch -> saveBatch(batch.associate { it.key to it.value }) }
+        // A single SharedPreferences commit prevents a partially restored ratchet set.
+        saveBatch(restored)
     }
 
     @Synchronized
