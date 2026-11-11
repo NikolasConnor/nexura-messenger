@@ -360,6 +360,7 @@ class E2eeClient(context: Context, userId: String) {
         val trusted = JSONObject()
             .put("curve25519", curve25519IdentityKey)
             .put("ed25519", ed25519IdentityKey)
+            .put("verification_method", "manual-fingerprint-v1")
             .toString()
             .toByteArray(StandardCharsets.UTF_8)
         store.save(trustedDeviceKey(remoteUserId, remoteDeviceId), trusted)
@@ -379,6 +380,9 @@ class E2eeClient(context: Context, userId: String) {
             ?: throw IllegalStateException("Сначала сверьте и подтвердите отпечаток устройства собеседника.")
         val identity = runCatching { JSONObject(String(saved, StandardCharsets.UTF_8)) }.getOrNull()
             ?: throw IllegalStateException("Сохранённая запись доверия повреждена")
+        if (identity.optString("verification_method") != "manual-fingerprint-v1") {
+            throw IllegalStateException("Это устройство было добавлено без ручной сверки. Подтвердите отпечаток заново.")
+        }
         if (identity.optString("curve25519") != curveKey || identity.optString("ed25519") != edKey) {
             throw IllegalStateException("Ключ устройства изменился. Сверьте новый отпечаток с собеседником.")
         }
@@ -394,7 +398,8 @@ class E2eeClient(context: Context, userId: String) {
         val saved = store.load(trustedDeviceKey(remoteUserId, remoteDeviceId)) ?: return false
         val identity = runCatching { JSONObject(String(saved, StandardCharsets.UTF_8)) }.getOrNull()
             ?: return false
-        return identity.optString("curve25519") == curve25519IdentityKey &&
+        return identity.optString("verification_method") == "manual-fingerprint-v1" &&
+            identity.optString("curve25519") == curve25519IdentityKey &&
             identity.optString("ed25519") == ed25519IdentityKey
     }
 
