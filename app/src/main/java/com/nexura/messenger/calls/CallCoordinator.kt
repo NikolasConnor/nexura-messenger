@@ -17,7 +17,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.UUID
@@ -202,69 +203,67 @@ class CallCoordinator(
         pendingRenderers.clear()
 
         roomEventsJob?.cancel()
-        roomEventsJob = scope.launch {
-            newRoom.events.collect(object : kotlinx.coroutines.flow.FlowCollector<RoomEvent> {
-                override suspend fun emit(event: RoomEvent) {
-                if (room !== newRoom || closed) return
-                when (event) {
-                    is RoomEvent.TrackSubscribed -> {
-                        if (event.participant.identity?.value == peerUserId) {
-                            val track = event.track as? VideoTrack
-                            if (track != null) publish((lastState ?: CallUiState()).copy(remoteVideoTrack = track))
-                        }
-                    }
-                    is RoomEvent.TrackUnsubscribed -> {
-                        val track = event.track as? VideoTrack
-                        if (track != null && lastState?.remoteVideoTrack === track) {
-                            publish((lastState ?: CallUiState()).copy(remoteVideoTrack = null))
-                        }
-                    }
-                    is RoomEvent.ParticipantConnected -> {
-                        if (event.participant.identity?.value == peerUserId &&
-                            event.participant.state == io.livekit.android.room.participant.Participant.State.ACTIVE) {
-                            markConnected()
-                        }
-                    }
-                    is RoomEvent.ParticipantStateChanged -> {
-                        if (event.participant.identity?.value == peerUserId &&
-                            event.newState == io.livekit.android.room.participant.Participant.State.ACTIVE) {
-                            markConnected()
-                        }
-                    }
-                    is RoomEvent.ParticipantDisconnected -> {
-                        if (event.participant.identity?.value == peerUserId && lastState?.active == true) {
-                            finish()
-                            publish(CallUiState(status = "Звонок завершён", error = "Собеседник отключился"))
-                        }
-                    }
-                    is RoomEvent.Reconnecting -> {
-                        publish((lastState ?: CallUiState()).copy(status = "Восстанавливаем связь…"))
-                    }
-                    is RoomEvent.Reconnected -> {
-                        if (newRoom.remoteParticipants.values.any {
-                it.identity?.value == peerUserId &&
-                    it.state == io.livekit.android.room.participant.Participant.State.ACTIVE
-            }) {
-                            markConnected()
-                        } else {
-                            publish((lastState ?: CallUiState()).copy(status = "Ожидаем собеседника…", connected = false))
-                        }
-                    }
-                    is RoomEvent.Disconnected -> {
-                        if (!endingRoom && lastState?.active == true) {
-                            failCall("Связь с LiveKit прервана", event.error?.message ?: "Соединение закрыто")
-                        }
-                    }
-                    is RoomEvent.FailedToConnect -> {
-                        if (lastState?.active == true) {
-                            failCall("Не удалось подключиться к LiveKit", event.error.message ?: "Ошибка соединения")
-                        }
-                    }
-                    else -> Unit
-                }
-                }
-            })
-        }
+        roomEventsJob = newRoom.events.onEach { event ->
+            if (room === newRoom && !closed) {
+                                when (event) {
+                                    is RoomEvent.TrackSubscribed -> {
+                                        if (event.participant.identity?.value == peerUserId) {
+                                            val track = event.track as? VideoTrack
+                                            if (track != null) publish((lastState ?: CallUiState()).copy(remoteVideoTrack = track))
+                                        }
+                                    }
+                                    is RoomEvent.TrackUnsubscribed -> {
+                                        val track = event.track as? VideoTrack
+                                        if (track != null && lastState?.remoteVideoTrack === track) {
+                                            publish((lastState ?: CallUiState()).copy(remoteVideoTrack = null))
+                                        }
+                                    }
+                                    is RoomEvent.ParticipantConnected -> {
+                                        if (event.participant.identity?.value == peerUserId &&
+                                            event.participant.state == io.livekit.android.room.participant.Participant.State.ACTIVE) {
+                                            markConnected()
+                                        }
+                                    }
+                                    is RoomEvent.ParticipantStateChanged -> {
+                                        if (event.participant.identity?.value == peerUserId &&
+                                            event.newState == io.livekit.android.room.participant.Participant.State.ACTIVE) {
+                                            markConnected()
+                                        }
+                                    }
+                                    is RoomEvent.ParticipantDisconnected -> {
+                                        if (event.participant.identity?.value == peerUserId && lastState?.active == true) {
+                                            finish()
+                                            publish(CallUiState(status = "Звонок завершён", error = "Собеседник отключился"))
+                                        }
+                                    }
+                                    is RoomEvent.Reconnecting -> {
+                                        publish((lastState ?: CallUiState()).copy(status = "Восстанавливаем связь…"))
+                                    }
+                                    is RoomEvent.Reconnected -> {
+                                        if (newRoom.remoteParticipants.values.any {
+                                it.identity?.value == peerUserId &&
+                                    it.state == io.livekit.android.room.participant.Participant.State.ACTIVE
+                            }) {
+                                            markConnected()
+                                        } else {
+                                            publish((lastState ?: CallUiState()).copy(status = "Ожидаем собеседника…", connected = false))
+                                        }
+                                    }
+                                    is RoomEvent.Disconnected -> {
+                                        if (!endingRoom && lastState?.active == true) {
+                                            failCall("Связь с LiveKit прервана", event.error?.message ?: "Соединение закрыто")
+                                        }
+                                    }
+                                    is RoomEvent.FailedToConnect -> {
+                                        if (lastState?.active == true) {
+                                            failCall("Не удалось подключиться к LiveKit", event.error.message ?: "Ошибка соединения")
+                                        }
+                                    }
+                                    else -> Unit
+                                }
+                                }
+            }
+        }.launchIn(scope)
 
         newRoom.connect(credentials.serverUrl, credentials.token)
         if (callId != expectedId || closed) return
