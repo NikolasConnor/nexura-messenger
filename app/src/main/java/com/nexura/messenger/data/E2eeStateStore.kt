@@ -121,6 +121,18 @@ class E2eeStateStore(context: Context, userNamespace: String) {
         }
     }
 
+    /** Deletes related outbox records in one durable transaction. */
+    @Synchronized
+    fun deleteBatch(sessionIds: Collection<String>) {
+        require(sessionIds.isNotEmpty()) { "sessionIds must not be empty" }
+        val editor = preferences.edit()
+        for (sessionId in sessionIds) {
+            require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+            editor.remove(storageKey(sessionId))
+        }
+        check(editor.commit()) { "Unable to delete encrypted E2EE state batch" }
+    }
+
     /** Removes all saved protocol states and the Keystore wrapping key. */
     @Synchronized
     @Throws(GeneralSecurityException::class)
