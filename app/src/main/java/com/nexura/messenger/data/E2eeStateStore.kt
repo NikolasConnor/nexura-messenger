@@ -60,7 +60,8 @@ class E2eeStateStore(context: Context, userNamespace: String) {
             Base64.encodeToString(encrypted, Base64.NO_WRAP)
 
         val key = storageKey(sessionId)
-        check(preferences.edit().putString(key, encoded).putString(idKey(key), sessionId).commit()) {
+        check(preferences.edit().putString(key, encoded).putString(idKey(key), sessionId)
+            .putLong(REVISION_KEY, revision() + 1L).commit()) {
             "Unable to persist encrypted E2EE state"
         }
     }
@@ -89,6 +90,7 @@ class E2eeStateStore(context: Context, userNamespace: String) {
             editor.putString(key, encoded)
             editor.putString(idKey(key), sessionId)
         }
+        editor.putLong(REVISION_KEY, revision() + 1L)
         check(editor.commit()) { "Unable to persist encrypted E2EE state batch" }
     }
 
@@ -133,7 +135,8 @@ class E2eeStateStore(context: Context, userNamespace: String) {
     fun delete(sessionId: String) {
         require(sessionId.isNotBlank()) { "sessionId must not be blank" }
         val key = storageKey(sessionId)
-        check(preferences.edit().remove(key).remove(idKey(key)).commit()) {
+        check(preferences.edit().remove(key).remove(idKey(key))
+            .putLong(REVISION_KEY, revision() + 1L).commit()) {
             "Unable to delete encrypted E2EE state"
         }
     }
@@ -200,6 +203,9 @@ class E2eeStateStore(context: Context, userNamespace: String) {
     }
 
     @Synchronized
+    fun revision(): Long = preferences.getLong(REVISION_KEY, 0L)
+
+    @Synchronized
     fun hasLocalDevice(): Boolean =
         load("olm-device-account") != null && load("olm-public-device-bundle") != null
 
@@ -246,5 +252,6 @@ class E2eeStateStore(context: Context, userNamespace: String) {
         const val AAD_PREFIX = "nexura-e2ee-state:v1:"
         const val GCM_IV_BYTES = 12
         const val GCM_TAG_BITS = 128
+        const val REVISION_KEY = "state_revision"
     }
 }
