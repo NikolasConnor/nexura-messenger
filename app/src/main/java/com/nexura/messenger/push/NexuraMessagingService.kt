@@ -98,13 +98,11 @@ class NexuraMessagingService : FirebaseMessagingService() {
             .setPriority(if (incomingCall) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_DEFAULT)
 
         if (incomingCall && conversationId != null && callId != null) {
-            val fullScreenIntent = callPendingIntent(baseUri, "show", notificationId + 1)
             val acceptIntent = callPendingIntent(baseUri, "accept", notificationId + 2)
             val declineIntent = callPendingIntent(baseUri, "decline", notificationId + 3)
             val caller = Person.Builder().setName("Входящий звонок").setImportant(true).build()
             builder
                 .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declineIntent, acceptIntent))
-                .setFullScreenIntent(fullScreenIntent, true)
                 .setOngoing(true)
                 .setTimeoutAfter(CALL_RING_TIMEOUT_MS)
                 .addAction(
