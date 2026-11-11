@@ -17,7 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.UUID
@@ -203,8 +203,7 @@ class CallCoordinator(
 
         roomEventsJob?.cancel()
         roomEventsJob = scope.launch {
-            newRoom.events.collect(object : FlowCollector<RoomEvent> {
-            override suspend fun emit(event: RoomEvent) {
+            newRoom.events.collect { event ->
                 if (room !== newRoom || closed) return
                 when (event) {
                     is RoomEvent.TrackSubscribed -> {
@@ -262,8 +261,7 @@ class CallCoordinator(
                     }
                     else -> Unit
                 }
-            }
-        })
+        }
 
         newRoom.connect(credentials.serverUrl, credentials.token)
         if (callId != expectedId || closed) return
