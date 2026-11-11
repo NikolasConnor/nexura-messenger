@@ -214,16 +214,25 @@ class NexuraApi(private val store: SessionStore) {
 
     suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val payload = JSONObject().put("conversation_id", chatId).put("sender_id", uid)
-            .put("message_type", "text").put("content", text)
+        val safeChatId = normalizeUuid(chatId)
+        val content = text.trim()
+        if (content.isEmpty()) throw IOException("Введите текст сообщения")
+        if (content.length > 20000) throw IOException("Сообщение слишком длинное. Максимум — 20 000 символов.")
+        val payload = JSONObject()
+            .put("conversation_id", safeChatId)
+            .put("sender_id", normalizeUuid(uid))
+            .put("message_type", "text")
+            .put("content", content)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
-        notifyChatPush(chatId, text)
+        notifyChatPush(safeChatId, content)
     }
 
     suspend fun markChatRead(chatId: String) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        call("/rest/v1/conversation_members?conversation_id=eq.$chatId&user_id=eq.$uid", "PATCH",
+        val safeChatId = normalizeUuid(chatId)
+        val safeUserId = normalizeUuid(uid)
+        call("/rest/v1/conversation_members?conversation_id=eq.$safeChatId&user_id=eq.$safeUserId", "PATCH",
             JSONObject().put("last_read_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
     }
@@ -263,7 +272,8 @@ class NexuraApi(private val store: SessionStore) {
         }
         if (bytes.size > 20 * 1024 * 1024) throw IOException("Максимальный размер изображения — 20 МБ")
         val extension = when (mimeType) { "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"; else -> "jpg" }
-        val path = "$chatId/${UUID.randomUUID()}.$extension"
+        val safeChatId = normalizeUuid(chatId)
+        val path = "$safeChatId/${UUID.randomUUID()}.$extension"
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
                 .url("$BASE_URL/storage/v1/object/chat-attachments/$path")
@@ -277,9 +287,9 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
         call("/rest/v1/messages", "POST",
-            JSONObject().put("conversation_id", chatId).put("sender_id", uid).put("message_type", "image").put("content", path).toString(),
+            JSONObject().put("conversation_id", safeChatId).put("sender_id", normalizeUuid(uid)).put("message_type", "image").put("content", path).toString(),
             prefer = "return=minimal")
-        notifyChatPush(chatId, "📷 Фото")
+        notifyChatPush(safeChatId, "📷 Фото")
     }
 
     suspend fun myProfile(): UserProfile {
