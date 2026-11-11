@@ -104,7 +104,7 @@ mod tests {
     use super::*;
     use nexura_crypto_core::{create_device_keys, start_outbound_session, pickle_session, unpickle_session};
 
-    fn sample_session() -> Session {
+    fn sample_session() -> Result<Session, String> {
         let (alice, _) = create_device_keys(0);
         let (_bob, bob_public) = create_device_keys(1);
         start_outbound_session(
@@ -112,7 +112,7 @@ mod tests {
             &bob_public.curve25519,
             &bob_public.one_time_keys[0].key,
             b"cache test",
-        ).unwrap().0
+        ).map(|result| result.0).map_err(|error| error.to_string())
     }
 
     #[test]
