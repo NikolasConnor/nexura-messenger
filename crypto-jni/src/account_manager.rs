@@ -29,6 +29,11 @@ impl AccountManager {
     }
     pub(crate) fn invalidate(&self, id: &str) -> Result<(), String> {
         let mut s = self.state.lock().map_err(|_| "account cache lock poisoned")?;
+        if let Some(account) = s.accounts.get(id) {
+            if Arc::strong_count(account) > 1 {
+                return Err("cannot invalidate an Olm account while it is in use".into());
+            }
+        }
         s.accounts.remove(id); s.recency.retain(|x| x != id); Ok(())
     }
     fn touch(q: &mut VecDeque<String>, id: &str) { q.retain(|x| x != id); q.push_back(id.to_owned()); }
@@ -42,6 +47,13 @@ mod tests {
         let again = cache.get_or_load("user-a|device-1", || panic!("unexpected restore")).unwrap();
         let b = cache.get_or_load("user-b|device-1", || Ok(Account::new())).unwrap();
         assert!(Arc::ptr_eq(&a, &again)); assert!(!Arc::ptr_eq(&a, &b));
+    }
+    #[test] fn invalidation_refuses_to_remove_an_account_in_use() {
+        let cache = AccountManager::new(2);
+        let active = cache.get_or_load("active", || Ok(Account::new())).unwrap();
+        assert!(cache.invalidate("active").is_err());
+        drop(active);
+        assert!(cache.invalidate("active").is_ok());
     }
     #[test] fn evicts_only_unreferenced_accounts() {
         let cache = AccountManager::new(1);
