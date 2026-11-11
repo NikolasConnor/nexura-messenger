@@ -90,6 +90,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
@@ -183,7 +185,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var openMessageMenu by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showTerminateOthersDialog by remember { mutableStateOf(false) }
-    var sendingMessage by remember { mutableStateOf(false) }
+    val messageDelivery = remember { mutableStateMapOf<String, String>() }
+    val failedMessageRetries = remember { mutableStateMapOf<String, Triple<ChatItem, String, String?>>() }
+    val messageSendMutex = remember { Mutex() }
     var sendingImage by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
@@ -226,8 +230,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
-    var pendingSecureMessageId by remember { mutableStateOf<String?>(null) }
-    var pendingSecureMessageText by remember { mutableStateOf<String?>(null) }
     var showCallDialog by remember { mutableStateOf(false) }
     var pendingCallAction by remember { mutableStateOf(authCallback?.getQueryParameter("action") ?: "show") }
     LaunchedEffect(selected?.id, store.userId) {
@@ -444,19 +446,32 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    fun dispatchSecureMessage(chat: ChatItem, messageId: String, text: String, replyToId: String?) {
+        messageDelivery[messageId] = "sending"
+        failedMessageRetries.remove(messageId)
+        scope.launch {
+            messageSendMutex.withLock {
+                try {
+                    val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
+                    if (chat.kind == "direct") {
+                        api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
+                    } else {
+                        api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+                    }
+                    messageDelivery[messageId] = "sent"
+                    failedMessageRetries.remove(messageId)
+                } catch (e: Exception) {
+                    messageDelivery[messageId] = "failed"
+                    failedMessageRetries[messageId] = Triple(chat, text, replyToId)
+                    error = e.message ?: "Не удалось отправить защищённое сообщение"
+                }
+            }
+        }
+    }
+
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
-        if (sendingMessage) return
-        if (pendingSecureMessageText != null && pendingSecureMessageText != text) {
-            error = "Предыдущее зашифрованное сообщение ещё не подтверждено сервером. Повторите отправку того же текста."
-            return
-        }
-        val messageId = pendingSecureMessageId ?: UUID.randomUUID().toString().also {
-            pendingSecureMessageId = it
-            pendingSecureMessageText = text
-        }
-        sendingMessage = true
-        val submittedReply = replyTarget
-        // Clear the composer immediately; restore the text only if delivery fails.
+        if (text.isBlank()) return
+        val messageId = UUID.randomUUID().toString()
         draft = ""
         chatDrafts[chat.id] = ""
         replyTarget = null
@@ -465,28 +480,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             "text", replyToId, encrypted = true, securityWarning = false
         )
         messages = (messages + optimistic).distinctBy { it.id }.sortedBy { it.createdAt }
-        scope.launch {
-            error = ""
-            try {
-                val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
-                if (chat.kind == "direct") {
-                    api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
-                } else {
-                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
-                }
-                pendingSecureMessageId = null
-                pendingSecureMessageText = null
-                // The message is already visible; successful persistence confirms it.
-            } catch (e: Exception) {
-                messages = messages.filterNot { it.id == messageId }
-                if (draft.isBlank()) draft = text
-                chatDrafts[chat.id] = draft
-                if (replyTarget == null) replyTarget = submittedReply
-                error = e.message ?: "Не удалось отправить защищённое сообщение"
-            } finally {
-                sendingMessage = false
-            }
-        }
+        dispatchSecureMessage(chat, messageId, text, replyToId)
     }
 
     LaunchedEffect(authCallback) {
@@ -2030,7 +2024,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             ) {
                                                 if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 10.sp)
                                                 Text(messageTimeLabel(msg.createdAt), color = Color(0xFFB7C4D9), fontSize = 10.sp)
-                                                if (mine && chat.kind == "direct") Text(if (isRead) "✓✓" else "✓", color = if (isRead) Accent else Color(0xFFB7C4D9), fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
+                                                if (mine) {
+                                                    when (messageDelivery[msg.id]) {
+                                                        "sending" -> Text("◷", color = Color(0xFFB7C4D9), fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp))
+                                                        "failed" -> Text(
+                                                            "Не отправлено · Повторить",
+                                                            color = Danger,
+                                                            fontSize = 10.sp,
+                                                            modifier = Modifier.padding(start = 5.dp).clickable {
+                                                                failedMessageRetries[msg.id]?.let { retry ->
+                                                                    dispatchSecureMessage(retry.first, msg.id, retry.second, retry.third)
+                                                                }
+                                                            }
+                                                        )
+                                                        else -> if (chat.kind == "direct") Text(
+                                                            if (isRead) "✓✓" else "✓",
+                                                            color = if (isRead) Accent else Color(0xFFB7C4D9),
+                                                            fontSize = 11.sp,
+                                                            modifier = Modifier.padding(start = 4.dp)
+                                                        )
+                                                    }
+                                                }
                                                 Box {
                                                     IconButton(
                                                         onClick = { openMessageMenu = if (openMessageMenu == msg.id) null else msg.id },
@@ -2205,7 +2219,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         val text = draft.trim()
                                         val media = pendingMediaUri
                                         if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
-                                        else if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
+                                        else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
                                     })
                                 )
                                 Spacer(Modifier.width(7.dp))
@@ -2214,12 +2228,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         val text = draft.trim()
                                         val media = pendingMediaUri
                                         if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
-                                        else if (text.isNotEmpty() && !sendingMessage) sendSecureMessage(chat, text, replyTarget?.id)
+                                        else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
                                     },
-                                    enabled = (draft.isNotBlank() || pendingMediaUri != null) && !sendingMessage && !sendingImage,
+                                    enabled = (draft.isNotBlank() || pendingMediaUri != null) && !sendingImage,
                                     modifier = Modifier.size(46.dp).background(if (draft.isNotBlank() || pendingMediaUri != null) Accent else Surface2, CircleShape)
                                 ) {
-                                    if (sendingMessage || sendingImage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
+                                    if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
                                     else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank() || pendingMediaUri != null) Bg else SecondaryText)
                                 }
                             }
