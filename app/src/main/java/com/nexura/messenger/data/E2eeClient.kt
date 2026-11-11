@@ -17,6 +17,7 @@ class E2eeClient(context: Context, userId: String) {
     private val nativeSessionNamespace = userId
 
     private fun nativeSessionId(key: String): String = "$nativeSessionNamespace|$key"
+    private fun nativeAccountId(): String = "$nativeSessionNamespace|${deviceId()}"
     private fun cachedEncrypt(key: String, pickle: ByteArray, plaintext: ByteArray): Array<ByteArray> {
         val id = nativeSessionId(key)
         return try { E2eeNative.nativeEncryptCached(id, pickle, plaintext) }
@@ -70,7 +71,7 @@ class E2eeClient(context: Context, userId: String) {
         val savedBundle = store.load(PUBLIC_BUNDLE_KEY)
             ?: error("E2EE public bundle is missing")
         val bundle = JSONObject(String(savedBundle, StandardCharsets.UTF_8))
-        val generated = E2eeNative.nativeGenerateOneTimeKeys(account, count)
+        val generated = E2eeNative.nativeGenerateOneTimeKeysCached(nativeAccountId(), account, count)
         require(generated.size == 2) { "Invalid native one-time-key result" }
 
         val newKeys = org.json.JSONArray(String(generated[1], StandardCharsets.UTF_8))
@@ -127,7 +128,7 @@ class E2eeClient(context: Context, userId: String) {
         val combined = linkedSetOf<String>()
         for (index in 0 until previous.length()) previous.optString(index).takeIf { it.isNotBlank() }?.let(combined::add)
         keyIds.forEach(combined::add)
-        val updatedAccount = E2eeNative.nativeMarkKeysPublished(account)
+        val updatedAccount = E2eeNative.nativeMarkKeysPublishedCached(nativeAccountId(), account)
         store.save(ACCOUNT_KEY, updatedAccount)
         store.save(PUBLISHED_KEY_IDS, org.json.JSONArray(combined.toList()).toString().toByteArray(StandardCharsets.UTF_8))
     }
@@ -151,8 +152,8 @@ class E2eeClient(context: Context, userId: String) {
     ): String {
         require(conversationId.isNotBlank()) { "conversationId must not be blank" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
-        val result = E2eeNative.nativeStartOutbound(
-            account,
+        val result = E2eeNative.nativeStartOutboundCached(
+            nativeAccountId(), account,
             recipientCurve25519,
             recipientEd25519,
             recipientOneTimeKey,
@@ -182,7 +183,7 @@ class E2eeClient(context: Context, userId: String) {
     ): ByteArray {
         require(conversationId.isNotBlank()) { "conversationId must not be blank" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
-        val result = E2eeNative.nativeAcceptInbound(account, senderCurve25519, preKeyEnvelope)
+        val result = E2eeNative.nativeAcceptInboundCached(nativeAccountId(), account, senderCurve25519, preKeyEnvelope)
         require(result.size == 3) { "Invalid native inbound-session result" }
         val states = linkedMapOf(
             ACCOUNT_KEY to result[0],
@@ -246,7 +247,7 @@ class E2eeClient(context: Context, userId: String) {
         messageId: String
     ): ByteArray {
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
-        val result = E2eeNative.nativeAcceptInbound(account, senderCurve25519, ciphertext)
+        val result = E2eeNative.nativeAcceptInboundCached(nativeAccountId(), account, senderCurve25519, ciphertext)
         require(result.size == 3) { "Invalid group inbound-session result" }
         store.saveBatch(mapOf(
             ACCOUNT_KEY to result[0],
@@ -509,6 +510,7 @@ class E2eeClient(context: Context, userId: String) {
     /** Permanently remove this user's local E2EE identity and all local sessions. */
     @Synchronized
     fun clearLocalIdentity() {
+        runCatching { E2eeNative.nativeInvalidateAccount(nativeAccountId()) }
         store.clearAll()
     }
 
