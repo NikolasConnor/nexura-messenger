@@ -457,10 +457,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             messageSendMutex.withLock {
                 try {
                     val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
-                    if (chat.kind == "direct") {
-                        api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
-                    } else {
-                        api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+                    // Olm/JNI encryption is CPU work; never run it on Compose's main thread.
+                    withContext(Dispatchers.Default) {
+                        if (chat.kind == "direct") {
+                            api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
+                        } else {
+                            api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+                        }
                     }
                     messageDelivery[messageId] = "sent"
                     failedMessageRetries.remove(messageId)
