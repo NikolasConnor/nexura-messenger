@@ -1789,8 +1789,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             val peerId = api.directPeerUserId(chat.id)
                                             val devices = api.activeE2eeDevices(peerId)
                                             if (devices.isEmpty()) throw IllegalStateException("У собеседника пока нет активных устройств Nexura.")
-                                            trustPeerId = peerId
-                                            trustCandidate = devices.first()
+                                            val ownUserId = store.userId ?: throw IllegalStateException("Сессия истекла")
+                                            val ownDeviceId = client.deviceId()
+                                            val ownOtherDevices = api.activeE2eeDevices(ownUserId)
+                                                .filterNot { it.deviceId == ownDeviceId }
+                                            val queue = (devices.map { peerId to it } + ownOtherDevices.map { ownUserId to it })
+                                                .filterNot { (userId, device) ->
+                                                    client.isRemoteDeviceTrusted(userId, device.deviceId, device.curve25519Key, device.ed25519Key)
+                                                }
+                                            if (queue.isEmpty()) {
+                                                notice = "Все устройства этого чата уже подтверждены"
+                                            } else {
+                                                groupTrustQueue = queue
+                                                trustPeerId = queue.first().first
+                                                trustCandidate = queue.first().second
+                                            }
                                         } else {
                                             val ownDeviceId = client.deviceId()
                                             val members = api.groupMemberIds(chat.id)
