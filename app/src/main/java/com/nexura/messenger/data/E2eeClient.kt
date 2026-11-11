@@ -16,6 +16,7 @@ class E2eeClient(context: Context, userId: String) {
     private val nativeSessionNamespace = userId
     // Fixed stripes serialize account mutation + durable pickle commit across E2eeClient instances.
     private val accountOperationLock = ACCOUNT_OPERATION_LOCKS[Math.floorMod(userId.hashCode(), ACCOUNT_OPERATION_LOCKS.size)]
+    @Volatile private var lastBackupSyncedRevision: Long = -1L
 
     private fun nativeSessionId(key: String): String = "$nativeSessionNamespace|$key"
     private fun nativeAccountId(): String = "$nativeSessionNamespace|${deviceId()}"
@@ -555,6 +556,53 @@ class E2eeClient(context: Context, userId: String) {
         }
     }
 
+
+    @Synchronized
+    fun hasLocalDevice(): Boolean = store.hasLocalDevice()
+
+    @Synchronized
+    fun hasRecoveryKey(): Boolean = store.load(RECOVERY_KEY) != null
+
+    @Synchronized
+    fun createRecoveryCode(): String {
+        val existing = store.load(RECOVERY_KEY)
+        if (existing != null) return String(existing, StandardCharsets.UTF_8)
+        val code = E2eeBackupCrypto.generateRecoveryCode()
+        store.save(RECOVERY_KEY, code.toByteArray(StandardCharsets.UTF_8))
+        return code
+    }
+
+    @Synchronized
+    fun recoveryCode(): String? =
+        store.load(RECOVERY_KEY)?.toString(StandardCharsets.UTF_8)
+
+    @Synchronized
+    fun createEncryptedBackup(): String {
+        val code = recoveryCode() ?: throw IllegalStateException("Ключ восстановления ещё не создан")
+        val snapshot = store.exportBackupSnapshot()
+        return E2eeBackupCrypto.encrypt(userNamespaceForBackup(), snapshot, code)
+    }
+
+    @Synchronized
+    fun restoreEncryptedBackup(envelope: String, recoveryCode: String) {
+        val snapshot = E2eeBackupCrypto.decrypt(userNamespaceForBackup(), envelope, recoveryCode)
+        store.restoreBackupSnapshot(snapshot)
+        store.save(RECOVERY_KEY, recoveryCode.trim().toByteArray(StandardCharsets.UTF_8))
+    }
+
+    @Synchronized
+    fun backupRevision(): Long = store.revision()
+
+    @Synchronized
+    fun markBackupSynced(revision: Long) {
+        lastBackupSyncedRevision = revision
+    }
+
+    @Synchronized
+    fun needsBackupSync(): Boolean = hasRecoveryKey() && backupRevision() != lastBackupSyncedRevision
+
+    private fun userNamespaceForBackup(): String = nativeSessionNamespace
+
     private fun sessionKey(conversationId: String): String = "olm-session:$conversationId"
     private fun messageCacheKey(conversationId: String, messageId: String): String =
         "message-cache:$conversationId:$messageId"
@@ -570,5 +618,6 @@ class E2eeClient(context: Context, userId: String) {
         const val ACCOUNT_KEY = "olm-device-account"
         const val PUBLIC_BUNDLE_KEY = "olm-public-device-bundle"
         const val PUBLISHED_KEY_IDS = "olm-published-one-time-key-ids"
+        const val RECOVERY_KEY = "cloud-backup-recovery-key"
     }
 }
