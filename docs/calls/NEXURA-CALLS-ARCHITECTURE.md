@@ -1,6 +1,6 @@
 # Nexura Calls — architecture and migration plan
 
-Status: LiveKit Cloud token service deployed to Supabase; Android media migration remains in progress.
+Status (2026-11-11): Android 1:1 audio/video path is wired to LiveKit Cloud in `livekit-cloud-android-studio`; GitHub Actions produced a successful debug APK at commit `ccc42ba3c03b6ef78432c98f4f2567eeb00b93a4`. This is a test build, not a production release. LiveKit media E2EE key distribution and two-device network acceptance tests are still outstanding.
 
 ## Goals
 
@@ -13,10 +13,11 @@ Status: LiveKit Cloud token service deployed to Supabase; Android media migratio
 
 ## What exists today (verified 2026-11-11)
 
-- Android uses the native WebRTC library (io.github.webrtc-sdk:android).
-- CallCoordinator owns call lifecycle and exchanges offer/answer/ICE.
-- CallSignalingClient uses private Supabase Realtime user topics for signaling.
-- NexuraCallEngine creates one WebRTC PeerConnection per call; current media path is peer-to-peer, not an SFU room.
+- `CallCoordinator` now owns the 1:1 call lifecycle and creates a LiveKit `Room` after the recipient accepts.
+- `NexuraApi.liveKitRoomCredentials` obtains a short-lived room token from the authenticated Supabase Edge Function.
+- `CallSignalingClient` uses private Supabase Realtime user topics for call-control messages (offer, answer, decline, busy, end); audio/video media is carried by LiveKit Cloud, not by this signaling socket.
+- `NexuraCallEngine` and the native WebRTC dependency remain in the repository as a rollback/reference path; they are not the active media transport in the LiveKit `CallCoordinator` path.
+- Android `Room.e2eeOptions` is not yet configured. LiveKit transport encryption is active, but Nexura call-media E2EE is not yet enabled.
 - Supabase project lyhzawblxcvpgpjrkspc provides Auth, Postgres, Edge Functions and FCM call-push integration.
 - Deployed Edge Functions include send-call-push and turn-credentials.
 - turn-credentials currently returns the legacy TURN endpoint 37.230.242.232:3478 and creates short-lived Coturn REST credentials from the server-side TURN_SHARED_SECRET. Treat this as legacy only; do not depend on it for the new system and do not expose or copy its secret.
@@ -79,11 +80,10 @@ The legacy home Coturn host is explicitly excluded. A new managed TURN service o
 1. Inventory (no production changes): inspect current Supabase functions/secrets and GitHub build configuration without revealing secret values; identify the existing TURN dependency and plan its replacement. No access to or dependency on the HP Pavilion g6 is required.
 2. Cloud staging: verify the LiveKit Cloud project URL, API key/secret and project region; check plan quotas. No production traffic yet.
 3. Control plane: deploy and verify the authenticated `livekit-token` Edge Function, which checks the Supabase user and direct-conversation membership before issuing a 10-minute room-scoped token.
-4. Android prototype: add the LiveKit Android SDK behind a transport interface and implement 1:1 audio.
-5. E2EE: integrate room media E2EE with Nexura's verified device-key exchange; fail closed if keys are unavailable.
-6. Video and background: add video, FCM incoming calls, foreground service, lock-screen notification actions and network handoff.
-7. Acceptance tests: two physical Android devices on different networks; Wi-Fi to cellular handoff; screen locked; app backgrounded; UDP blocked/TCP/TURN fallback; accept/decline/busy/timeout; reconnect; verify server cannot decrypt media.
-8. Cutover: enable for a small test group, monitor, then migrate the rest. Retain rollback to the existing P2P path until stability is demonstrated. Retire the legacy TURN endpoint only after the new route is proven and the app no longer requests its credentials.
+4. Android 1:1 LiveKit prototype: implemented in `CallCoordinator`; debug APK built at commit `ccc42ba3c03b6ef78432c98f4f2567eeb00b93a4`. The old P2P engine remains as rollback/reference code.
+5. E2EE: integrate LiveKit `E2EEOptions`/`BaseKeyProvider` with Nexura's verified Olm device-key exchange. Do not use a hard-coded, server-issued or unauthenticated shared key; fail closed if the remote device cannot be verified or a key cannot be securely delivered.
+6. Acceptance tests: two physical Android devices on different networks; Wi-Fi to cellular handoff; screen locked; app backgrounded; UDP blocked/TCP/TURN fallback; accept/decline/busy/timeout; reconnect; verify the SFU cannot decrypt media.
+7. Controlled cutover: enable for a small test group only after E2EE and acceptance tests pass. Retain rollback to the existing P2P path until stability is demonstrated. Retire the legacy TURN endpoint only after the new route is proven and the app no longer requests its credentials.
 
 ## Non-goals for the first release
 
@@ -95,3 +95,12 @@ The legacy home Coturn host is explicitly excluded. A new managed TURN service o
 ## Release gate
 
 No production cutover until two-device cross-network audio and video tests pass, E2EE key exchange is reviewed, Android background/lock-screen behavior is validated, and rollback is available.
+
+
+## Current test build
+
+- Branch: `livekit-cloud-android-studio`
+- Commit: `ccc42ba3c03b6ef78432c98f4f2567eeb00b93a4`
+- GitHub Actions run: [43066029611](https://github.com/NikolasConnor/nexura-messenger/actions/runs/43066029611) — successful debug build
+- Artifact: `nexura-debug-apk` (debug-signed; install for testing, not Play Store distribution)
+- Not yet verified on physical devices or against the user's LiveKit Cloud project credentials.
