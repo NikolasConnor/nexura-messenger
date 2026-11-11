@@ -13,6 +13,11 @@ internal object E2eeNative {
     external fun nativeCreateDevice(oneTimeKeyCount: Int): Array<ByteArray>
 
     external fun nativeGenerateOneTimeKeys(accountPickle: ByteArray, count: Int): Array<ByteArray>
+    external fun nativeGenerateOneTimeKeysCached(accountId: String, accountPickle: ByteArray, count: Int): Array<ByteArray>
+    external fun nativeMarkKeysPublishedCached(accountId: String, accountPickle: ByteArray): ByteArray
+    external fun nativeStartOutboundCached(accountId: String, accountPickle: ByteArray, recipientCurve25519: String, recipientEd25519: String, recipientOneTimeKey: String, recipientOneTimeKeySignature: String, plaintext: ByteArray): Array<ByteArray>
+    external fun nativeAcceptInboundCached(accountId: String, accountPickle: ByteArray, senderCurve25519: String, envelope: String): Array<ByteArray>
+    external fun nativeInvalidateAccount(accountId: String)
 
     external fun nativeMarkKeysPublished(accountPickle: ByteArray): ByteArray
 
