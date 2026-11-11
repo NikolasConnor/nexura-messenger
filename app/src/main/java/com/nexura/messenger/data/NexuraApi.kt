@@ -367,7 +367,7 @@ class NexuraApi(private val store: SessionStore) {
                             throw IOException("Версия протокола устройства не поддерживается")
                         }
                         if (curve != envelope.senderCurve25519) throw IOException("Идентичность отправителя не совпадает")
-                        client.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, curve, ed)
+                        client.requireRemoteDeviceTrusted(senderId, envelope.senderDeviceId, curve, ed)
                         val cached = client.cachedMessage(chatId, id)
                         val plaintext = cached ?: when (envelope.kind) {
                             E2eeMessageEnvelope.Kind.PRE_KEY -> client.acceptDirectSession(
@@ -661,7 +661,7 @@ class NexuraApi(private val store: SessionStore) {
                 if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
                     throw IOException("Устройство участника использует неподдерживаемый протокол")
                 }
-                e2ee.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
+                e2ee.requireRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
                 val pending = e2ee.pendingGroupEnvelope(chatId, messageId, memberId, device.deviceId)
                 if (pending != null) {
                     val cached = e2ee.cachedMessage(chatId, messageId)
@@ -709,7 +709,7 @@ class NexuraApi(private val store: SessionStore) {
             val sentDevices = recipients.filter { it.userId == memberId }
             if (currentDevices.map { it.deviceId }.toSet() != sentDevices.map { it.deviceId }.toSet() ||
                 currentDevices.any { device ->
-                    runCatching { e2ee.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key) }.isFailure
+                    runCatching { e2ee.requireRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key) }.isFailure
                 }) {
                 throw IOException("Список устройств или ключи участника изменились во время отправки. Повторите отправку.")
             }
@@ -775,7 +775,7 @@ class NexuraApi(private val store: SessionStore) {
             return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
                 ?: throw IOException("Локальная копия группового сообщения недоступна")
         }
-        e2ee.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, sender.optString("curve25519_key"), sender.optString("ed25519_key"))
+        e2ee.requireRemoteDeviceTrusted(senderId, envelope.senderDeviceId, sender.optString("curve25519_key"), sender.optString("ed25519_key"))
         val recipient = envelope.recipients.singleOrNull {
             it.userId == uid && it.deviceId == myDeviceId
         } ?: throw IOException("Это групповое сообщение не адресовано данному устройству")
@@ -880,7 +880,7 @@ class NexuraApi(private val store: SessionStore) {
             if (device.protocol != "olm-v1" || device.bundleVersion != 1) {
                 throw IOException("Одно из устройств собеседника использует неподдерживаемый протокол")
             }
-            e2ee.trustRemoteDeviceOnFirstUse(device.userId, device.deviceId, device.curve25519Key, device.ed25519Key)
+            e2ee.requireRemoteDeviceTrusted(device.userId, device.deviceId, device.curve25519Key, device.ed25519Key)
             val saved = e2ee.pendingGroupEnvelope(chatId, messageId, device.userId, device.deviceId)
             if (saved != null) {
                 val cached = e2ee.cachedMessage(chatId, messageId)
