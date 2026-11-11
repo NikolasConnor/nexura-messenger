@@ -33,8 +33,10 @@ class E2eeClient(context: Context, userId: String) {
             oneTimeKeys.getJSONObject(index).put("key_id", UUID.randomUUID().toString())
         }
         val publicBundleBytes = publicBundle.toString().toByteArray(StandardCharsets.UTF_8)
-        store.save(ACCOUNT_KEY, result[0])
-        store.save(PUBLIC_BUNDLE_KEY, publicBundleBytes)
+        store.saveBatch(mapOf(
+            ACCOUNT_KEY to result[0],
+            PUBLIC_BUNDLE_KEY to publicBundleBytes
+        ))
         return String(publicBundleBytes, StandardCharsets.UTF_8)
     }
 
@@ -65,8 +67,10 @@ class E2eeClient(context: Context, userId: String) {
 
         // Persist the account and public bundle before any network request. A
         // failed upload can safely be retried with the same stable key IDs.
-        store.save(ACCOUNT_KEY, generated[0])
-        store.save(PUBLIC_BUNDLE_KEY, updatedBundle)
+        store.saveBatch(mapOf(
+            ACCOUNT_KEY to generated[0],
+            PUBLIC_BUNDLE_KEY to updatedBundle
+        ))
         return newKeys.toString()
     }
 
@@ -110,8 +114,10 @@ class E2eeClient(context: Context, userId: String) {
         for (index in 0 until previous.length()) previous.optString(index).takeIf { it.isNotBlank() }?.let(combined::add)
         keyIds.forEach(combined::add)
         val updatedAccount = E2eeNative.nativeMarkKeysPublished(account)
-        store.save(ACCOUNT_KEY, updatedAccount)
-        store.save(PUBLISHED_KEY_IDS, org.json.JSONArray(combined.toList()).toString().toByteArray(StandardCharsets.UTF_8))
+        store.saveBatch(mapOf(
+            ACCOUNT_KEY to updatedAccount,
+            PUBLISHED_KEY_IDS to org.json.JSONArray(combined.toList()).toString().toByteArray(StandardCharsets.UTF_8)
+        ))
     }
 
     fun verifyPublishedOneTimeKey(
