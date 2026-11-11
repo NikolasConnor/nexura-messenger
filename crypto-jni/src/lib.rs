@@ -264,10 +264,14 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeInvalidat
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeEncryptCached(mut env: JNIEnv, _class: JClass, session_id: JString, plaintext: JByteArray) -> jobjectArray {
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeEncryptCached(mut env: JNIEnv, _class: JClass, session_id: JString, session_pickle: JByteArray, plaintext: JByteArray) -> jobjectArray {
     let result = (|| {
         let id = read_string(&mut env, &session_id)?;
-        let session = session_manager().get_or_load(&id, || Err("session is not loaded".into()))?;
+        let pickle_bytes = read_bytes(&mut env, &session_pickle)?;
+        let pickle = utf8(&pickle_bytes, "session pickle")?.to_owned();
+        let session = session_manager().get_or_load(&id, || {
+            unpickle_session(&pickle).map_err(|e| e.to_string())
+        })?;
         let plaintext = read_bytes(&mut env, &plaintext)?;
         let mut guard = session.lock().map_err(|_| "Olm session lock poisoned")?;
         let envelope = encrypt_message(&mut guard, &plaintext).map_err(|e| e.to_string())?;
@@ -278,10 +282,14 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeEncryptCa
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeDecryptCached(mut env: JNIEnv, _class: JClass, session_id: JString, envelope: JString) -> jobjectArray {
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeDecryptCached(mut env: JNIEnv, _class: JClass, session_id: JString, session_pickle: JByteArray, envelope: JString) -> jobjectArray {
     let result = (|| {
         let id = read_string(&mut env, &session_id)?;
-        let session = session_manager().get_or_load(&id, || Err("session is not loaded".into()))?;
+        let pickle_bytes = read_bytes(&mut env, &session_pickle)?;
+        let pickle = utf8(&pickle_bytes, "session pickle")?.to_owned();
+        let session = session_manager().get_or_load(&id, || {
+            unpickle_session(&pickle).map_err(|e| e.to_string())
+        })?;
         let envelope = read_string(&mut env, &envelope)?;
         let mut guard = session.lock().map_err(|_| "Olm session lock poisoned")?;
         let plaintext = decrypt_message(&mut guard, &envelope).map_err(|e| e.to_string())?;
