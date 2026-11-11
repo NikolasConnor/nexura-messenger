@@ -10,7 +10,6 @@ import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.core.app.Person
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -100,9 +99,10 @@ class NexuraMessagingService : FirebaseMessagingService() {
         if (incomingCall && conversationId != null && callId != null) {
             val acceptIntent = callPendingIntent(baseUri, "accept", notificationId + 2)
             val declineIntent = callPendingIntent(baseUri, "decline", notificationId + 3)
-            val caller = Person.Builder().setName("Входящий звонок").setImportant(true).build()
+            // Android 14+ only permits CallStyle for an eligible foreground service
+            // or a full-screen intent. Nexura avoids background full-screen launches,
+            // so keep this as a high-priority regular notification with call actions.
             builder
-                .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declineIntent, acceptIntent))
                 .setOngoing(true)
                 .setTimeoutAfter(CALL_RING_TIMEOUT_MS)
                 .addAction(
