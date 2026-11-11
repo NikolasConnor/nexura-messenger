@@ -219,7 +219,16 @@ class CallCoordinator(
                         }
                     }
                     is RoomEvent.ParticipantConnected -> {
-                        if (event.participant.identity?.value == peerUserId) markConnected()
+                        if (event.participant.identity?.value == peerUserId &&
+                            event.participant.state == io.livekit.android.room.participant.Participant.State.ACTIVE) {
+                            markConnected()
+                        }
+                    }
+                    is RoomEvent.ParticipantStateChanged -> {
+                        if (event.participant.identity?.value == peerUserId &&
+                            event.newState == io.livekit.android.room.participant.Participant.State.ACTIVE) {
+                            markConnected()
+                        }
                     }
                     is RoomEvent.ParticipantDisconnected -> {
                         if (event.participant.identity?.value == peerUserId && lastState?.active == true) {
@@ -231,7 +240,10 @@ class CallCoordinator(
                         publish((lastState ?: CallUiState()).copy(status = "Восстанавливаем связь…"))
                     }
                     is RoomEvent.Reconnected -> {
-                        if (newRoom.remoteParticipants.values.any { it.identity?.value == peerUserId }) {
+                        if (newRoom.remoteParticipants.values.any {
+                it.identity?.value == peerUserId &&
+                    it.state == io.livekit.android.room.participant.Participant.State.ACTIVE
+            }) {
                             markConnected()
                         } else {
                             publish((lastState ?: CallUiState()).copy(status = "Ожидаем собеседника…", connected = false))
@@ -295,7 +307,10 @@ class CallCoordinator(
                 ringTimeoutJob = null
                 armConnectionTimeout(id)
                 publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true))
-                if (room?.remoteParticipants?.values?.any { it.identity?.value == peerUserId } == true) {
+                if (room?.remoteParticipants?.values?.any {
+                    it.identity?.value == peerUserId &&
+                        it.state == io.livekit.android.room.participant.Participant.State.ACTIVE
+                } == true) {
                     markConnected()
                 }
             }
