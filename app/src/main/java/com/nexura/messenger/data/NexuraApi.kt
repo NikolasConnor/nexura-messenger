@@ -1021,6 +1021,57 @@ class NexuraApi(private val store: SessionStore) {
         throw IOException("Отправка открытого текста отключена. Используйте подтверждённое E2EE-устройство.")
     }
 
+
+    /** Cloud backup contains only an AES-256-GCM envelope; the recovery code never leaves this device. */
+    suspend fun hasE2eeBackup(): Boolean {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call(
+            "/rest/v1/e2ee_state_backups?select=user_id&user_id=eq.$uid&limit=1"
+        ))
+        return rows.length() == 1
+    }
+
+    suspend fun uploadE2eeBackup(e2ee: E2eeClient): Boolean {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (!e2ee.needsBackupSync()) return false
+        val revision = e2ee.backupRevision()
+        val envelope = e2ee.createEncryptedBackup()
+        val payload = JSONObject()
+            .put("user_id", uid)
+            .put("format_version", 1)
+            .put("encrypted_payload", envelope)
+            .put("updated_at", java.time.Instant.now().toString())
+        call(
+            "/rest/v1/e2ee_state_backups?on_conflict=user_id",
+            "POST",
+            payload.toString(),
+            prefer = "resolution=merge-duplicates,return=minimal"
+        )
+        e2ee.markBackupSynced(revision)
+        return true
+    }
+
+    suspend fun restoreE2eeBackup(e2ee: E2eeClient, recoveryCode: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (e2ee.hasLocalDevice()) throw IOException("На этом устройстве уже есть ключи E2EE; восстановление отменено")
+        val rows = JSONArray(call(
+            "/rest/v1/e2ee_state_backups?select=format_version,encrypted_payload&user_id=eq.$uid&limit=1"
+        ))
+        if (rows.length() != 1) throw IOException("Защищённая резервная копия не найдена")
+        val row = rows.getJSONObject(0)
+        if (row.optInt("format_version") != 1) throw IOException("Версия резервной копии не поддерживается")
+        try {
+            e2ee.restoreEncryptedBackup(row.getString("encrypted_payload"), recoveryCode)
+        } catch (error: Exception) {
+            throw IOException("Не удалось восстановить ключи. Проверьте ключ восстановления.", error)
+        }
+    }
+
+    suspend fun syncE2eeBackupIfEnabled(e2ee: E2eeClient) {
+        if (!e2ee.needsBackupSync()) return
+        uploadE2eeBackup(e2ee)
+    }
+
     suspend fun privacySettings(): PrivacySettings {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val profile = JSONArray(call("/rest/v1/profiles?select=read_receipts_enabled&id=eq.$uid&limit=1"))
