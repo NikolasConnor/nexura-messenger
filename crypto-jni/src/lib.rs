@@ -14,8 +14,8 @@ fn session_manager() -> &'static SessionManager {
     SESSION_MANAGER.get_or_init(|| SessionManager::new(256))
 }
 
-// Stage 1: bounded per-session cache; JNI integration is intentionally deferred
-// until the repository persistence and recovery path is added in a later stage.
+// Bounded per-session and per-device account caches. Durable pickles remain
+// encrypted and owned by the Android E2eeStateStore.
 use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::sys::{jboolean, jint, jobjectArray, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
