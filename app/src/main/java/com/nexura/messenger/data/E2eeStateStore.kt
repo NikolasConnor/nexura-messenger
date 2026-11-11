@@ -19,8 +19,10 @@ import javax.crypto.spec.GCMParameterSpec
  * state itself must already be serialized by the crypto layer; never pass plaintext
  * chat messages or raw private keys to this store.
  *
- * This class is deliberately not wired into message sending yet. Integration must
- * wait until the Rust/Kotlin protocol bridge and restore/replay tests are complete.
+ * This store is used by E2eeClient for device accounts, Olm sessions, and
+ * related local protocol state. Rust keeps only bounded in-memory working copies;
+ * every state transition must be committed here before ciphertext is sent or
+ * plaintext is exposed to the caller.
  */
 class E2eeStateStore(context: Context, userNamespace: String) {
     // Android Keystore key handles are non-exportable; cache the handle, not key bytes.
