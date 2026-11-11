@@ -137,10 +137,11 @@ class CallCoordinator(
             }
         }
         scope.launch {
+            runCatching { api.notifyIncomingCall(chatId, peerUserId, expectedId, video) }
+        }
+        scope.launch {
             try {
                 joinLiveKit(expectedId, video)
-                if (callId != expectedId || closed) return@launch
-                runCatching { api.notifyIncomingCall(chatId, peerUserId, expectedId, video) }
             } catch (error: Exception) {
                 if (callId == expectedId && !closed) {
                     failCall("Не удалось подключиться к LiveKit", error.message ?: "Проверьте настройки LiveKit")
