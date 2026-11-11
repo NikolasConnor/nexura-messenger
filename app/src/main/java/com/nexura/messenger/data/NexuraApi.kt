@@ -943,9 +943,12 @@ class NexuraApi(private val store: SessionStore) {
             val own = async { activeE2eeDevices(uid) }
             peer.await() to own.await()
         }
-        val latestOwnDevices = ownDevicesWithAvailableKeys(
-            uid, latestOwnDevicesRaw.filterNot { it.deviceId == ownDeviceId }
-        )
+        // Compare against the own-device set selected before consuming OTKs.
+        // Its available-key count is expected to decrease during this send.
+        val selectedOwnDeviceIds = ownOtherDevices.map { it.deviceId }.toSet()
+        val latestOwnDevices = latestOwnDevicesRaw.filter {
+            it.deviceId != ownDeviceId && it.deviceId in selectedOwnDeviceIds
+        }
         val latestTargets = (latestPeerDevices + latestOwnDevices).distinctBy { "${it.userId}:${it.deviceId}" }
         if (latestTargets.map { "${it.userId}:${it.deviceId}" }.toSet() != allTargets.map { "${it.userId}:${it.deviceId}" }.toSet()) {
             throw IOException("Список устройств одного из участников изменился во время отправки. Повторите отправку.")
