@@ -65,6 +65,9 @@ class CallCoordinator(
     private var callVideoForHistory = false
     private var callDirectionOutgoing = false
     private var callHistoryWritten = false
+    // A call timer starts only after this device joined the LiveKit room AND the peer is active.
+    private var localRoomConnected = false
+    private var peerRoomConnected = false
     private var lastState: CallUiState? = null
 
     fun connect(token: String) {
@@ -107,6 +110,8 @@ class CallCoordinator(
         callHistoryWritten = false
         connectedAtMs = null
         accepted = false
+        localRoomConnected = false
+        peerRoomConnected = false
         callId = UUID.randomUUID().toString()
         val expectedId = callId ?: return
         startKeepAlive(video)
@@ -152,6 +157,8 @@ class CallCoordinator(
         callHistoryWritten = false
         connectedAtMs = null
         accepted = true
+        localRoomConnected = false
+        peerRoomConnected = false
         callId = expectedId
         pendingCallId = null
         pendingVideo = false
@@ -211,16 +218,27 @@ class CallCoordinator(
                                             publish((lastState ?: CallUiState()).copy(remoteVideoTrack = null))
                                         }
                                     }
+                                    is RoomEvent.Connected -> {
+                                        localRoomConnected = true
+                                        peerRoomConnected = newRoom.remoteParticipants.values.any {
+                                            it.identity?.value == peerUserId &&
+                                                it.state == io.livekit.android.room.participant.Participant.State.ACTIVE
+                                        }
+                                        if (peerRoomConnected) markConnected()
+                                        else publish((lastState ?: CallUiState()).copy(status = "Ожидаем собеседника…", connected = false))
+                                    }
                                     is RoomEvent.ParticipantConnected -> {
                                         if (event.participant.identity?.value == peerUserId &&
                                             event.participant.state == io.livekit.android.room.participant.Participant.State.ACTIVE) {
-                                            markConnected()
+                                            peerRoomConnected = true
+                                            if (localRoomConnected) markConnected()
                                         }
                                     }
                                     is RoomEvent.ParticipantStateChanged -> {
-                                        if (event.participant.identity?.value == peerUserId &&
-                                            event.newState == io.livekit.android.room.participant.Participant.State.ACTIVE) {
-                                            markConnected()
+                                        if (event.participant.identity?.value == peerUserId) {
+                                            peerRoomConnected = event.newState == io.livekit.android.room.participant.Participant.State.ACTIVE
+                                            if (peerRoomConnected && localRoomConnected) markConnected()
+                                            else if (!peerRoomConnected) publish((lastState ?: CallUiState()).copy(status = "Восстанавливаем связь…", connected = false))
                                         }
                                     }
                                     is RoomEvent.ParticipantDisconnected -> {
@@ -233,10 +251,11 @@ class CallCoordinator(
                                         publish((lastState ?: CallUiState()).copy(status = "Восстанавливаем связь…"))
                                     }
                                     is RoomEvent.Reconnected -> {
-                                        if (newRoom.remoteParticipants.values.any {
+                                        peerRoomConnected = newRoom.remoteParticipants.values.any {
                                 it.identity?.value == peerUserId &&
                                     it.state == io.livekit.android.room.participant.Participant.State.ACTIVE
-                            }) {
+                            }
+                                        if (localRoomConnected && peerRoomConnected) {
                                             markConnected()
                                         } else {
                                             publish((lastState ?: CallUiState()).copy(status = "Ожидаем собеседника…", connected = false))
@@ -348,7 +367,7 @@ class CallCoordinator(
     }
 
     private fun markConnected() {
-        if (callId == null || closed || lastState?.connected == true) return
+        if (callId == null || closed || lastState?.connected == true || !localRoomConnected || !peerRoomConnected) return
         connectionTimeoutJob?.cancel()
         connectionTimeoutJob = null
         ringTimeoutJob?.cancel()
@@ -473,6 +492,8 @@ class CallCoordinator(
             runCatching { onCallFinished(duration, wasOutgoing, callVideoForHistory, result) }
         }
         connectedAtMs = null
+        localRoomConnected = false
+        peerRoomConnected = false
         callId = null
         pendingCallId = null
         pendingVideo = false
