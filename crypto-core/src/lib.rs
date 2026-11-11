@@ -365,6 +365,31 @@ mod tests {
     }
 
     #[test]
+    fn replenishing_keys_does_not_republish_an_unacknowledged_batch() {
+        let (mut account, public) = create_device_keys(2);
+        let previous: std::collections::HashSet<String> = public
+            .one_time_keys
+            .iter()
+            .map(|key| key.key.clone())
+            .collect();
+
+        // Simulate an upload that has not yet been acknowledged by the server.
+        let next_batch = generate_additional_one_time_keys(&mut account, 3);
+        assert_eq!(next_batch.len(), 3);
+        assert!(next_batch.iter().all(|key| !previous.contains(&key.key)));
+
+        let unique: std::collections::HashSet<String> = next_batch
+            .iter()
+            .map(|key| key.key.clone())
+            .collect();
+        assert_eq!(unique.len(), next_batch.len());
+        for key in &next_batch {
+            verify_signed_one_time_key(&public.ed25519, &public.curve25519, key)
+                .expect("new one-time key must be signed by the existing device identity");
+        }
+    }
+
+    #[test]
     fn account_and_session_pickles_restore_protocol_state() {
         let (alice, alice_public) = create_device_keys(0);
         let (mut bob, bob_public) = create_device_keys(1);
