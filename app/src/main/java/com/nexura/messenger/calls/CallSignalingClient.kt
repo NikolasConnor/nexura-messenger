@@ -139,10 +139,10 @@ class CallSignalingClient(
                 socket = null
                 readyDelivered = false
                 synchronized(lock) { joined.clear() }
-                reportError(buildString {
-                    append(t.message ?: "Не удалось подключиться к серверу звонков")
-                    if (response != null) append(" (HTTP ").append(response.code).append(")")
-                })
+                reportError(
+                    if (response != null) "Связь с сервером звонков прервана (HTTP ${response.code}). Переподключаемся…"
+                    else "Связь с сервером звонков временно прервана. Переподключаемся…"
+                )
                 scheduleReconnect()
             }
 
@@ -151,7 +151,7 @@ class CallSignalingClient(
                 socket = null
                 readyDelivered = false
                 synchronized(lock) { joined.clear() }
-                reportError("Сигнализация отключилась")
+                reportError("Связь с сервером звонков прервана. Переподключаемся…")
                 scheduleReconnect()
             }
         })
