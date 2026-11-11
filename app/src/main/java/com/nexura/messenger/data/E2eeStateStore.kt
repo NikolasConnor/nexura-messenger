@@ -159,7 +159,7 @@ class E2eeStateStore(context: Context, userNamespace: String) {
     @Synchronized
     @Throws(GeneralSecurityException::class)
     fun exportBackupSnapshot(): ByteArray {
-        val stateKeys = preferences.all.keys.filter { it.startsWith("state_") }
+        val stateKeys = preferences.all.keys.filter { it.startsWith("state_") && it != REVISION_KEY }
         val states = org.json.JSONArray()
         var unmapped = 0
         for (key in stateKeys) {
