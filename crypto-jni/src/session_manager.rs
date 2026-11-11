@@ -154,7 +154,8 @@ mod tests {
         let pickle = pickle_session(&original).unwrap();
         let cached = manager.get_or_load("first", || unpickle_session(&pickle).map_err(|e| e.to_string())).unwrap();
         drop(cached);
-        let _next = manager.get_or_load("second", sample_session).unwrap();
+        let next = manager.get_or_load("second", sample_session).unwrap();
+        drop(next);
         let restored = manager.get_or_load("first", || unpickle_session(&pickle).map_err(|e| e.to_string())).unwrap();
         assert_eq!(restored.lock().unwrap().session_id(), original.session_id());
     }
