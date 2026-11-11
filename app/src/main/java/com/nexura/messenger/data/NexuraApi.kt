@@ -332,7 +332,7 @@ class NexuraApi(private val store: SessionStore) {
         val mediaFilter = if (mediaOnly) "&message_type=in.(media,image,file)" else ""
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
-                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc,id.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
         ))
         // Fetch newest-first for cursor pages, then decrypt chronologically within each page.
         val chronologicalIndexes = (0 until raw.length()).sortedWith(
