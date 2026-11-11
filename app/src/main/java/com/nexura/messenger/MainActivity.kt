@@ -723,6 +723,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             ) {
                                                 if (msg.editedAt != null) Text("изменено · ", color = Color(0xFFB7C4D9), fontSize = 10.sp)
                                                 Text(msg.createdAt.replace("T", " ").take(16), color = Color(0xFFB7C4D9), fontSize = 10.sp)
+                                                if (mine) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text(when (msg.deliveryStatus) { "pending" -> "◷"; "failed" -> "⚠"; else -> "✓" }, color = if (msg.deliveryStatus == "failed") Danger else Color(0xFFB7C4D9), fontSize = 11.sp)
+                                                }
                                                 Box {
                                                     IconButton(
                                                         onClick = { openMessageMenu = if (openMessageMenu == msg.id) null else msg.id },
@@ -790,12 +794,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                                     keyboardActions = KeyboardActions(onSend = {
                                         val text = draft.trim()
-                                        if (text.isNotEmpty() && !sendingMessage) scope.launch {
-                                            sendingMessage = true
-                                            error = ""
-                                            try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
-                                            catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
-                                            finally { sendingMessage = false }
+                                        if (text.isNotEmpty()) {
+                                            val localId = "local-" + System.nanoTime().toString()
+                                            val replyId = replyTarget?.id
+                                            val optimistic = MessageItem(localId, store.userId.orEmpty(), text, java.time.Instant.now().toString(), "text", replyId, null, "pending")
+                                            messages = messages + optimistic
+                                            draft = ""; replyTarget = null; error = ""
+                                            scope.launch {
+                                                try {
+                                                    api.sendMessage(chat.id, text, replyId)
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "sent") else it }
+                                                    scope.launch { try { api.sendPushForMessage(chat.id, text) } catch (_: Exception) { } }
+                                                } catch (e: Exception) {
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "failed") else it }
+                                                    error = e.message ?: "Не удалось отправить сообщение"
+                                                }
+                                            }
                                         }
                                     })
                                 )
@@ -803,19 +817,28 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 IconButton(
                                     onClick = {
                                         val text = draft.trim()
-                                        if (text.isNotEmpty() && !sendingMessage) scope.launch {
-                                            sendingMessage = true
-                                            error = ""
-                                            try { api.sendMessage(chat.id, text, replyTarget?.id); draft = ""; replyTarget = null; messages = api.messages(chat.id) }
-                                            catch (e: Exception) { error = e.message ?: "Не удалось отправить сообщение" }
-                                            finally { sendingMessage = false }
+                                        if (text.isNotEmpty()) {
+                                            val localId = "local-" + System.nanoTime().toString()
+                                            val replyId = replyTarget?.id
+                                            val optimistic = MessageItem(localId, store.userId.orEmpty(), text, java.time.Instant.now().toString(), "text", replyId, null, "pending")
+                                            messages = messages + optimistic
+                                            draft = ""; replyTarget = null; error = ""
+                                            scope.launch {
+                                                try {
+                                                    api.sendMessage(chat.id, text, replyId)
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "sent") else it }
+                                                    scope.launch { try { api.sendPushForMessage(chat.id, text) } catch (_: Exception) { } }
+                                                } catch (e: Exception) {
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "failed") else it }
+                                                    error = e.message ?: "Не удалось отправить сообщение"
+                                                }
+                                            }
                                         }
                                     },
-                                    enabled = draft.isNotBlank() && !sendingMessage,
+                                    enabled = draft.isNotBlank(),
                                     modifier = Modifier.size(46.dp).background(if (draft.isNotBlank()) Accent else Surface2, CircleShape)
                                 ) {
-                                    if (sendingMessage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
-                                    else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText)
+                                    Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank()) Bg else SecondaryText)
                                 }
                             }
                         }
