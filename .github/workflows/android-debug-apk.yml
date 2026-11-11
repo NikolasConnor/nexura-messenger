@@ -33,6 +33,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - name: Run native E2EE cache tests
+        run: cargo test --manifest-path crypto-jni/Cargo.toml
       - name: Configure Android NDK
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - name: Install cargo-ndk
