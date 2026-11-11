@@ -436,6 +436,7 @@ class CallCoordinator(
 
     private fun failCall(status: String, message: String) {
         val wasOutgoing = callDirectionOutgoing
+        callId?.let { send(endSignal(it)) }
         finish()
         publish(CallUiState(
             status = if (ready) "Готово к звонку" else "Подключение…",
