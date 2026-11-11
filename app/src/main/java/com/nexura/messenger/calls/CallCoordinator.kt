@@ -260,8 +260,7 @@ class CallCoordinator(
                                         }
                                     }
                                     else -> Unit
-                                }
-                                }
+                }
             }
         }.launchIn(scope)
 
