@@ -1617,7 +1617,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             } else {
                                                 trustCandidate = null
                                                 trustPeerId = null
-                                                notice = "Все устройства участников группы подтверждены"
+                                                notice = "Все устройства чата подтверждены"
                                             }
                                         } else {
                                             trustCandidate = null
