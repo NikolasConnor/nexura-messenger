@@ -18,8 +18,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Private per-user Supabase Realtime signaling with bounded reconnect/backoff.
- * Call media itself stays peer-to-peer; only SDP/ICE/control messages use this socket.
+ * Private per-user Supabase Realtime call-control signaling with bounded reconnect/backoff.
+ * Audio/video media is transported separately through the LiveKit SFU room.
  */
 class CallSignalingClient(
     private val projectRef: String,
