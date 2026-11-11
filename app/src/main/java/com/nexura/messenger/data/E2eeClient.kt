@@ -19,14 +19,12 @@ class E2eeClient(context: Context, userId: String) {
     private fun nativeSessionId(key: String): String = "$nativeSessionNamespace|$key"
     private fun cachedEncrypt(key: String, pickle: ByteArray, plaintext: ByteArray): Array<ByteArray> {
         val id = nativeSessionId(key)
-        check(E2eeNative.nativeCacheSession(id, pickle)) { "Unable to load native Olm session" }
-        return try { E2eeNative.nativeEncryptCached(id, plaintext) }
+        return try { E2eeNative.nativeEncryptCached(id, pickle, plaintext) }
         catch (error: Throwable) { runCatching { E2eeNative.nativeInvalidateSession(id) }; throw error }
     }
     private fun cachedDecrypt(key: String, pickle: ByteArray, envelope: String): Array<ByteArray> {
         val id = nativeSessionId(key)
-        check(E2eeNative.nativeCacheSession(id, pickle)) { "Unable to load native Olm session" }
-        return try { E2eeNative.nativeDecryptCached(id, envelope) }
+        return try { E2eeNative.nativeDecryptCached(id, pickle, envelope) }
         catch (error: Throwable) { runCatching { E2eeNative.nativeInvalidateSession(id) }; throw error }
     }
     private fun invalidateNativeSession(key: String) { runCatching { E2eeNative.nativeInvalidateSession(nativeSessionId(key)) } }
