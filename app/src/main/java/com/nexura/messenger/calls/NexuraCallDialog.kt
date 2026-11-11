@@ -33,9 +33,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
-import org.webrtc.EglBase
-import org.webrtc.SurfaceViewRenderer
-import org.webrtc.VideoTrack
+import io.livekit.android.renderer.SurfaceViewRenderer
+import io.livekit.android.room.track.VideoTrack
 import com.nexura.messenger.data.ChatItem
 import com.nexura.messenger.data.NexuraApi
 import kotlinx.coroutines.launch
@@ -61,7 +60,6 @@ fun NexuraCallDialog(
     var callStartedAt by remember { mutableStateOf<Long?>(null) }
     var pendingAction by remember { mutableStateOf("audio") }
     var starting by remember { mutableStateOf(false) }
-    val eglContext = remember { EglBase.create() }
     var remoteRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     var localRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     val latestRemoteRenderer by rememberUpdatedState(remoteRenderer)
@@ -70,20 +68,19 @@ fun NexuraCallDialog(
         onDispose {
             latestRemoteRenderer?.release()
             latestLocalRenderer?.release()
-            eglContext.release()
         }
     }
     DisposableEffect(ui.remoteVideoTrack, remoteRenderer) {
         val track = ui.remoteVideoTrack
         val renderer = remoteRenderer
-        if (track != null && renderer != null) track.addSink(renderer)
-        onDispose { if (track != null && renderer != null) track.removeSink(renderer) }
+        if (track != null && renderer != null) track.addRenderer(renderer)
+        onDispose { if (track != null && renderer != null) track.removeRenderer(renderer) }
     }
     DisposableEffect(ui.localVideoTrack, localRenderer) {
         val track = ui.localVideoTrack
         val renderer = localRenderer
-        if (track != null && renderer != null) track.addSink(renderer)
-        onDispose { if (track != null && renderer != null) track.removeSink(renderer) }
+        if (track != null && renderer != null) track.addRenderer(renderer)
+        onDispose { if (track != null && renderer != null) track.removeRenderer(renderer) }
     }
 
     var permissionStep by remember { mutableStateOf("") }
@@ -230,7 +227,7 @@ fun NexuraCallDialog(
                         modifier = Modifier.fillMaxSize(),
                         factory = { viewContext ->
                             SurfaceViewRenderer(viewContext).also { renderer ->
-                                renderer.init(coordinator?.sharedEglContext() ?: eglContext.eglBaseContext, null)
+                                coordinator?.initVideoRenderer(renderer)
                                 renderer.setEnableHardwareScaler(true)
                                 renderer.setMirror(false)
                                 renderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
@@ -255,7 +252,7 @@ fun NexuraCallDialog(
                             modifier = Modifier.fillMaxSize(),
                             factory = { viewContext ->
                                 SurfaceViewRenderer(viewContext).also { renderer ->
-                                    renderer.init(coordinator?.sharedEglContext() ?: eglContext.eglBaseContext, null)
+                                    coordinator?.initVideoRenderer(renderer)
                                     renderer.setEnableHardwareScaler(true)
                                     renderer.setMirror(true)
                                 renderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
