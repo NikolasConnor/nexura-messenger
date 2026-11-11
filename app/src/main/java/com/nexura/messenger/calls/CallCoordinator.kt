@@ -276,16 +276,6 @@ class CallCoordinator(
         if (callId != expectedId || closed) return
         // connect() returns only after this participant has joined the LiveKit room.
         localRoomConnected = true
-        if (!callDirectionOutgoing && !answerSent) {
-            if (!send(JSONObject()
-                    .put("type", "answer")
-                    .put("call_id", expectedId)
-                    .put("from", ownUserId)
-                    .put("to", peerUserId))) {
-                throw IOException("Не удалось подтвердить вызов собеседнику")
-            }
-            answerSent = true
-        }
         if (!newRoom.localParticipant.setMicrophoneEnabled(true)) {
             throw IOException("LiveKit не смог включить микрофон")
         }
@@ -295,6 +285,16 @@ class CallCoordinator(
             }
             val localTrack = newRoom.localParticipant.getTrackPublication(Track.Source.CAMERA)?.track as? VideoTrack
             publish((lastState ?: CallUiState()).copy(localVideoTrack = localTrack))
+        }
+        if (!callDirectionOutgoing && !answerSent) {
+            if (!send(JSONObject()
+                    .put("type", "answer")
+                    .put("call_id", expectedId)
+                    .put("from", ownUserId)
+                    .put("to", peerUserId))) {
+                throw IOException("Не удалось подтвердить вызов собеседнику")
+            }
+            answerSent = true
         }
         if (newRoom.remoteParticipants.values.any { it.identity?.value == peerUserId }) {
             markConnected()
