@@ -2,7 +2,7 @@ name: Nexura crypto core tests
 
 on:
   push:
-    branches: [ security/e2ee-phase-2 ]
+    branches: [ security/e2ee-phase-2, feature/voice-video-calls, integration/nexura-apk-ready ]
     paths:
       - "crypto-core/**"
       - "crypto-jni/**"
