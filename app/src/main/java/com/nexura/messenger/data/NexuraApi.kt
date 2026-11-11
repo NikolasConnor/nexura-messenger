@@ -1035,6 +1035,18 @@ class NexuraApi(private val store: SessionStore) {
     }
 
 
+
+    /** Called only when the user explicitly abandons an unrecoverable old device. */
+    suspend fun removeOtherOwnE2eeDevices(keepDeviceId: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val keep = java.net.URLEncoder.encode(keepDeviceId, "UTF-8")
+        call(
+            "/rest/v1/e2ee_devices?user_id=eq.$uid&device_id=neq.$keep",
+            "DELETE",
+            prefer = "return=minimal"
+        )
+    }
+
     suspend fun hasRegisteredE2eeDevice(): Boolean {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val rows = JSONArray(call(
