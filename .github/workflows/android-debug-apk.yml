@@ -1,7 +1,7 @@
 name: Android debug APK
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feature/voice-video-calls ]
   workflow_dispatch:
 permissions:
   contents: read
