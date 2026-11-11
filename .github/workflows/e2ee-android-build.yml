@@ -2,7 +2,7 @@ name: Nexura E2EE Android build
 
 on:
   push:
-    branches: [ security/e2ee-phase-2, feature/voice-video-calls ]
+    branches: [ security/e2ee-phase-2, feature/voice-video-calls, integration/nexura-apk-ready ]
     paths:
       - "app/**"
       - "crypto-core/**"
@@ -11,6 +11,7 @@ on:
       - "settings.gradle.kts"
       - "gradle/**"
       - ".github/workflows/e2ee-android-build.yml"
+      - ".github/workflows/android-debug-apk.yml"
   workflow_dispatch:
 
 permissions:
