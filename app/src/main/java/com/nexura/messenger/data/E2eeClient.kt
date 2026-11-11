@@ -4,7 +4,6 @@ import android.content.Context
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Olm E2EE client used by NexuraApi for direct and group conversations.
@@ -33,8 +32,10 @@ class E2eeClient(context: Context, userId: String) {
     }
     private fun invalidateNativeSession(key: String) { runCatching { E2eeNative.nativeInvalidateSession(nativeSessionId(key)) } }
     // Olm ratchets are sequential per device session, but independent chats can progress concurrently.
-    private val sessionLocks = ConcurrentHashMap<String, Any>()
-    private fun sessionLock(key: String): Any = sessionLocks.getOrPut(key) { Any() }
+    // Fixed stripes avoid an unbounded per-conversation lock map and serialize
+    // ratchet mutation through durable persistence across client instances.
+    private fun sessionLock(key: String): Any =
+        SESSION_OPERATION_LOCKS[Math.floorMod(key.hashCode(), SESSION_OPERATION_LOCKS.size)]
 
     @Synchronized
     fun ensureDevice(oneTimeKeyCount: Int = 20): String {
@@ -565,6 +566,7 @@ class E2eeClient(context: Context, userId: String) {
 
     private companion object {
         val ACCOUNT_OPERATION_LOCKS: Array<Any> = Array(64) { Any() }
+        val SESSION_OPERATION_LOCKS: Array<Any> = Array(128) { Any() }
         const val ACCOUNT_KEY = "olm-device-account"
         const val PUBLIC_BUNDLE_KEY = "olm-public-device-bundle"
         const val PUBLISHED_KEY_IDS = "olm-published-one-time-key-ids"
