@@ -1,3 +1,5 @@
+mod session_manager;
+
 use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::sys::{jboolean, jint, jobjectArray, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
