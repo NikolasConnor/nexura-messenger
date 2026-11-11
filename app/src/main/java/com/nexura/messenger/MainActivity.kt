@@ -139,6 +139,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val context = LocalContext.current
+    // Honor 10i-class devices have limited memory/CPU headroom; use lighter refresh and scrolling.
+    val lowRamDevice = remember {
+        (context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).isLowRamDevice
+    }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val scope = rememberCoroutineScope()
@@ -520,7 +524,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             launch {
                 while (true) {
                     if (context.getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE).getBoolean("activity_visible", false)) runCatching { api.updatePresenceHeartbeat() }
-                    delay(60_000)
+                    delay(if (lowRamDevice) 120_000L else 60_000L)
                 }
             }
             try {
@@ -558,23 +562,33 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     // Keep the open conversation fresh without requiring the user to tap Refresh.
     // The list is refreshed less often to avoid unnecessary database traffic.
-    LaunchedEffect(signedIn, selected?.id) {
+    LaunchedEffect(signedIn, selected?.id, lowRamDevice) {
         if (signedIn) {
-            var retryDelay = 2500L
+            val normalChatInterval = if (lowRamDevice) 6_000L else 4_000L
+            val listInterval = if (lowRamDevice) 30_000L else 20_000L
+            var retryDelay = normalChatInterval
             var lastReceiptRefresh = 0L
             while (true) {
-                delay(if (selected != null) retryDelay else maxOf(20_000L, retryDelay))
+                val foreground = context.getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE)
+                    .getBoolean("activity_visible", false)
+                if (!foreground) {
+                    delay(15_000L)
+                    continue
+                }
+                val currentChat = selected
+                delay(if (currentChat != null) retryDelay else maxOf(listInterval, retryDelay))
                 try {
-                    val currentChat = selected
                     if (currentChat != null) {
                         val lastTimestamp = lastSyncedMessageTimestamp
                         val latest = api.messages(currentChat.id, e2eeClient, lastTimestamp)
-                        if (currentChat.kind == "direct" && System.currentTimeMillis() - lastReceiptRefresh >= 15_000L) {
+                        if (currentChat.kind == "direct" && System.currentTimeMillis() - lastReceiptRefresh >= 30_000L) {
                             peerReadReceiptAt = api.peerReadReceiptAt(currentChat.id, currentChat.peerUserId)
                             lastReceiptRefresh = System.currentTimeMillis()
                         }
                         if (selected?.id == currentChat.id && latest.isNotEmpty()) {
-                            messages = (messages + latest).distinctBy { it.id }.sortedBy { it.createdAt }
+                            val maxLocalMessages = if (lowRamDevice) 150 else 300
+                            messages = (messages + latest).distinctBy { it.id }
+                                .sortedBy { it.createdAt }.takeLast(maxLocalMessages)
                             lastSyncedMessageTimestamp = maxOf(
                                 lastSyncedMessageTimestamp ?: latest.first().createdAt,
                                 latest.maxOf { it.createdAt }
@@ -583,9 +597,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     } else {
                         chats = api.chats()
                     }
-                    retryDelay = 2500L
+                    retryDelay = normalChatInterval
                 } catch (_: Exception) {
-                    // Back off during network outages instead of hammering the API every 2.5s.
+                    // Back off during network outages instead of repeatedly parsing/decrypting the same rows.
                     retryDelay = (retryDelay * 2).coerceAtMost(30_000L)
                 }
             }
@@ -1911,7 +1925,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 LaunchedEffect(chat.id, visibleMessages.size, chatSearchQuery, scrollToMessageId) {
                                     if (visibleMessages.isNotEmpty()) {
                                         val targetIndex = scrollToMessageId?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
-                                        messageListState.animateScrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
+                                        // Avoid expensive fling animation on every sync, especially on low-memory phones.
+                                        if (lowRamDevice) {
+                                            messageListState.scrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
+                                        } else {
+                                            messageListState.animateScrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
+                                        }
                                         if (targetIndex >= 0) scrollToMessageId = null
                                     }
                                 }
