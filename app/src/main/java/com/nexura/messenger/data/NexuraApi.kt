@@ -317,7 +317,8 @@ class NexuraApi(private val store: SessionStore) {
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
                 "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
         ))
-        return (0 until raw.length()).map { i ->
+        return withContext(Dispatchers.Default) {
+            (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
             val id = m.getString("id")
             val senderId = m.optString("sender_id")
@@ -411,7 +412,8 @@ class NexuraApi(private val store: SessionStore) {
                     securityWarning = type == "text" || type == "image" || type == "file"
                 )
             }
-        }.sortedBy { it.createdAt }
+            }.sortedBy { it.createdAt }
+        }
     }
     /**
      * Publishes only public E2EE material. Idempotent inserts let the client
