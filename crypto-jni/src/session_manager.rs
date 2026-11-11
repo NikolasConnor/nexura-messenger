@@ -78,6 +78,11 @@ impl SessionManager {
 
     pub(crate) fn invalidate(&self, id: &str) -> Result<(), String> {
         let mut state = self.state.lock().map_err(|_| "session cache lock poisoned")?;
+        if let Some(session) = state.sessions.get(id) {
+            if Arc::strong_count(session) > 1 {
+                return Err("cannot invalidate an Olm session while it is in use".into());
+            }
+        }
         state.sessions.remove(id);
         state.recency.retain(|entry| entry != id);
         Ok(())
@@ -129,6 +134,17 @@ mod tests {
         assert_eq!(manager.cached_count().unwrap(), 1);
         assert!(manager.get_or_load("second", || panic!("cached session expected")).is_ok());
         drop(second);
+    }
+
+    #[test]
+    fn invalidation_refuses_to_remove_a_session_in_use() {
+        let manager = SessionManager::new(2);
+        let active = manager.get_or_load("active", sample_session).unwrap();
+        assert!(manager.invalidate("active").is_err());
+        assert_eq!(manager.cached_count().unwrap(), 1);
+        drop(active);
+        assert!(manager.invalidate("active").is_ok());
+        assert_eq!(manager.cached_count().unwrap(), 0);
     }
 
     #[test]
