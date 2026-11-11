@@ -23,6 +23,9 @@ import javax.crypto.spec.GCMParameterSpec
  * wait until the Rust/Kotlin protocol bridge and restore/replay tests are complete.
  */
 class E2eeStateStore(context: Context, userNamespace: String) {
+    // Android Keystore key handles are non-exportable; cache the handle, not key bytes.
+    // This avoids reopening AndroidKeyStore for every pickle encrypt/decrypt operation.
+    @Volatile private var cachedKey: SecretKey? = null
     private val keyAlias: String
     private val preferences: android.content.SharedPreferences
 
@@ -128,11 +131,16 @@ class E2eeStateStore(context: Context, userNamespace: String) {
         check(preferences.edit().clear().commit()) { "Unable to clear encrypted E2EE states" }
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         if (keyStore.containsAlias(keyAlias)) keyStore.deleteEntry(keyAlias)
+        cachedKey = null
     }
 
     private fun getOrCreateKey(): SecretKey {
+        cachedKey?.let { return it }
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-        (keyStore.getKey(keyAlias, null) as? SecretKey)?.let { return it }
+        (keyStore.getKey(keyAlias, null) as? SecretKey)?.let {
+            cachedKey = it
+            return it
+        }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
         generator.init(
@@ -146,7 +154,7 @@ class E2eeStateStore(context: Context, userNamespace: String) {
                 .setRandomizedEncryptionRequired(true)
                 .build()
         )
-        return generator.generateKey()
+        return generator.generateKey().also { cachedKey = it }
     }
 
     private fun aad(sessionId: String): ByteArray =
