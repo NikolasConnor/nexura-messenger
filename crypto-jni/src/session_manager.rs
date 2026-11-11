@@ -76,6 +76,13 @@ impl SessionManager {
         Ok(restored)
     }
 
+    pub(crate) fn invalidate(&self, id: &str) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|_| "session cache lock poisoned")?;
+        state.sessions.remove(id);
+        state.recency.retain(|entry| entry != id);
+        Ok(())
+    }
+
     pub(crate) fn cached_count(&self) -> Result<usize, String> {
         self.state.lock().map(|state| state.sessions.len())
             .map_err(|_| "session cache lock poisoned".into())
