@@ -185,7 +185,7 @@ class NexuraApi(private val store: SessionStore) {
         call("/auth/v1/logout?scope=others", "POST", "{}", auth = true)
     }
 
-    /** Fetches TURN relay credentials from our authenticated Supabase Edge Function. */
+    data class LiveKitRoomCredentials(\n        val token: String,\n        val serverUrl: String,\n        val roomName: String,\n        val identity: String,\n        val expiresInSeconds: Int\n    )\n\n    /** Requests a short-lived, conversation-scoped LiveKit participant token. */\n    suspend fun liveKitRoomCredentials(conversationId: String, peerUserId: String): LiveKitRoomCredentials {\n        val payload = JSONObject()\n            .put("conversation_id", conversationId)\n            .put("peer_user_id", peerUserId)\n        val response = JSONObject(call("/functions/v1/livekit-token", "POST", payload.toString(), auth = true))\n        val token = response.optString("token")\n        val serverUrl = response.optString("server_url")\n        val roomName = response.optString("room_name")\n        val identity = response.optString("identity")\n        if (token.isBlank() || !serverUrl.startsWith("wss://") || roomName.isBlank() || identity.isBlank()) {\n            throw IOException(response.optString("error").ifBlank { "LiveKit не вернул данные для подключения" })\n        }\n        return LiveKitRoomCredentials(token, serverUrl, roomName, identity, response.optInt("expires_in", 600))\n    }\n\n    /** Fetches TURN relay credentials from our authenticated Supabase Edge Function. */
     suspend fun turnIceServers(callId: String, initiatorId: String, receiverId: String): List<TurnIceServerConfig> {
         val payload = JSONObject()
             .put("room", callId)
