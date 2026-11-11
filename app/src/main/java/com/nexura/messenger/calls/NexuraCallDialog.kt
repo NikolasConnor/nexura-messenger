@@ -230,7 +230,7 @@ fun NexuraCallDialog(
                                 coordinator?.initVideoRenderer(renderer)
                                 renderer.setEnableHardwareScaler(true)
                                 renderer.setMirror(false)
-                                renderer.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                                renderer.setScalingType(livekit.org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                                 remoteRenderer = renderer
                             }
                         },
