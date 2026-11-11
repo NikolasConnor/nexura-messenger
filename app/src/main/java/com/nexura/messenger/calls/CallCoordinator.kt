@@ -261,6 +261,7 @@ class CallCoordinator(
                     }
                     else -> Unit
                 }
+            }
         }
 
         newRoom.connect(credentials.serverUrl, credentials.token)
