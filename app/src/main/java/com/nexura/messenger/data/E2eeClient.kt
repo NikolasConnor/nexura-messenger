@@ -18,6 +18,7 @@ class E2eeClient(context: Context, userId: String) {
 
     private fun nativeSessionId(key: String): String = "$nativeSessionNamespace|$key"
     private fun nativeAccountId(): String = "$nativeSessionNamespace|${deviceId()}"
+    private fun invalidateNativeAccount() { runCatching { E2eeNative.nativeInvalidateAccount(nativeAccountId()) } }
     private fun cachedEncrypt(key: String, pickle: ByteArray, plaintext: ByteArray): Array<ByteArray> {
         val id = nativeSessionId(key)
         return try { E2eeNative.nativeEncryptCached(id, pickle, plaintext) }
@@ -84,8 +85,9 @@ class E2eeClient(context: Context, userId: String) {
 
         // Persist the account and public bundle before any network request. A
         // failed upload can safely be retried with the same stable key IDs.
-        store.save(ACCOUNT_KEY, generated[0])
-        store.save(PUBLIC_BUNDLE_KEY, updatedBundle)
+        try {
+            store.saveBatch(mapOf(ACCOUNT_KEY to generated[0], PUBLIC_BUNDLE_KEY to updatedBundle))
+        } catch (error: Throwable) { invalidateNativeAccount(); throw error }
         return newKeys.toString()
     }
 
@@ -129,8 +131,12 @@ class E2eeClient(context: Context, userId: String) {
         for (index in 0 until previous.length()) previous.optString(index).takeIf { it.isNotBlank() }?.let(combined::add)
         keyIds.forEach(combined::add)
         val updatedAccount = E2eeNative.nativeMarkKeysPublishedCached(nativeAccountId(), account)
-        store.save(ACCOUNT_KEY, updatedAccount)
-        store.save(PUBLISHED_KEY_IDS, org.json.JSONArray(combined.toList()).toString().toByteArray(StandardCharsets.UTF_8))
+        try {
+            store.saveBatch(mapOf(
+                ACCOUNT_KEY to updatedAccount,
+                PUBLISHED_KEY_IDS to org.json.JSONArray(combined.toList()).toString().toByteArray(StandardCharsets.UTF_8)
+            ))
+        } catch (error: Throwable) { invalidateNativeAccount(); throw error }
     }
 
     fun verifyPublishedOneTimeKey(
@@ -192,7 +198,9 @@ class E2eeClient(context: Context, userId: String) {
         if (!messageId.isNullOrBlank()) {
             states[messageCacheKey(conversationId, messageId)] = result[2]
         }
-        store.saveBatch(states)
+        try { store.saveBatch(states) } catch (error: Throwable) {
+            invalidateNativeAccount(); invalidateNativeSession(sessionKey(conversationId)); throw error
+        }
         invalidateNativeSession(sessionKey(conversationId))
         return result[2]
     }
@@ -249,11 +257,15 @@ class E2eeClient(context: Context, userId: String) {
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val result = E2eeNative.nativeAcceptInboundCached(nativeAccountId(), account, senderCurve25519, ciphertext)
         require(result.size == 3) { "Invalid group inbound-session result" }
-        store.saveBatch(mapOf(
-            ACCOUNT_KEY to result[0],
-            groupSessionKey(conversationId, peerUserId, peerDeviceId) to result[1],
-            messageCacheKey(conversationId, messageId) to result[2]
-        ))
+        try {
+            store.saveBatch(mapOf(
+                ACCOUNT_KEY to result[0],
+                groupSessionKey(conversationId, peerUserId, peerDeviceId) to result[1],
+                messageCacheKey(conversationId, messageId) to result[2]
+            ))
+        } catch (error: Throwable) {
+            invalidateNativeAccount(); invalidateNativeSession(groupSessionKey(conversationId, peerUserId, peerDeviceId)); throw error
+        }
         invalidateNativeSession(groupSessionKey(conversationId, peerUserId, peerDeviceId))
         return result[2]
     }
