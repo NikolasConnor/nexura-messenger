@@ -2556,6 +2556,7 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
                                     val uid = store.userId ?: throw IOException("Сессия истекла")
                                     val freshClient = E2eeClient(context.applicationContext, uid)
                                     val available = api.publishE2eeDevice(freshClient)
+                                    api.removeOtherOwnE2eeDevices(freshClient.deviceId())
                                     e2eeClient = freshClient
                                     e2eeRecoveryRequired = false
                                     e2eeStatus = "Создано новое устройство · старые сообщения не расшифруются"
