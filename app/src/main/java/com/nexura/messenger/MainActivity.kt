@@ -67,6 +67,8 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -90,6 +92,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -166,6 +169,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var peerReadReceiptAt by remember { mutableStateOf<String?>(null) }
     var canManagePins by remember { mutableStateOf(false) }
     var lastSyncedMessageTimestamp by remember { mutableStateOf<String?>(null) }
+    var lastSyncedMessageId by remember { mutableStateOf<String?>(null) }
+    var hasMoreMessages by remember { mutableStateOf(false) }
+    var loadingOlderMessages by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
     var chatSearchOpen by remember { mutableStateOf(false) }
@@ -431,6 +437,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         draft = chatDrafts[chat.id].orEmpty()
         messages = emptyList()
         lastSyncedMessageTimestamp = null
+        lastSyncedMessageId = null
+        hasMoreMessages = false
+        loadingOlderMessages = false
         messageReactions = emptyMap()
         pinnedMessageId = null
         canManagePins = false
@@ -439,10 +448,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         chatSearchQuery = ""
         scope.launch {
             try {
-                val loadedMessages = api.messages(chat.id, e2eeClient)
+                val loadedMessages = api.messages(chat.id, e2eeClient, pageSize = 30)
                 if (selected?.id == chat.id) {
                     messages = loadedMessages
-                    lastSyncedMessageTimestamp = loadedMessages.maxOfOrNull { it.createdAt } ?: "1970-01-01T00:00:00Z"
+                    hasMoreMessages = loadedMessages.size >= 30
+                    val newest = loadedMessages.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                    lastSyncedMessageTimestamp = newest?.createdAt ?: "1970-01-01T00:00:00Z"
+                    lastSyncedMessageId = newest?.id
                     messageReactions = api.messageReactions(chat.id)
                     pinnedMessageId = api.pinnedMessage(chat.id)
                     canManagePins = api.canManageConversation(chat.id)
@@ -590,17 +602,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 try {
                     if (currentChat != null) {
                         val lastTimestamp = lastSyncedMessageTimestamp
-                        val latest = api.messages(currentChat.id, e2eeClient, lastTimestamp)
+                        val latest = api.messages(currentChat.id, e2eeClient, lastTimestamp, afterMessageId = lastSyncedMessageId)
                         if (currentChat.kind == "direct" && System.currentTimeMillis() - lastReceiptRefresh >= 15_000L) {
                             peerReadReceiptAt = api.peerReadReceiptAt(currentChat.id, currentChat.peerUserId)
                             lastReceiptRefresh = System.currentTimeMillis()
                         }
                         if (selected?.id == currentChat.id && latest.isNotEmpty()) {
-                            messages = (messages + latest).distinctBy { it.id }.sortedBy { it.createdAt }
-                            lastSyncedMessageTimestamp = maxOf(
-                                lastSyncedMessageTimestamp ?: latest.first().createdAt,
-                                latest.maxOf { it.createdAt }
-                            )
+                            messages = (messages + latest).distinctBy { it.id }.sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            if (newest != null) {
+                                val currentTimestamp = lastSyncedMessageTimestamp
+                                val currentId = lastSyncedMessageId
+                                if (currentTimestamp == null || newest.createdAt > currentTimestamp ||
+                                    (newest.createdAt == currentTimestamp && newest.id > currentId.orEmpty())) {
+                                    lastSyncedMessageTimestamp = newest.createdAt
+                                    lastSyncedMessageId = newest.id
+                                }
+                            }
                         }
                     } else {
                         chats = api.chats()
@@ -1250,7 +1268,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 val id = api.createDirect(user.id)
                                                 val chat = ChatItem(id, user.displayName, "direct", null, avatar = user.avatar, peerUserId = user.id)
                                                 selected = chat
-                                                messages = api.messages(id, e2eeClient)
+                                                openChat(chat)
                                                 loadChats()
                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
                                         }
@@ -1958,8 +1976,48 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             } else {
                                 val messageListState = rememberLazyListState()
+                                var suppressNextAutoScroll by remember(chat.id) { mutableStateOf(false) }
+                                LaunchedEffect(chat.id, messageListState) {
+                                    snapshotFlow { messageListState.firstVisibleItemIndex to messageListState.isScrollInProgress }
+                                        .collectLatest { (firstVisibleIndex, scrolling) ->
+                                            if (scrolling && firstVisibleIndex <= 1 && hasMoreMessages && !loadingOlderMessages && chatSearchQuery.isBlank()) {
+                                                val cursor = messages.minWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                                if (cursor != null) {
+                                                    loadingOlderMessages = true
+                                                    try {
+                                                        val anchorIndex = messageListState.firstVisibleItemIndex
+                                                        val anchorOffset = messageListState.firstVisibleItemScrollOffset
+                                                        val older = api.messages(
+                                                            chat.id, e2eeClient,
+                                                            beforeCreatedAt = cursor.createdAt,
+                                                            beforeMessageId = cursor.id,
+                                                            pageSize = 30
+                                                        )
+                                                        if (selected?.id == chat.id) {
+                                                            val knownIds = messages.asSequence().map { it.id }.toHashSet()
+                                                            val additions = older.filterNot { it.id in knownIds }
+                                                            hasMoreMessages = older.size >= 30 && additions.isNotEmpty()
+                                                            if (additions.isNotEmpty()) {
+                                                                suppressNextAutoScroll = true
+                                                                messages = (additions + messages).distinctBy { it.id }
+                                                                    .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                                                withFrameNanos { }
+                                                                messageListState.scrollToItem(anchorIndex + additions.size, anchorOffset)
+                                                            }
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        error = e.message ?: "Не удалось загрузить предыдущие сообщения"
+                                                    } finally {
+                                                        loadingOlderMessages = false
+                                                    }
+                                                }
+                                            }
+                                        }
+                                }
                                 LaunchedEffect(chat.id, visibleMessages.size, chatSearchQuery, scrollToMessageId) {
-                                    if (visibleMessages.isNotEmpty()) {
+                                    if (suppressNextAutoScroll) {
+                                        suppressNextAutoScroll = false
+                                    } else if (visibleMessages.isNotEmpty()) {
                                         val targetIndex = scrollToMessageId?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
                                         // Avoid expensive fling animation on every sync, especially on low-memory phones.
                                         if (lowRamDevice) {
@@ -1975,7 +2033,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor),
                                     contentPadding = PaddingValues(bottom = 10.dp)
                                 ) {
-                                    items(visibleMessages, key = { it.id }) { msg ->
+                                    items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
                                     val mine = msg.senderId == store.userId
                                     val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
                                     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
