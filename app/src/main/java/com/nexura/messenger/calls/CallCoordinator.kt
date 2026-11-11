@@ -203,8 +203,8 @@ class CallCoordinator(
 
         roomEventsJob?.cancel()
         roomEventsJob = scope.launch {
-            newRoom.events.collect { event ->
-                if (room !== newRoom || closed) return
+            newRoom.events.collect { event: RoomEvent ->
+                if (room !== newRoom || closed) return@collect
                 when (event) {
                     is RoomEvent.TrackSubscribed -> {
                         if (event.participant.identity?.value == peerUserId) {
