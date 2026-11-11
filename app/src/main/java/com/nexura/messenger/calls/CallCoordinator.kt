@@ -139,15 +139,6 @@ class CallCoordinator(
         scope.launch {
             runCatching { api.notifyIncomingCall(chatId, peerUserId, expectedId, video) }
         }
-        scope.launch {
-            try {
-                joinLiveKit(expectedId, video)
-            } catch (error: Exception) {
-                if (callId == expectedId && !closed) {
-                    failCall("Не удалось подключиться к LiveKit", error.message ?: "Проверьте настройки LiveKit")
-                }
-            }
-        }
     }
 
     fun accept() {
@@ -302,17 +293,20 @@ class CallCoordinator(
                     video = pendingVideo
                 ))
             }
-            "answer" -> if (id == callId) {
+            "answer" -> if (id == callId && !accepted) {
                 accepted = true
                 ringTimeoutJob?.cancel()
                 ringTimeoutJob = null
                 armConnectionTimeout(id)
                 publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true))
-                if (room?.remoteParticipants?.values?.any {
-                    it.identity?.value == peerUserId &&
-                        it.state == io.livekit.android.room.participant.Participant.State.ACTIVE
-                } == true) {
-                    markConnected()
+                scope.launch {
+                    try {
+                        joinLiveKit(id, videoMode)
+                    } catch (error: Exception) {
+                        if (callId == id && !closed) {
+                            failCall("Не удалось подключиться к LiveKit", error.message ?: "Проверьте настройки LiveKit")
+                        }
+                    }
                 }
             }
             "end", "decline", "busy" -> if (id == callId || id == pendingCallId) {
