@@ -17,8 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.launchIn
+import io.livekit.android.events.collect
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.UUID
@@ -203,9 +202,10 @@ class CallCoordinator(
         pendingRenderers.clear()
 
         roomEventsJob?.cancel()
-        roomEventsJob = newRoom.events.onEach { event ->
-            if (room === newRoom && !closed) {
-                                when (event) {
+        roomEventsJob = scope.launch {
+            newRoom.events.collect { event ->
+                if (room === newRoom && !closed) {
+                    when (event) {
                                     is RoomEvent.TrackSubscribed -> {
                                         if (event.participant.identity?.value == peerUserId) {
                                             val track = event.track as? VideoTrack
@@ -259,10 +259,11 @@ class CallCoordinator(
                                             failCall("Не удалось подключиться к LiveKit", event.error.message ?: "Ошибка соединения")
                                         }
                                     }
-                                    else -> Unit
+                        else -> Unit
+                    }
                 }
             }
-        }.launchIn(scope)
+        }
 
         newRoom.connect(credentials.serverUrl, credentials.token)
         if (callId != expectedId || closed) return
