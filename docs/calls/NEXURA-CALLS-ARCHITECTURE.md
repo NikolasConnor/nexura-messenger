@@ -1,6 +1,6 @@
 # Nexura Calls — architecture and migration plan
 
-Status: design baseline, not yet deployed.
+Status: LiveKit Cloud token service deployed to Supabase; Android media migration remains in progress.
 
 ## Goals
 
@@ -36,21 +36,14 @@ Supabase remains responsible for:
 
 The token function must verify the caller's Supabase JWT and that caller and recipient are members of the same conversation. It must mint a short-lived token scoped to one room and one identity. Media-server API secrets must never ship in the Android APK.
 
-### Media plane (new Nexura-controlled infrastructure)
+### Media plane (LiveKit Cloud)
 
-Recommended first implementation: self-host the open-source LiveKit Server as the SFU media engine, operated by Nexura on a new dedicated Linux VM/VPS. This is not LiveKit Cloud: Nexura controls the deployment, domain, API keys, server configuration and operational data.
+The selected media plane is the user's existing LiveKit Cloud project. LiveKit Cloud operates the SFU; Nexura keeps ownership of the app-level call lifecycle and authorization. Do not provision a VPS or use the HP Pavilion g6 / home Ubuntu machine for this migration.
 
-Hosting decision:
-- Provision a new VPS specifically for Nexura Calls; do not use the HP Pavilion g6 / home Ubuntu machine.
-- Do not assume the existing Render service or Supabase Edge Functions can host the media plane.
-- Keep the new media plane separate from production chat/backend workloads initially, so media load cannot destabilize messaging.
-- Choose the VPS size after estimating concurrent calls, video quality, bandwidth and region latency. Start with a staging instance and load-test before production sizing.
-
-Why this foundation:
-- production-grade SFU and room/participant lifecycle;
-- Android SDK and reconnect/network-state facilities;
-- integrated ICE/TURN options;
-- built-in media E2EE support, with key distribution remaining the application's responsibility.
+- Keep media routing on LiveKit Cloud and control-plane data on the existing Supabase project.
+- The LiveKit API key and secret are stored only as Supabase Edge Function secrets; they must never be shipped in the APK or committed to GitHub.
+- The Android client receives only a short-lived, room-scoped participant token and the project's WSS URL.
+- Confirm the LiveKit Cloud plan's quotas, region and any TURN/network fallback limits before production rollout; do not assume unlimited or free capacity.
 
 Nexura owns the product layer around it: call authorization, room naming, call invitations, participant policy, push flow, call history, key distribution, UI and diagnostics.
 
@@ -77,24 +70,15 @@ Keep and improve:
 
 ## Hosting and network requirements
 
-Supabase Edge Functions are serverless control-plane functions, not long-running UDP media servers. The currently connected Render web service belongs to another project and is not configured as a Nexura media server.
-
-A self-hosted SFU on the new VPS needs:
-- stable public IP and DNS name;
-- trusted TLS certificate;
-- inbound UDP media ports (default LiveKit range 50000–60000/UDP);
-- TCP fallback (default 7881/TCP);
-- HTTPS/WebSocket endpoint (typically 443/TCP);
-- TURN/TLS or TURN/UDP reachability for restrictive networks;
-- enough bandwidth and CPU for relayed media.
+Supabase Edge Functions remain control-plane services and do not relay media. LiveKit Cloud operates the SFU endpoint and media networking. Nexura's Android client must connect to the exact WSS URL returned by the authenticated token function. Test real mobile carriers, restrictive Wi-Fi, TCP/TURN fallback and Wi-Fi-to-cellular handoff; do not assume every network path is available.
 
 The legacy home Coturn host is explicitly excluded. A new managed TURN service or TURN deployment on suitable VPS infrastructure must be evaluated separately; do not keep the old home machine as a dependency.
 
 ## Delivery stages
 
 1. Inventory (no production changes): inspect current Supabase functions/secrets and GitHub build configuration without revealing secret values; identify the existing TURN dependency and plan its replacement. No access to or dependency on the HP Pavilion g6 is required.
-2. Server staging: provision a new VPS in a suitable European region; configure TLS, media ports, API key/secret and monitoring. No production traffic yet.
-3. Control plane: add authenticated short-lived room-token issuance and call-room authorization in Supabase.
+2. Cloud staging: verify the LiveKit Cloud project URL, API key/secret and project region; check plan quotas. No production traffic yet.
+3. Control plane: deploy and verify the authenticated `livekit-token` Edge Function, which checks the Supabase user and direct-conversation membership before issuing a 10-minute room-scoped token.
 4. Android prototype: add the LiveKit Android SDK behind a transport interface and implement 1:1 audio.
 5. E2EE: integrate room media E2EE with Nexura's verified device-key exchange; fail closed if keys are unavailable.
 6. Video and background: add video, FCM incoming calls, foreground service, lock-screen notification actions and network handoff.
