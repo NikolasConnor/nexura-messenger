@@ -279,9 +279,10 @@ class E2eeClient(context: Context, userId: String) {
 
     @Synchronized
     fun markGroupOutboundDelivered(conversationId: String, messageId: String, recipients: List<E2eeGroupRecipientEnvelope>) {
-        recipients.forEach { recipient ->
-            store.delete(groupOutboxKey(conversationId, messageId, recipient.userId, recipient.deviceId))
+        val keys = recipients.map { recipient ->
+            groupOutboxKey(conversationId, messageId, recipient.userId, recipient.deviceId)
         }
+        if (keys.isNotEmpty()) store.deleteBatch(keys)
     }
 
     @Synchronized
