@@ -9,7 +9,7 @@ import io.livekit.android.room.Room
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
 import io.livekit.android.room.track.LocalVideoTrack
-import livekit.org.webrtc.SurfaceViewRenderer
+import io.livekit.android.renderer.SurfaceViewRenderer
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
