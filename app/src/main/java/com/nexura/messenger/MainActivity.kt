@@ -231,6 +231,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var editDraft by remember { mutableStateOf("") }
     var e2eeClient by remember { mutableStateOf<E2eeClient?>(null) }
     var e2eeStatus by remember { mutableStateOf("Шифрование не проверено") }
+    var e2eeRecoveryRequired by remember { mutableStateOf(false) }
+    var recoveryCodeInput by remember { mutableStateOf("") }
+    var backupRecoveryCode by remember { mutableStateOf("") }
+    var backupBusy by remember { mutableStateOf(false) }
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
@@ -541,17 +545,24 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val e2eeUserId = store.userId
                 val localE2eeClient = if (!e2eeUserId.isNullOrBlank()) {
                     runCatching { E2eeClient(context.applicationContext, e2eeUserId) }
-                        .onSuccess { e2eeClient = it }
                         .onFailure { e2eeStatus = "Не удалось подготовить E2EE: ${it.message ?: "ошибка устройства"}" }
                         .getOrNull()
                 } else null
                 chats = api.chats()
                 if (localE2eeClient != null) {
-                    try {
-                        val available = api.publishE2eeDevice(localE2eeClient)
-                        e2eeStatus = "Устройство зарегистрировано · $available ключей"
-                    } catch (e: Exception) {
-                        e2eeStatus = "Каталог ключей недоступен: ${e.message ?: "ожидается настройка сервера"}"
+                    if (!localE2eeClient.hasLocalDevice() && api.hasE2eeBackup()) {
+                        e2eeClient = null
+                        e2eeRecoveryRequired = true
+                        e2eeStatus = "Найдена защищённая копия. Требуется восстановление ключей."
+                    } else {
+                        e2eeClient = localE2eeClient
+                        try {
+                            val available = api.publishE2eeDevice(localE2eeClient)
+                            e2eeStatus = "Устройство зарегистрировано · $available ключей"
+                            runCatching { api.syncE2eeBackupIfEnabled(localE2eeClient) }
+                        } catch (e: Exception) {
+                            e2eeStatus = "Каталог ключей недоступен: ${e.message ?: "ожидается настройка сервера"}"
+                        }
                     }
                 }
                 val pushToken = FirebaseMessaging.getInstance().token.await()
@@ -835,12 +846,40 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Сквозное шифрование", color = MainText, fontWeight = FontWeight.SemiBold)
                                 Text(e2eeStatus, color = if (e2eeStatus.startsWith("Устройство зарегистрировано")) Success else Color(0xFFFFC56E), fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
                                 val client = e2eeClient
-                                val bundle = runCatching { JSONObject(client?.ensureDevice() ?: "{}") }.getOrNull()
+                                val bundle = runCatching { JSONObject(if (client?.hasLocalDevice() == true) client.ensureDevice() else "{}") }.getOrNull()
                                 if (client != null && bundle != null && bundle.has("curve25519") && bundle.has("ed25519")) {
                                     Text("Отпечаток этого устройства", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp))
                                     Text(client.deviceFingerprint(bundle.getString("curve25519"), bundle.getString("ed25519")), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Text("Сравните отпечатки устройств лично или по другому доверенному каналу. Текст, фото и видео шифруются до отправки. В личном чате пока поддерживается одно активное устройство собеседника.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
+                                if (client != null && client.hasLocalDevice()) {
+                                    OutlinedButton(onClick = {
+                                        scope.launch {
+                                            backupBusy = true
+                                            error = ""
+                                            notice = ""
+                                            try {
+                                                val code = client.createRecoveryCode()
+                                                backupRecoveryCode = code
+                                                api.uploadE2eeBackup(client)
+                                                notice = "Зашифрованная копия сохранена. Сохраните ключ восстановления отдельно."
+                                            } catch (e: Exception) { error = e.message ?: "Не удалось создать резервную копию" }
+                                            finally { backupBusy = false }
+                                        }
+                                    }, enabled = !backupBusy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), shape = RoundedCornerShape(12.dp)) {
+                                        Text(if (backupBusy) "Создаём копию…" else "Создать / обновить резервную копию")
+                                    }
+                                    val savedCode = backupRecoveryCode.ifBlank { client.recoveryCode().orEmpty() }
+                                    if (savedCode.isNotBlank()) {
+                                        Text("КЛЮЧ ВОССТАНОВЛЕНИЯ · СОХРАНИТЕ ВНЕ ТЕЛЕФОНА", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                                        Text(savedCode, color = MainText, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 6.dp).background(Surface2, RoundedCornerShape(8.dp)).clickable {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("Nexura recovery key", savedCode))
+                                            notice = "Ключ скопирован. Храните его в надёжном месте."
+                                        }.padding(10.dp))
+                                        Text("Без этого ключа сервер не сможет восстановить копию. Не отправляйте его никому.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                                    }
+                                }
                             }
                         }
                         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
@@ -2470,6 +2509,44 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
                     .clip(CircleShape)
                     .background(Bg)
             )
+            if (e2eeRecoveryRequired) {
+                AlertDialog(
+                    onDismissRequest = { },
+                    title = { Text("Восстановление защищённых чатов") },
+                    text = {
+                        Column {
+                            Text("Найдена резервная копия ключей этого аккаунта. Введите ключ восстановления, сохранённый при создании копии.")
+                            OutlinedTextField(value = recoveryCodeInput, onValueChange = { recoveryCodeInput = it.trim().take(64) },
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true,
+                                label = { Text("Ключ восстановления") })
+                            if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(enabled = !busy && recoveryCodeInput.isNotBlank(), onClick = {
+                            scope.launch {
+                                busy = true
+                                error = ""
+                                try {
+                                    val uid = store.userId ?: throw IOException("Сессия истекла")
+                                    val restoredClient = E2eeClient(context.applicationContext, uid)
+                                    api.restoreE2eeBackup(restoredClient, recoveryCodeInput)
+                                    val available = api.publishE2eeDevice(restoredClient)
+                                    e2eeClient = restoredClient
+                                    e2eeRecoveryRequired = false
+                                    e2eeStatus = "Ключи восстановлены · $available ключей"
+                                    recoveryCodeInput = ""
+                                    notice = "Защищённые ключи восстановлены. История снова доступна."
+                                } catch (e: Exception) { error = e.message ?: "Не удалось восстановить ключи" }
+                                finally { busy = false }
+                            }
+                        }) { Text(if (busy) "Восстанавливаем…" else "Восстановить") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { error = "Без восстановления старые зашифрованные сообщения останутся недоступны." }) { Text("Почему это нужно?") }
+                    }
+                )
+            }
         }
     }
 }
