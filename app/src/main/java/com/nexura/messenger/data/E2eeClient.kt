@@ -366,21 +366,22 @@ class E2eeClient(context: Context, userId: String) {
     }
 
 
-    /** Trust first-seen device identity; a later key change always requires manual verification. */
+    /**
+     * Require explicit fingerprint approval before any remote device can be used.
+     * Never trust a first-seen key automatically: a malicious key directory could
+     * otherwise replace it during the first conversation.
+     */
     @Synchronized
-    fun trustRemoteDeviceOnFirstUse(userId: String, deviceId: String, curveKey: String, edKey: String): Boolean {
+    fun requireRemoteDeviceTrusted(userId: String, deviceId: String, curveKey: String, edKey: String) {
         require(userId.isNotBlank() && deviceId.isNotBlank()) { "Invalid remote device identity" }
         require(curveKey.length in 40..64 && edKey.length in 40..64) { "Invalid remote device keys" }
         val saved = store.load(trustedDeviceKey(userId, deviceId))
-        if (saved == null) {
-            trustRemoteDevice(userId, deviceId, curveKey, edKey)
-            return true
-        }
+            ?: throw IllegalStateException("Сначала сверьте и подтвердите отпечаток устройства собеседника.")
         val identity = runCatching { JSONObject(String(saved, StandardCharsets.UTF_8)) }.getOrNull()
             ?: throw IllegalStateException("Сохранённая запись доверия повреждена")
-        if (identity.optString("curve25519") != curveKey || identity.optString("ed25519") != edKey)
-            throw IllegalStateException("Ключ устройства изменился. Сверьте отпечаток с собеседником.")
-        return false
+        if (identity.optString("curve25519") != curveKey || identity.optString("ed25519") != edKey) {
+            throw IllegalStateException("Ключ устройства изменился. Сверьте новый отпечаток с собеседником.")
+        }
     }
 
     @Synchronized
