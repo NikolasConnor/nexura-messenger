@@ -1034,6 +1034,15 @@ class NexuraApi(private val store: SessionStore) {
         return rows.length() == 1
     }
 
+
+    suspend fun hasRegisteredE2eeDevice(): Boolean {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call(
+            "/rest/v1/e2ee_devices?select=device_id&user_id=eq.$uid&is_active=eq.true&limit=1"
+        ))
+        return rows.length() > 0
+    }
+
     suspend fun uploadE2eeBackup(e2ee: E2eeClient): Boolean {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (!e2ee.needsBackupSync()) return false
