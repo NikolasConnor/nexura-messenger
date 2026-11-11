@@ -550,7 +550,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 } else null
                 chats = api.chats()
                 if (localE2eeClient != null) {
-                    if (!localE2eeClient.hasLocalDevice() && api.hasE2eeBackup()) {
+                    val hadLocalDevice = localE2eeClient.hasLocalDevice()
+                    val previousServerDevice = !hadLocalDevice && api.hasRegisteredE2eeDevice()
+                    val cloudBackupExists = !hadLocalDevice && api.hasE2eeBackup()
+                    if (!hadLocalDevice && cloudBackupExists) {
                         e2eeClient = null
                         e2eeRecoveryRequired = true
                         e2eeStatus = "Найдена защищённая копия. Требуется восстановление ключей."
@@ -558,7 +561,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         e2eeClient = localE2eeClient
                         try {
                             val available = api.publishE2eeDevice(localE2eeClient)
-                            e2eeStatus = "Устройство зарегистрировано · $available ключей"
+                            e2eeStatus = if (previousServerDevice) {
+                                "Создано новое E2EE-устройство · старые ключи не найдены"
+                            } else "Устройство зарегистрировано · $available ключей"
                             runCatching { api.syncE2eeBackupIfEnabled(localE2eeClient) }
                         } catch (e: Exception) {
                             e2eeStatus = "Каталог ключей недоступен: ${e.message ?: "ожидается настройка сервера"}"
@@ -2543,7 +2548,22 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
                         }) { Text(if (busy) "Восстанавливаем…" else "Восстановить") }
                     },
                     dismissButton = {
-                        TextButton(onClick = { error = "Без восстановления старые зашифрованные сообщения останутся недоступны." }) { Text("Почему это нужно?") }
+                        TextButton(enabled = !busy, onClick = {
+                            scope.launch {
+                                busy = true
+                                error = ""
+                                try {
+                                    val uid = store.userId ?: throw IOException("Сессия истекла")
+                                    val freshClient = E2eeClient(context.applicationContext, uid)
+                                    val available = api.publishE2eeDevice(freshClient)
+                                    e2eeClient = freshClient
+                                    e2eeRecoveryRequired = false
+                                    e2eeStatus = "Создано новое устройство · старые сообщения не расшифруются"
+                                    notice = "Начато с нового устройства. Старая история без ключа восстановления недоступна."
+                                } catch (e: Exception) { error = e.message ?: "Не удалось создать новое устройство" }
+                                finally { busy = false }
+                            }
+                        }) { Text("Начать без старой истории") }
                     }
                 )
             }
