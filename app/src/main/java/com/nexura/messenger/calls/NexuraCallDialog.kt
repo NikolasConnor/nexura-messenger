@@ -213,7 +213,7 @@ fun NexuraCallDialog(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(if (ui.video) "Видеозвонок" else "Аудиозвонок", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                    Text(if (ui.incoming) "Входящий вызов" else if (ui.active) "Защищённое соединение Nexura" else "Личный звонок Nexura", color = Color(0xFFA4AFBF), fontSize = 12.sp)
+                    Text(if (ui.incoming) "Входящий вызов" else if (ui.active) "Звонок через LiveKit" else "Личный звонок Nexura", color = Color(0xFFA4AFBF), fontSize = 12.sp)
                 }
                 Box(Modifier.background(Color(0xFF263B50), androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(horizontal = 11.dp, vertical = 7.dp)) {
                     Text("NEXURA", color = Color(0xFFB8D6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
