@@ -203,8 +203,9 @@ class CallCoordinator(
 
         roomEventsJob?.cancel()
         roomEventsJob = scope.launch {
-            newRoom.events.collect { event: RoomEvent ->
-                if (room !== newRoom || closed) return@collect
+            newRoom.events.collect(object : kotlinx.coroutines.flow.FlowCollector<RoomEvent> {
+                override suspend fun emit(event: RoomEvent) {
+                if (room !== newRoom || closed) return
                 when (event) {
                     is RoomEvent.TrackSubscribed -> {
                         if (event.participant.identity?.value == peerUserId) {
@@ -261,7 +262,8 @@ class CallCoordinator(
                     }
                     else -> Unit
                 }
-            }
+                }
+            })
         }
 
         newRoom.connect(credentials.serverUrl, credentials.token)
