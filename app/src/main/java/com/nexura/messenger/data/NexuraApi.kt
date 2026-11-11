@@ -19,7 +19,7 @@ data class ChatItem(val id: String, val title: String, val kind: String, val upd
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class ContactMatch(val phone: String, val userId: String, val displayName: String, val avatar: String)
-data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text", val replyToId: String? = null, val editedAt: String? = null)
+data class MessageItem(val id: String, val senderId: String, val content: String, val createdAt: String, val messageType: String = "text", val replyToId: String? = null, val editedAt: String? = null, val deliveryStatus: String = "sent")
 
 class NexuraApi(private val store: SessionStore) {
     companion object {
@@ -225,8 +225,9 @@ class NexuraApi(private val store: SessionStore) {
             .put("content", content)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
-        notifyChatPush(safeChatId, content)
     }
+
+    suspend fun sendPushForMessage(chatId: String, preview: String) { notifyChatPush(chatId, preview) }
 
     suspend fun markChatRead(chatId: String) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
