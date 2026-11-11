@@ -303,22 +303,44 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
     }
-    suspend fun messages(chatId: String, e2ee: E2eeClient? = null, afterCreatedAt: String? = null, mediaOnly: Boolean = false, beforeCreatedAt: String? = null): List<MessageItem> {
+    suspend fun messages(
+        chatId: String,
+        e2ee: E2eeClient? = null,
+        afterCreatedAt: String? = null,
+        mediaOnly: Boolean = false,
+        beforeCreatedAt: String? = null,
+        beforeMessageId: String? = null,
+        afterMessageId: String? = null,
+        pageSize: Int = 30
+    ): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val afterFilter = afterCreatedAt?.let {
-            "&created_at=gte.${java.net.URLEncoder.encode(it, "UTF-8")}"
-        }.orEmpty()
-        val beforeFilter = beforeCreatedAt?.let {
-            "&created_at=lte.${java.net.URLEncoder.encode(it, "UTF-8")}"
-        }.orEmpty()
-        val limit = if (mediaOnly) 1000 else if (afterCreatedAt == null && beforeCreatedAt == null) 50 else 100
+        val afterTimestamp = afterCreatedAt?.let { java.net.URLEncoder.encode(it, "UTF-8") }
+        val beforeTimestamp = beforeCreatedAt?.let { java.net.URLEncoder.encode(it, "UTF-8") }
+        val afterFilter = when {
+            afterTimestamp != null && !afterMessageId.isNullOrBlank() ->
+                "&or=(created_at.gt.$afterTimestamp,and(created_at.eq.$afterTimestamp,id.gt.${normalizeUuid(afterMessageId)}))"
+            afterTimestamp != null -> "&created_at=gte.$afterTimestamp"
+            else -> ""
+        }
+        val beforeFilter = when {
+            beforeTimestamp != null && !beforeMessageId.isNullOrBlank() ->
+                "&or=(created_at.lt.$beforeTimestamp,and(created_at.eq.$beforeTimestamp,id.lt.${normalizeUuid(beforeMessageId)}))"
+            beforeTimestamp != null -> "&created_at=lte.$beforeTimestamp"
+            else -> ""
+        }
+        val limit = if (mediaOnly) 1000 else if (afterCreatedAt != null) 100 else pageSize.coerceIn(1, 100)
         val mediaFilter = if (mediaOnly) "&message_type=in.(media,image,file)" else ""
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
                 "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
         ))
+        // Fetch newest-first for cursor pages, then decrypt chronologically within each page.
+        val chronologicalIndexes = (0 until raw.length()).sortedWith(
+            compareBy<Int> { raw.getJSONObject(it).optString("created_at") }
+                .thenBy { raw.getJSONObject(it).optString("id") }
+        )
         val rendered = withContext(Dispatchers.Default) {
-            (0 until raw.length()).map { i ->
+            chronologicalIndexes.map { i ->
             val m = raw.getJSONObject(i)
             val id = m.getString("id")
             val senderId = m.optString("sender_id")
@@ -412,7 +434,7 @@ class NexuraApi(private val store: SessionStore) {
                     securityWarning = type == "text" || type == "image" || type == "file"
                 )
             }
-            }.sortedBy { it.createdAt }
+            }.sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
         }
         if (e2ee != null) runCatching { syncE2eeBackupIfEnabled(e2ee) }
         return rendered
