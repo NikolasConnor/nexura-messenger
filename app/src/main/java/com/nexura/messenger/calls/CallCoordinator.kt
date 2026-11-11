@@ -206,7 +206,7 @@ class CallCoordinator(
                 if (room !== newRoom || closed) return@collect
                 when (event) {
                     is RoomEvent.TrackSubscribed -> {
-                        if (event.participant.identity?.toString() == peerUserId) {
+                        if (event.participant.identity?.value == peerUserId) {
                             val track = event.track as? VideoTrack
                             if (track != null) publish((lastState ?: CallUiState()).copy(remoteVideoTrack = track))
                         }
@@ -218,10 +218,10 @@ class CallCoordinator(
                         }
                     }
                     is RoomEvent.ParticipantConnected -> {
-                        if (event.participant.identity?.toString() == peerUserId) markConnected()
+                        if (event.participant.identity?.value == peerUserId) markConnected()
                     }
                     is RoomEvent.ParticipantDisconnected -> {
-                        if (event.participant.identity?.toString() == peerUserId && lastState?.active == true) {
+                        if (event.participant.identity?.value == peerUserId && lastState?.active == true) {
                             finish()
                             publish(CallUiState(status = "Звонок завершён", error = "Собеседник отключился"))
                         }
@@ -230,7 +230,7 @@ class CallCoordinator(
                         publish((lastState ?: CallUiState()).copy(status = "Восстанавливаем связь…"))
                     }
                     is RoomEvent.Reconnected -> {
-                        if (newRoom.remoteParticipants.values.any { it.identity?.toString() == peerUserId }) {
+                        if (newRoom.remoteParticipants.values.any { it.identity?.value == peerUserId }) {
                             markConnected()
                         } else {
                             publish((lastState ?: CallUiState()).copy(status = "Ожидаем собеседника…", connected = false))
@@ -263,7 +263,7 @@ class CallCoordinator(
             val localTrack = newRoom.localParticipant.getTrackPublication(Track.Source.CAMERA)?.track as? VideoTrack
             publish((lastState ?: CallUiState()).copy(localVideoTrack = localTrack))
         }
-        if (newRoom.remoteParticipants.values.any { it.identity?.toString() == peerUserId }) {
+        if (newRoom.remoteParticipants.values.any { it.identity?.value == peerUserId }) {
             markConnected()
         } else if (accepted) {
             publish((lastState ?: CallUiState()).copy(status = "Ожидаем собеседника…"))
@@ -294,7 +294,7 @@ class CallCoordinator(
                 ringTimeoutJob = null
                 armConnectionTimeout(id)
                 publish((lastState ?: CallUiState()).copy(status = "Соединяем…", incoming = false, active = true))
-                if (room?.remoteParticipants?.values?.any { it.identity?.toString() == peerUserId } == true) {
+                if (room?.remoteParticipants?.values?.any { it.identity?.value == peerUserId } == true) {
                     markConnected()
                 }
             }
