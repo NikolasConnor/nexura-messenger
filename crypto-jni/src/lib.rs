@@ -1,5 +1,7 @@
 mod session_manager;
 
+// Stage 1: bounded per-session cache; JNI integration is intentionally deferred
+// until the repository persistence and recovery path is added in a later stage.
 use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::sys::{jboolean, jint, jobjectArray, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
