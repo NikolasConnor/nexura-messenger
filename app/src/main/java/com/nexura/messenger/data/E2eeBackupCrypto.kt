@@ -19,7 +19,7 @@ object E2eeBackupCrypto {
     private const val IV_BYTES = 12
     private const val KEY_BYTES = 32
     private const val TAG_BITS = 128
-    private const val MAX_PLAINTEXT_BYTES = 12 * 1024 * 1024
+    private const val MAX_PLAINTEXT_BYTES = 10 * 1024 * 1024
     private const val AAD_PREFIX = "nexura-e2ee-cloud-backup:v1:"
 
     fun generateRecoveryCode(): String {
