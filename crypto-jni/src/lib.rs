@@ -1,5 +1,14 @@
 mod session_manager;
 
+use std::sync::OnceLock;
+use session_manager::SessionManager;
+
+static SESSION_MANAGER: OnceLock<SessionManager> = OnceLock::new();
+
+fn session_manager() -> &'static SessionManager {
+    SESSION_MANAGER.get_or_init(|| SessionManager::new(256))
+}
+
 // Stage 1: bounded per-session cache; JNI integration is intentionally deferred
 // until the repository persistence and recovery path is added in a later stage.
 use jni::objects::{JByteArray, JClass, JObject, JString};
@@ -232,4 +241,52 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeDecrypt(
         Ok(value) => value,
         Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() }
     }
+}
+
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeCacheSession(mut env: JNIEnv, _class: JClass, session_id: JString, session_pickle: JByteArray) -> jboolean {
+    let result = (|| {
+        let id = read_string(&mut env, &session_id)?;
+        if id.is_empty() || id.len() > 512 { return Err("invalid native session id".to_string()); }
+        let bytes = read_bytes(&mut env, &session_pickle)?;
+        let pickle = utf8(&bytes, "session pickle")?.to_owned();
+        session_manager().get_or_load(&id, || unpickle_session(&pickle).map_err(|e| e.to_string()))?;
+        Ok::<(), String>(())
+    })();
+    match result { Ok(()) => JNI_TRUE, Err(error) => { set_error(&mut env, &error); JNI_FALSE } }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeInvalidateSession(mut env: JNIEnv, _class: JClass, session_id: JString) {
+    let result = (|| { let id = read_string(&mut env, &session_id)?; session_manager().invalidate(&id) })();
+    if let Err(error) = result { set_error(&mut env, &error); }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeEncryptCached(mut env: JNIEnv, _class: JClass, session_id: JString, plaintext: JByteArray) -> jobjectArray {
+    let result = (|| {
+        let id = read_string(&mut env, &session_id)?;
+        let session = session_manager().get_or_load(&id, || Err("session is not loaded".into()))?;
+        let plaintext = read_bytes(&mut env, &plaintext)?;
+        let mut guard = session.lock().map_err(|_| "Olm session lock poisoned")?;
+        let envelope = encrypt_message(&mut guard, &plaintext).map_err(|e| e.to_string())?;
+        let updated = pickle_session(&guard).map_err(|e| e.to_string())?;
+        byte_array_result(&mut env, vec![updated.into_bytes(), envelope.into_bytes()])
+    })();
+    match result { Ok(value) => value, Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() } }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeDecryptCached(mut env: JNIEnv, _class: JClass, session_id: JString, envelope: JString) -> jobjectArray {
+    let result = (|| {
+        let id = read_string(&mut env, &session_id)?;
+        let session = session_manager().get_or_load(&id, || Err("session is not loaded".into()))?;
+        let envelope = read_string(&mut env, &envelope)?;
+        let mut guard = session.lock().map_err(|_| "Olm session lock poisoned")?;
+        let plaintext = decrypt_message(&mut guard, &envelope).map_err(|e| e.to_string())?;
+        let updated = pickle_session(&guard).map_err(|e| e.to_string())?;
+        byte_array_result(&mut env, vec![updated.into_bytes(), plaintext])
+    })();
+    match result { Ok(value) => value, Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() } }
 }
