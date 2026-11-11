@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Olm E2EE client used by NexuraApi for direct and group conversations.
@@ -13,6 +14,9 @@ import java.util.UUID
  */
 class E2eeClient(context: Context, userId: String) {
     private val store = E2eeStateStore(context.applicationContext, userId)
+    // Olm ratchets are sequential per device session, but independent chats can progress concurrently.
+    private val sessionLocks = ConcurrentHashMap<String, Any>()
+    private fun sessionLock(key: String): Any = sessionLocks.getOrPut(key) { Any() }
 
     @Synchronized
     fun ensureDevice(oneTimeKeyCount: Int = 20): String {
@@ -235,7 +239,6 @@ class E2eeClient(context: Context, userId: String) {
         return result[2]
     }
 
-    @Synchronized
     fun encryptGroupMessage(
         conversationId: String,
         peerUserId: String,
@@ -244,18 +247,20 @@ class E2eeClient(context: Context, userId: String) {
         messageId: String
     ): String {
         val key = groupSessionKey(conversationId, peerUserId, peerDeviceId)
-        val session = store.load(key) ?: error("No E2EE group session for recipient device")
-        val result = E2eeNative.nativeEncrypt(session, plaintext)
-        require(result.size == 2) { "Invalid group encryption result" }
-        val ciphertext = String(result[1], StandardCharsets.UTF_8)
-        store.saveBatch(mapOf(
-            key to result[0],
-            messageCacheKey(conversationId, messageId) to plaintext,
-            groupOutboxKey(conversationId, messageId, peerUserId, peerDeviceId) to JSONObject()
-                .put("kind", E2eeMessageEnvelope.Kind.NORMAL.wireValue)
-                .put("ciphertext", ciphertext).toString().toByteArray(StandardCharsets.UTF_8)
-        ))
-        return ciphertext
+        return synchronized(sessionLock(key)) {
+            val session = store.load(key) ?: error("No E2EE group session for recipient device")
+            val result = E2eeNative.nativeEncrypt(session, plaintext)
+            require(result.size == 2) { "Invalid group encryption result" }
+            val ciphertext = String(result[1], StandardCharsets.UTF_8)
+            store.saveBatch(mapOf(
+                key to result[0],
+                messageCacheKey(conversationId, messageId) to plaintext,
+                groupOutboxKey(conversationId, messageId, peerUserId, peerDeviceId) to JSONObject()
+                    .put("kind", E2eeMessageEnvelope.Kind.NORMAL.wireValue)
+                    .put("ciphertext", ciphertext).toString().toByteArray(StandardCharsets.UTF_8)
+            ))
+            ciphertext
+        }
     }
 
     @Synchronized
@@ -278,7 +283,6 @@ class E2eeClient(context: Context, userId: String) {
         }
     }
 
-    @Synchronized
     fun decryptGroupMessage(
         conversationId: String,
         peerUserId: String,
@@ -287,14 +291,16 @@ class E2eeClient(context: Context, userId: String) {
         messageId: String
     ): ByteArray {
         val key = groupSessionKey(conversationId, peerUserId, peerDeviceId)
-        val session = store.load(key) ?: error("No E2EE group session for sender device")
-        val result = E2eeNative.nativeDecrypt(session, ciphertext)
-        require(result.size == 2) { "Invalid group decryption result" }
-        store.saveBatch(mapOf(
-            key to result[0],
-            messageCacheKey(conversationId, messageId) to result[1]
-        ))
-        return result[1]
+        return synchronized(sessionLock(key)) {
+            val session = store.load(key) ?: error("No E2EE group session for sender device")
+            val result = E2eeNative.nativeDecrypt(session, ciphertext)
+            require(result.size == 2) { "Invalid group decryption result" }
+            store.saveBatch(mapOf(
+                key to result[0],
+                messageCacheKey(conversationId, messageId) to result[1]
+            ))
+            result[1]
+        }
     }
 
     @Synchronized
@@ -397,44 +403,46 @@ class E2eeClient(context: Context, userId: String) {
             identity.optString("ed25519") == ed25519IdentityKey
     }
 
-    @Synchronized
     fun encryptDirectMessage(
         conversationId: String,
         plaintext: ByteArray,
         messageId: String = UUID.randomUUID().toString()
     ): String {
-        val session = store.load(sessionKey(conversationId))
-            ?: error("No E2EE session for this conversation")
-        val result = E2eeNative.nativeEncrypt(session, plaintext)
-        require(result.size == 2) { "Invalid native encryption result" }
-        val ciphertext = String(result[1], StandardCharsets.UTF_8)
-        store.saveBatch(mapOf(
-            sessionKey(conversationId) to result[0],
-            messageCacheKey(conversationId, messageId) to plaintext,
-            outboxKey(conversationId, messageId) to JSONObject()
-                .put("kind", E2eeMessageEnvelope.Kind.NORMAL.wireValue)
-                .put("ciphertext", ciphertext)
-                .toString().toByteArray(StandardCharsets.UTF_8)
-        ))
-        return ciphertext
+        val key = sessionKey(conversationId)
+        return synchronized(sessionLock(key)) {
+            val session = store.load(key) ?: error("No E2EE session for this conversation")
+            val result = E2eeNative.nativeEncrypt(session, plaintext)
+            require(result.size == 2) { "Invalid native encryption result" }
+            val ciphertext = String(result[1], StandardCharsets.UTF_8)
+            store.saveBatch(mapOf(
+                key to result[0],
+                messageCacheKey(conversationId, messageId) to plaintext,
+                outboxKey(conversationId, messageId) to JSONObject()
+                    .put("kind", E2eeMessageEnvelope.Kind.NORMAL.wireValue)
+                    .put("ciphertext", ciphertext)
+                    .toString().toByteArray(StandardCharsets.UTF_8)
+            ))
+            ciphertext
+        }
     }
 
-    @Synchronized
     fun decryptDirectMessage(
         conversationId: String,
         envelope: String,
         messageId: String? = null
     ): ByteArray {
-        val session = store.load(sessionKey(conversationId))
-            ?: error("No E2EE session for this conversation")
-        val result = E2eeNative.nativeDecrypt(session, envelope)
-        require(result.size == 2) { "Invalid native decryption result" }
-        val states = linkedMapOf(sessionKey(conversationId) to result[0])
-        if (!messageId.isNullOrBlank()) {
-            states[messageCacheKey(conversationId, messageId)] = result[1]
+        val key = sessionKey(conversationId)
+        return synchronized(sessionLock(key)) {
+            val session = store.load(key) ?: error("No E2EE session for this conversation")
+            val result = E2eeNative.nativeDecrypt(session, envelope)
+            require(result.size == 2) { "Invalid native decryption result" }
+            val states = linkedMapOf(key to result[0])
+            if (!messageId.isNullOrBlank()) {
+                states[messageCacheKey(conversationId, messageId)] = result[1]
+            }
+            store.saveBatch(states)
+            result[1]
         }
-        store.saveBatch(states)
-        return result[1]
     }
 
     @Synchronized
