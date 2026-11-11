@@ -1,9 +1,14 @@
 mod session_manager;
+mod account_manager;
 
 use std::sync::OnceLock;
 use session_manager::SessionManager;
+use account_manager::AccountManager;
 
 static SESSION_MANAGER: OnceLock<SessionManager> = OnceLock::new();
+static ACCOUNT_MANAGER: OnceLock<AccountManager> = OnceLock::new();
+
+fn account_manager() -> &'static AccountManager { ACCOUNT_MANAGER.get_or_init(|| AccountManager::new(16)) }
 
 fn session_manager() -> &'static SessionManager {
     SESSION_MANAGER.get_or_init(|| SessionManager::new(256))
@@ -297,4 +302,83 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeDecryptCa
         byte_array_result(&mut env, vec![updated.into_bytes(), plaintext])
     })();
     match result { Ok(value) => value, Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() } }
+}
+
+
+// AccountCache JNI: account pickles remain encrypted/persisted by Kotlin.
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeGenerateOneTimeKeysCached(mut env: JNIEnv, _class: JClass, account_id: JString, account_pickle: JByteArray, count: jint) -> jobjectArray {
+    let result = (|| {
+        if count < 1 || count > 50 { return Err("one-time-key count must be between 1 and 50".to_string()); }
+        let id = read_string(&mut env, &account_id)?;
+        let bytes = read_bytes(&mut env, &account_pickle)?;
+        let pickle = utf8(&bytes, "account pickle")?.to_owned();
+        let account = account_manager().get_or_load(&id, || unpickle_account(&pickle).map_err(|e| e.to_string()))?;
+        let mut guard = account.lock().map_err(|_| "Olm account lock poisoned")?;
+        let keys = generate_additional_one_time_keys(&mut guard, count as usize);
+        let updated = pickle_account(&guard).map_err(|e| e.to_string())?;
+        let json = serde_json::to_vec(&keys).map_err(|e| e.to_string())?;
+        byte_array_result(&mut env, vec![updated.into_bytes(), json])
+    })();
+    match result { Ok(value) => value, Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() } }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeMarkKeysPublishedCached(mut env: JNIEnv, _class: JClass, account_id: JString, account_pickle: JByteArray) -> jni::sys::jbyteArray {
+    let result = (|| {
+        let id = read_string(&mut env, &account_id)?;
+        let bytes = read_bytes(&mut env, &account_pickle)?;
+        let pickle = utf8(&bytes, "account pickle")?.to_owned();
+        let account = account_manager().get_or_load(&id, || unpickle_account(&pickle).map_err(|e| e.to_string()))?;
+        let mut guard = account.lock().map_err(|_| "Olm account lock poisoned")?;
+        mark_keys_as_published(&mut guard);
+        let updated = pickle_account(&guard).map_err(|e| e.to_string())?;
+        env.byte_array_from_slice(updated.as_bytes()).map(|v| v.into_raw()).map_err(|e| e.to_string())
+    })();
+    match result { Ok(value) => value, Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() } }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeStartOutboundCached(mut env: JNIEnv, _class: JClass, account_id: JString, account_pickle: JByteArray, recipient_curve: JString, recipient_ed: JString, recipient_otk: JString, recipient_signature: JString, plaintext: JByteArray) -> jobjectArray {
+    let result = (|| {
+        let id = read_string(&mut env, &account_id)?;
+        let bytes = read_bytes(&mut env, &account_pickle)?;
+        let pickle = utf8(&bytes, "account pickle")?.to_owned();
+        let account = account_manager().get_or_load(&id, || unpickle_account(&pickle).map_err(|e| e.to_string()))?;
+        let curve = read_string(&mut env, &recipient_curve)?;
+        let ed = read_string(&mut env, &recipient_ed)?;
+        let key = read_string(&mut env, &recipient_otk)?;
+        let signature = read_string(&mut env, &recipient_signature)?;
+        verify_signed_one_time_key(&ed, &curve, &SignedOneTimeKey { key: key.clone(), signature }).map_err(|_| "recipient one-time key signature is invalid".to_string())?;
+        let message = read_bytes(&mut env, &plaintext)?;
+        let guard = account.lock().map_err(|_| "Olm account lock poisoned")?;
+        let (session, envelope) = start_outbound_session(&guard, &curve, &key, &message).map_err(|e| e.to_string())?;
+        let session_pickle = pickle_session(&session).map_err(|e| e.to_string())?;
+        byte_array_result(&mut env, vec![session_pickle.into_bytes(), envelope.into_bytes()])
+    })();
+    match result { Ok(value) => value, Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() } }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeAcceptInboundCached(mut env: JNIEnv, _class: JClass, account_id: JString, account_pickle: JByteArray, sender_curve: JString, envelope: JString) -> jobjectArray {
+    let result = (|| {
+        let id = read_string(&mut env, &account_id)?;
+        let bytes = read_bytes(&mut env, &account_pickle)?;
+        let pickle = utf8(&bytes, "account pickle")?.to_owned();
+        let account = account_manager().get_or_load(&id, || unpickle_account(&pickle).map_err(|e| e.to_string()))?;
+        let sender = read_string(&mut env, &sender_curve)?;
+        let envelope = read_string(&mut env, &envelope)?;
+        let mut guard = account.lock().map_err(|_| "Olm account lock poisoned")?;
+        let (session, plaintext) = accept_inbound_session(&mut guard, &sender, &envelope).map_err(|e| e.to_string())?;
+        let account_pickle = pickle_account(&guard).map_err(|e| e.to_string())?;
+        let session_pickle = pickle_session(&session).map_err(|e| e.to_string())?;
+        byte_array_result(&mut env, vec![account_pickle.into_bytes(), session_pickle.into_bytes(), plaintext])
+    })();
+    match result { Ok(value) => value, Err(error) => { set_error(&mut env, &error); std::ptr::null_mut() } }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeInvalidateAccount(mut env: JNIEnv, _class: JClass, account_id: JString) {
+    let result = (|| { let id = read_string(&mut env, &account_id)?; account_manager().invalidate(&id) })();
+    if let Err(error) = result { set_error(&mut env, &error); }
 }
