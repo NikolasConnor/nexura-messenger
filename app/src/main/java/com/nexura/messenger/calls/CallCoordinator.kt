@@ -68,6 +68,7 @@ class CallCoordinator(
     // A call timer starts only after this device joined the LiveKit room AND the peer is active.
     private var localRoomConnected = false
     private var peerRoomConnected = false
+    private var answerSent = false
     private var lastState: CallUiState? = null
 
     fun connect(token: String) {
@@ -112,6 +113,7 @@ class CallCoordinator(
         accepted = false
         localRoomConnected = false
         peerRoomConnected = false
+        answerSent = false
         callId = UUID.randomUUID().toString()
         val expectedId = callId ?: return
         startKeepAlive(video)
@@ -159,18 +161,11 @@ class CallCoordinator(
         accepted = true
         localRoomConnected = false
         peerRoomConnected = false
+        answerSent = false
         callId = expectedId
         pendingCallId = null
         pendingVideo = false
         startKeepAlive(videoMode)
-        if (!send(JSONObject()
-                .put("type", "answer")
-                .put("call_id", expectedId)
-                .put("from", ownUserId)
-                .put("to", peerUserId))) {
-            failCall("Не удалось принять звонок", "Не удалось подтвердить вызов собеседнику")
-            return
-        }
         publish(CallUiState(
             status = "Соединяем…",
             active = true,
@@ -279,6 +274,18 @@ class CallCoordinator(
 
         newRoom.connect(credentials.serverUrl, credentials.token)
         if (callId != expectedId || closed) return
+        // connect() returns only after this participant has joined the LiveKit room.
+        localRoomConnected = true
+        if (!callDirectionOutgoing && !answerSent) {
+            if (!send(JSONObject()
+                    .put("type", "answer")
+                    .put("call_id", expectedId)
+                    .put("from", ownUserId)
+                    .put("to", peerUserId))) {
+                throw IOException("Не удалось подтвердить вызов собеседнику")
+            }
+            answerSent = true
+        }
         if (!newRoom.localParticipant.setMicrophoneEnabled(true)) {
             throw IOException("LiveKit не смог включить микрофон")
         }
