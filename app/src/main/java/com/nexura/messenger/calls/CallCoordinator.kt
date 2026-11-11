@@ -144,6 +144,8 @@ class CallCoordinator(
     fun accept() {
         val expectedId = pendingCallId ?: return
         if (closed || room != null) return
+        ringTimeoutJob?.cancel()
+        ringTimeoutJob = null
         videoMode = pendingVideo
         callVideoForHistory = pendingVideo
         callDirectionOutgoing = false
@@ -276,12 +278,15 @@ class CallCoordinator(
     }
 
     private fun receive(signal: JSONObject) {
+        // Only the other participant in this direct chat may control this call.
         if (signal.optString("to") != ownUserId) return
+        if (signal.optString("from") != peerUserId) return
         val id = signal.optString("call_id")
+        if (id.isBlank()) return
         when (signal.optString("type")) {
             "offer" -> {
                 if (id.isBlank() || id == callId || id == pendingCallId) return
-                if (room != null || callId != null || lastState?.active == true) {
+                if (room != null || callId != null || pendingCallId != null || lastState?.active == true) {
                     send(JSONObject().put("type", "busy").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
                     return
                 }
@@ -292,6 +297,16 @@ class CallCoordinator(
                     incoming = true,
                     video = pendingVideo
                 ))
+                // Do not leave an unanswered incoming call dialog ringing indefinitely.
+                ringTimeoutJob?.cancel()
+                ringTimeoutJob = scope.launch {
+                    delay(35_000)
+                    if (pendingCallId == id && !closed) {
+                        send(endSignal(id))
+                        finish()
+                        publish(CallUiState(status = "Готово к звонку", error = "Пропущенный вызов"))
+                    }
+                }
             }
             "answer" -> if (id == callId && !accepted) {
                 accepted = true
