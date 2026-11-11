@@ -1977,10 +1977,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             } else {
                                 val messageListState = rememberLazyListState()
                                 var suppressNextAutoScroll by remember(chat.id) { mutableStateOf(false) }
+                                var initialScrollCompleted by remember(chat.id) { mutableStateOf(false) }
                                 LaunchedEffect(chat.id, messageListState) {
                                     snapshotFlow { messageListState.firstVisibleItemIndex to messageListState.isScrollInProgress }
                                         .collect { (firstVisibleIndex, scrolling) ->
-                                            if (scrolling && firstVisibleIndex <= 1 && hasMoreMessages && !loadingOlderMessages && chatSearchQuery.isBlank()) {
+                                            if (initialScrollCompleted && scrolling && firstVisibleIndex <= 1 && hasMoreMessages && !loadingOlderMessages && chatSearchQuery.isBlank()) {
                                                 val cursor = messages.minWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                                                 if (cursor != null) {
                                                     loadingOlderMessages = true
@@ -2026,6 +2027,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             messageListState.animateScrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
                                         }
                                         if (targetIndex >= 0) scrollToMessageId = null
+                                        initialScrollCompleted = true
                                     }
                                 }
                                 LazyColumn(
