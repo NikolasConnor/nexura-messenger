@@ -317,7 +317,7 @@ class NexuraApi(private val store: SessionStore) {
             "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
                 "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
         ))
-        return withContext(Dispatchers.Default) {
+        val rendered = withContext(Dispatchers.Default) {
             (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
             val id = m.getString("id")
@@ -414,6 +414,8 @@ class NexuraApi(private val store: SessionStore) {
             }
             }.sortedBy { it.createdAt }
         }
+        if (e2ee != null) runCatching { syncE2eeBackupIfEnabled(e2ee) }
+        return rendered
     }
     /**
      * Publishes only public E2EE material. Idempotent inserts let the client
@@ -748,6 +750,7 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Сервер не подтвердил сохранение группового E2EE-сообщения")
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
+        runCatching { syncE2eeBackupIfEnabled(e2ee) }
         notifyChatPush(chatId)
     }
 
