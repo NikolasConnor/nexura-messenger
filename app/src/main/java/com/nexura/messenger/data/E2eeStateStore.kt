@@ -19,8 +19,8 @@ import javax.crypto.spec.GCMParameterSpec
  * state itself must already be serialized by the crypto layer; never pass plaintext
  * chat messages or raw private keys to this store.
  *
- * This class is deliberately not wired into message sending yet. Integration must
- * wait until the Rust/Kotlin protocol bridge and restore/replay tests are complete.
+ * E2eeClient uses this store for account, session, ratchet, cache, and outbox
+ * state. Every saved value is authenticated with AES-GCM and bound to its record ID.
  */
 class E2eeStateStore(context: Context, userNamespace: String) {
     private val keyAlias: String
