@@ -43,7 +43,7 @@ class E2eeClient(context: Context, userId: String) {
         require(oneTimeKeyCount in 1..50) { "oneTimeKeyCount must be between 1 and 50" }
         val savedPublic = store.load(PUBLIC_BUNDLE_KEY)
         if (savedPublic != null && store.load(ACCOUNT_KEY) != null) {
-            return String(savedPublic, StandardCharsets.UTF_8)
+            return@synchronized String(savedPublic, StandardCharsets.UTF_8)
         }
 
         val result = E2eeNative.nativeCreateDevice(oneTimeKeyCount)
@@ -59,8 +59,7 @@ class E2eeClient(context: Context, userId: String) {
         val publicBundleBytes = publicBundle.toString().toByteArray(StandardCharsets.UTF_8)
         store.save(ACCOUNT_KEY, result[0])
         store.save(PUBLIC_BUNDLE_KEY, publicBundleBytes)
-        return String(publicBundleBytes, StandardCharsets.UTF_8)
-    
+        String(publicBundleBytes, StandardCharsets.UTF_8)
         }
     }
 
@@ -96,8 +95,7 @@ class E2eeClient(context: Context, userId: String) {
         try {
             store.saveBatch(mapOf(ACCOUNT_KEY to generated[0], PUBLIC_BUNDLE_KEY to updatedBundle))
         } catch (error: Throwable) { invalidateNativeAccount(); throw error }
-        return newKeys.toString()
-    
+        newKeys.toString()
         }
     }
 
@@ -193,8 +191,7 @@ class E2eeClient(context: Context, userId: String) {
                 .toString().toByteArray(StandardCharsets.UTF_8)
         ))
         invalidateNativeSession(sessionKey(conversationId))
-        return ciphertext
-    
+        ciphertext
         }
     }
 
@@ -222,8 +219,7 @@ class E2eeClient(context: Context, userId: String) {
             invalidateNativeAccount(); invalidateNativeSession(sessionKey(conversationId)); throw error
         }
         invalidateNativeSession(sessionKey(conversationId))
-        return result[2]
-    
+        result[2]
         }
     }
 
@@ -266,8 +262,7 @@ class E2eeClient(context: Context, userId: String) {
                 .put("ciphertext", ciphertext).toString().toByteArray(StandardCharsets.UTF_8)
         ))
         invalidateNativeSession(key)
-        return ciphertext
-    
+        ciphertext
         }
     }
 
@@ -295,8 +290,7 @@ class E2eeClient(context: Context, userId: String) {
             invalidateNativeAccount(); invalidateNativeSession(groupSessionKey(conversationId, peerUserId, peerDeviceId)); throw error
         }
         invalidateNativeSession(groupSessionKey(conversationId, peerUserId, peerDeviceId))
-        return result[2]
-    
+        result[2]
         }
     }
 
