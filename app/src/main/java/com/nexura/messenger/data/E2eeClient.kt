@@ -227,8 +227,8 @@ class E2eeClient(context: Context, userId: String) {
         messageId: String
     ): String {
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
-        val result = E2eeNative.nativeStartOutbound(
-            account, recipientCurve25519, recipientEd25519,
+        val result = E2eeNative.nativeStartOutboundCached(
+            nativeAccountId(), account, recipientCurve25519, recipientEd25519,
             recipientOneTimeKey, recipientOneTimeKeySignature, plaintext
         )
         require(result.size == 2) { "Invalid group outbound-session result" }
@@ -452,7 +452,7 @@ class E2eeClient(context: Context, userId: String) {
         val key = sessionKey(conversationId)
         return synchronized(sessionLock(key)) {
             val session = store.load(key) ?: error("No E2EE session for this conversation")
-            val result = E2eeNative.nativeEncrypt(session, plaintext)
+            val result = cachedEncrypt(key, session, plaintext)
             require(result.size == 2) { "Invalid native encryption result" }
             val ciphertext = String(result[1], StandardCharsets.UTF_8)
             try {
