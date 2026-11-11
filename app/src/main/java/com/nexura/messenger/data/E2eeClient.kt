@@ -15,6 +15,8 @@ import java.util.concurrent.ConcurrentHashMap
 class E2eeClient(context: Context, userId: String) {
     private val store = E2eeStateStore(context.applicationContext, userId)
     private val nativeSessionNamespace = userId
+    // Fixed stripes serialize account mutation + durable pickle commit across E2eeClient instances.
+    private val accountOperationLock = ACCOUNT_OPERATION_LOCKS[Math.floorMod(userId.hashCode(), ACCOUNT_OPERATION_LOCKS.size)]
 
     private fun nativeSessionId(key: String): String = "$nativeSessionNamespace|$key"
     private fun nativeAccountId(): String = "$nativeSessionNamespace|${deviceId()}"
@@ -36,6 +38,8 @@ class E2eeClient(context: Context, userId: String) {
 
     @Synchronized
     fun ensureDevice(oneTimeKeyCount: Int = 20): String {
+        return synchronized(accountOperationLock) {
+
         require(oneTimeKeyCount in 1..50) { "oneTimeKeyCount must be between 1 and 50" }
         val savedPublic = store.load(PUBLIC_BUNDLE_KEY)
         if (savedPublic != null && store.load(ACCOUNT_KEY) != null) {
@@ -56,6 +60,8 @@ class E2eeClient(context: Context, userId: String) {
         store.save(ACCOUNT_KEY, result[0])
         store.save(PUBLIC_BUNDLE_KEY, publicBundleBytes)
         return String(publicBundleBytes, StandardCharsets.UTF_8)
+    
+        }
     }
 
     @Synchronized
@@ -67,6 +73,8 @@ class E2eeClient(context: Context, userId: String) {
 
     @Synchronized
     fun replenishOneTimeKeys(count: Int): String {
+        return synchronized(accountOperationLock) {
+
         require(count in 1..50) { "count must be between 1 and 50" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val savedBundle = store.load(PUBLIC_BUNDLE_KEY)
@@ -89,6 +97,8 @@ class E2eeClient(context: Context, userId: String) {
             store.saveBatch(mapOf(ACCOUNT_KEY to generated[0], PUBLIC_BUNDLE_KEY to updatedBundle))
         } catch (error: Throwable) { invalidateNativeAccount(); throw error }
         return newKeys.toString()
+    
+        }
     }
 
     /**
@@ -115,6 +125,8 @@ class E2eeClient(context: Context, userId: String) {
 
     @Synchronized
     fun markPublicKeysPublished(keyIds: List<String>) {
+        synchronized(accountOperationLock) {
+
         require(keyIds.isNotEmpty()) { "No published one-time keys to acknowledge" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val bundleBytes = store.load(PUBLIC_BUNDLE_KEY)
@@ -137,6 +149,8 @@ class E2eeClient(context: Context, userId: String) {
                 PUBLISHED_KEY_IDS to org.json.JSONArray(combined.toList()).toString().toByteArray(StandardCharsets.UTF_8)
             ))
         } catch (error: Throwable) { invalidateNativeAccount(); throw error }
+    
+        }
     }
 
     fun verifyPublishedOneTimeKey(
@@ -156,6 +170,8 @@ class E2eeClient(context: Context, userId: String) {
         firstPlaintext: ByteArray,
         messageId: String = UUID.randomUUID().toString()
     ): String {
+        return synchronized(accountOperationLock) {
+
         require(conversationId.isNotBlank()) { "conversationId must not be blank" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val result = E2eeNative.nativeStartOutboundCached(
@@ -178,6 +194,8 @@ class E2eeClient(context: Context, userId: String) {
         ))
         invalidateNativeSession(sessionKey(conversationId))
         return ciphertext
+    
+        }
     }
 
     @Synchronized
@@ -187,6 +205,8 @@ class E2eeClient(context: Context, userId: String) {
         preKeyEnvelope: String,
         messageId: String? = null
     ): ByteArray {
+        return synchronized(accountOperationLock) {
+
         require(conversationId.isNotBlank()) { "conversationId must not be blank" }
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val result = E2eeNative.nativeAcceptInboundCached(nativeAccountId(), account, senderCurve25519, preKeyEnvelope)
@@ -203,6 +223,8 @@ class E2eeClient(context: Context, userId: String) {
         }
         invalidateNativeSession(sessionKey(conversationId))
         return result[2]
+    
+        }
     }
 
     private fun groupSessionKey(conversationId: String, peerUserId: String, peerDeviceId: String): String =
@@ -226,6 +248,8 @@ class E2eeClient(context: Context, userId: String) {
         plaintext: ByteArray,
         messageId: String
     ): String {
+        return synchronized(accountOperationLock) {
+
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val result = E2eeNative.nativeStartOutboundCached(
             nativeAccountId(), account, recipientCurve25519, recipientEd25519,
@@ -243,6 +267,8 @@ class E2eeClient(context: Context, userId: String) {
         ))
         invalidateNativeSession(key)
         return ciphertext
+    
+        }
     }
 
     @Synchronized
@@ -254,6 +280,8 @@ class E2eeClient(context: Context, userId: String) {
         ciphertext: String,
         messageId: String
     ): ByteArray {
+        return synchronized(accountOperationLock) {
+
         val account = store.load(ACCOUNT_KEY) ?: error("E2EE device is not initialized")
         val result = E2eeNative.nativeAcceptInboundCached(nativeAccountId(), account, senderCurve25519, ciphertext)
         require(result.size == 3) { "Invalid group inbound-session result" }
@@ -268,6 +296,8 @@ class E2eeClient(context: Context, userId: String) {
         }
         invalidateNativeSession(groupSessionKey(conversationId, peerUserId, peerDeviceId))
         return result[2]
+    
+        }
     }
 
     fun encryptGroupMessage(
@@ -522,8 +552,12 @@ class E2eeClient(context: Context, userId: String) {
     /** Permanently remove this user's local E2EE identity and all local sessions. */
     @Synchronized
     fun clearLocalIdentity() {
+        synchronized(accountOperationLock) {
+
         runCatching { E2eeNative.nativeInvalidateAccount(nativeAccountId()) }
         store.clearAll()
+    
+        }
     }
 
     private fun sessionKey(conversationId: String): String = "olm-session:$conversationId"
@@ -536,6 +570,7 @@ class E2eeClient(context: Context, userId: String) {
         "trusted-device:$userId:$deviceId"
 
     private companion object {
+        val ACCOUNT_OPERATION_LOCKS: Array<Any> = Array(64) { Any() }
         const val ACCOUNT_KEY = "olm-device-account"
         const val PUBLIC_BUNDLE_KEY = "olm-public-device-bundle"
         const val PUBLISHED_KEY_IDS = "olm-published-one-time-key-ids"
