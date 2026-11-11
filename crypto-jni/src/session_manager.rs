@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn evicted_session_can_be_restored_from_pickle() {
         let manager = SessionManager::new(1);
-        let original = sample_session();
+        let original = sample_session().unwrap();
         let pickle = pickle_session(&original).unwrap();
         let cached = manager.get_or_load("first", || unpickle_session(&pickle).map_err(|e| e.to_string())).unwrap();
         drop(cached);
