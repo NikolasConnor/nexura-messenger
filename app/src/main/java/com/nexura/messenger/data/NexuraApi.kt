@@ -980,6 +980,7 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Сервер не подтвердил сохранение именно этого зашифрованного сообщения")
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
+        runCatching { syncE2eeBackupIfEnabled(e2ee) }
         notifyChatPush(chatId)
     }
 
