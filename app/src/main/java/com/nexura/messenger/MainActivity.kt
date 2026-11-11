@@ -92,7 +92,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -1979,7 +1979,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 var suppressNextAutoScroll by remember(chat.id) { mutableStateOf(false) }
                                 LaunchedEffect(chat.id, messageListState) {
                                     snapshotFlow { messageListState.firstVisibleItemIndex to messageListState.isScrollInProgress }
-                                        .collectLatest { (firstVisibleIndex, scrolling) ->
+                                        .collect { (firstVisibleIndex, scrolling) ->
                                             if (scrolling && firstVisibleIndex <= 1 && hasMoreMessages && !loadingOlderMessages && chatSearchQuery.isBlank()) {
                                                 val cursor = messages.minWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                                                 if (cursor != null) {
