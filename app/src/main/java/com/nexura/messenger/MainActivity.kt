@@ -26,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -2283,7 +2284,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                             if (msg.replyToId != null) {
                                                 val parent = messages.firstOrNull { it.id == msg.replyToId }
-                                                Text("↪ Ответ: ${parent?.content?.take(70) ?: "сообщение"}", color = Accent, fontSize = 11.sp, modifier = Modifier.padding(bottom = 5.dp))
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                                                        .clip(RoundedCornerShape(9.dp))
+                                                        .background(Surface1.copy(alpha = 0.88f))
+                                                        .padding(horizontal = 9.dp, vertical = 7.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Box(Modifier.width(3.dp).height(30.dp).clip(RoundedCornerShape(2.dp)).background(Accent))
+                                                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                                        Text("Ответ на сообщение", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                        Text(parent?.content?.take(85) ?: "Исходное сообщение", color = SecondaryText, fontSize = 11.sp, maxLines = 2)
+                                                    }
+                                                }
                                             }
                                             if (msg.messageType == "call" && msg.encrypted) {
                                                 val call = runCatching { org.json.JSONObject(msg.content) }.getOrNull()
@@ -2463,25 +2476,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             val reactionsForMessage = messageReactions[msg.id].orEmpty()
                                             if (reactionsForMessage.isNotEmpty()) {
                                                 Row(
-                                                    Modifier.fillMaxWidth().padding(top = 6.dp),
+                                                    Modifier.fillMaxWidth().padding(top = 7.dp),
                                                     horizontalArrangement = Arrangement.Start,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     reactionsForMessage.forEach { (emoji, count) ->
                                                         Row(
-                                                            Modifier.padding(end = 5.dp).clip(RoundedCornerShape(14.dp))
-                                                                .background(Surface2).clickable {
+                                                            Modifier.padding(end = 6.dp).clip(RoundedCornerShape(16.dp))
+                                                                .background(Accent.copy(alpha = 0.13f))
+                                                                .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+                                                                .clickable {
                                                                     scope.launch {
                                                                         try {
                                                                             api.toggleMessageReaction(chat.id, msg.id, emoji)
                                                                             messageReactions = api.messageReactions(chat.id)
                                                                         } catch (e: Exception) { error = e.message ?: "Не удалось изменить реакцию" }
                                                                     }
-                                                                }.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                                }.padding(horizontal = 10.dp, vertical = 6.dp),
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                            Text(emoji, fontSize = 12.sp)
-                                                            Text(" $count", color = MainText, fontSize = 11.sp)
+                                                            Text(emoji, fontSize = 13.sp)
+                                                            Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                                         }
                                                     }
                                                 }
@@ -2499,18 +2514,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         ) {
                             if (replyTarget != null) {
                                 Row(
-                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface2).padding(start = 12.dp, end = 4.dp, top = 7.dp, bottom = 7.dp),
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+                                        .background(Brush.horizontalGradient(listOf(Color(0xFF251A3D), Surface2)))
+                                        .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(13.dp))
+                                        .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Ответ на сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                        Text(replyTarget!!.content.take(75).ifBlank { "Фото" }, color = SecondaryText, fontSize = 12.sp, maxLines = 1)
+                                    Box(Modifier.width(3.dp).height(38.dp).clip(RoundedCornerShape(2.dp)).background(Accent))
+                                    Column(Modifier.weight(1f).padding(horizontal = 9.dp)) {
+                                        Text("ОТВЕТ НА СООБЩЕНИЕ", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+                                        Text(replyTarget!!.content.take(90).ifBlank { "Вложение" }, color = MainText, fontSize = 12.sp, maxLines = 2)
                                     }
-                                    IconButton(onClick = { replyTarget = null }, modifier = Modifier.size(32.dp)) {
-                                        Text("×", color = SecondaryText, fontSize = 24.sp)
+                                    IconButton(onClick = { replyTarget = null }, modifier = Modifier.size(34.dp)) {
+                                        Icon(Icons.Default.Close, "Отменить ответ", tint = SecondaryText, modifier = Modifier.size(18.dp))
                                     }
                                 }
-                                Spacer(Modifier.height(7.dp))
+                                Spacer(Modifier.height(8.dp))
                             }
                             if (pendingMediaUri != null) {
                                 Row(
