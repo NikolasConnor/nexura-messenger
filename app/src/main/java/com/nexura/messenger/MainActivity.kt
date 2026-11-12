@@ -2025,7 +2025,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                     // Resize the whole chat viewport for the IME so the composer remains anchored at the bottom.
-                    Column(Modifier.fillMaxSize().imePadding()) {
+                    Column(Modifier.fillMaxSize()) {
                         Row(
                             Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
