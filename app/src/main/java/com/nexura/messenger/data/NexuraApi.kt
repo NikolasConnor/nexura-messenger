@@ -954,15 +954,14 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Ключи вашего E2EE-устройства не совпадают с регистрацией сервера")
         }
         if (peerDevices.isEmpty()) throw IOException("У собеседника пока нет активных устройств Nexura")
-        // A sender cannot manufacture private one-time keys for another device.
-        // Skip peer replicas whose OTK pool is exhausted only when that device has
-        // no established Olm session; another usable peer device can still receive.
-        val peerDevicesWithKeys = peerDevices.filter { device ->
-            e2ee.hasGroupSession(chatId, device.userId, device.deviceId) ||
-                countAvailableE2eeKeys(device.userId, device.deviceId) > 0
-        }
+        // Supabase intentionally exposes OTK rows only to their owner. A sender
+        // must never infer a peer's key inventory through a direct table SELECT:
+        // RLS returns zero rows even when the peer has a healthy key reserve.
+        // Attempt the protected atomic consume RPC for each peer device instead;
+        // it reveals only one usable public pre-key and safely handles races.
+        val peerDevicesWithKeys = peerDevices
         if (peerDevicesWithKeys.isEmpty()) {
-            throw IOException("У собеседника закончились одноразовые ключи защиты. Попросите его открыть Nexura и подождать обновления ключей, затем отправьте сообщение ещё раз.")
+            throw IOException("У собеседника пока нет активных устройств Nexura")
         }
         // Offline own devices may have exhausted their published OTK pool; skip
         // those replicas instead of failing the entire direct-message send.
