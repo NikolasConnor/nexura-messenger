@@ -544,7 +544,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         "text", pending.replyToId, encrypted = true, securityWarning = false
                     )
                 }
-                messages = (loadedMessages + pendingItems).distinctBy { it.id }
+                // Prefer freshly decrypted server rows, while retaining older cached pages.
+                messages = (loadedMessages + cachedMessages + pendingItems).distinctBy { it.id }
                     .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                 withContext(Dispatchers.IO) {
                     localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
