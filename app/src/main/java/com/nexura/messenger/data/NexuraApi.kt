@@ -885,8 +885,8 @@ class NexuraApi(private val store: SessionStore) {
         val myDeviceId = e2ee.deviceId()
         if (senderId == uid && envelope.senderDeviceId == myDeviceId) {
             val own = JSONObject(e2ee.ensureDevice())
-            if (sender.optString("curve25519_key") != own.optString("curve25519") ||
-                sender.optString("ed25519_key") != own.optString("ed25519")) {
+            if (senderDevice.curve25519Key != own.optString("curve25519") ||
+                senderDevice.ed25519Key != own.optString("ed25519")) {
                 throw IOException("Идентичность отправляющего устройства не совпадает")
             }
             return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
