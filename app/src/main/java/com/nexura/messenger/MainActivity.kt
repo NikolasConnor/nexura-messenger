@@ -150,7 +150,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val scope = rememberCoroutineScope()
     val realtimeClient = remember(store) { SupabaseMessagesRealtime(store) }
-    var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank()) }
+    var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank() || !store.refreshToken.isNullOrBlank()) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
@@ -587,7 +587,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
             }
             try {
-                if (store.accessToken.isNullOrBlank()) api.refreshSession()
+                api.restoreSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
                 val initialPrivacy = api.privacySettings()
                 showOnlineStatus = initialPrivacy.showOnlineStatus
@@ -641,7 +641,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось восстановить сессию"
-                if (store.accessToken.isNullOrBlank()) signedIn = false
+                if (store.accessToken.isNullOrBlank() && store.refreshToken.isNullOrBlank()) signedIn = false
             }
 
             // Keep the recipient's public one-time-key pool replenished automatically.
