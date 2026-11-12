@@ -2274,7 +2274,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 topStart = 20.dp, topEnd = 20.dp,
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
-                                            )).background(if (mine) chatBubbleColor else Surface2).padding(horizontal = 15.dp, vertical = 12.dp)
+                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35)).padding(horizontal = 15.dp, vertical = 12.dp)
                                         ) {
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
@@ -2727,10 +2727,10 @@ private fun NexuraBottomBar(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-        color = Color(0xFF171F2D),
+        color = Surface1,
         shape = RoundedCornerShape(24.dp),
         shadowElevation = 12.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.07f))
+        border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp),
