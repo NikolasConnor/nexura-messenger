@@ -2537,7 +2537,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 LazyColumn(
                                     state = messageListState,
                                     modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor),
-                                    contentPadding = PaddingValues(bottom = 10.dp)
+                                    contentPadding = PaddingValues(bottom = 180.dp)
                                 ) {
                                     items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
                                     val mine = msg.senderId == store.userId
