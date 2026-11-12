@@ -1187,7 +1187,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 Icon(Icons.Default.Lock, null, tint = if (currentDevice) Success else Accent, modifier = Modifier.size(20.dp))
                                                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                                     Text(if (currentDevice) "Это устройство" else "Другое устройство", color = MainText, fontWeight = FontWeight.Medium)
-                                                    Text("ID: \${device.deviceId.take(8)}…", color = SecondaryText, fontSize = 11.sp)
+                                                    Text("ID: ${device.deviceId.take(8)}…", color = SecondaryText, fontSize = 11.sp)
                                                 }
                                                 if (currentDevice) {
                                                     Text("Текущее", color = Success, fontSize = 11.sp)
@@ -1197,7 +1197,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }
                                                 }
                                             }
-                                            Text("Отпечаток: \${runCatching { e2eeClient?.deviceFingerprint(device.curve25519Key, device.ed25519Key) }.getOrNull().orEmpty()}", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 30.dp, top = 3.dp))
+                                            Text("Отпечаток: ${runCatching { e2eeClient?.deviceFingerprint(device.curve25519Key, device.ed25519Key) }.getOrNull().orEmpty()}", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 30.dp, top = 3.dp))
                                         }
                                     }
                                 }
@@ -1233,7 +1233,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     if (deviceToRevoke != null) AlertDialog(
                         onDismissRequest = { if (!busy) deviceToRevoke = null },
                         title = { Text("Отозвать E2EE-устройство?") },
-                        text = { Text("Устройство \${deviceToRevoke?.deviceId?.take(8)}… будет отключено от E2EE. Его активные одноразовые ключи удалятся, а повторная регистрация с тем же ID будет заблокирована. Уже сохранённые на нём данные автоматически не стираются.") },
+                        text = { Text("Устройство ${deviceToRevoke?.deviceId?.take(8)}… будет отключено от E2EE. Его активные одноразовые ключи удалятся, а повторная регистрация с тем же ID будет заблокирована. Уже сохранённые на нём данные автоматически не стираются.") },
                         confirmButton = {
                             TextButton(enabled = !busy, onClick = {
                                 val target = deviceToRevoke ?: return@TextButton
