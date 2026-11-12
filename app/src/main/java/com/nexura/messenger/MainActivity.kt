@@ -430,6 +430,55 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    fun dispatchSecureMessage(
+        chat: ChatItem, messageId: String, text: String, replyToId: String?, createdAt: String? = null
+    ) {
+        if (messageDelivery[messageId] == "sending" || messageDelivery[messageId] == "sent") return
+        messageDelivery[messageId] = "sending"
+        failedMessageRetries.remove(messageId)
+        scope.launch {
+            try {
+                val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
+                // Durably queue the plaintext under the Android Keystore key before any ratchet advance or network I/O.
+                withContext(Dispatchers.IO) {
+                    client.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
+                }
+                var delivered = false
+                var lastFailure: Exception? = null
+                for (attempt in 0..2) {
+                    try {
+                        messageSendMutex.withLock {
+                            // Olm/JNI encryption is CPU work; never run it on Compose's main thread.
+                            withContext(Dispatchers.Default) {
+                                if (chat.kind == "direct") {
+                                    api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
+                                } else {
+                                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+                                }
+                            }
+                        }
+                        delivered = true
+                        break
+                    } catch (e: Exception) {
+                        lastFailure = e
+                        if (attempt < 2) delay(if (attempt == 0) 1_500L else 4_000L)
+                    }
+                }
+                if (delivered) {
+                    messageDelivery[messageId] = "sent"
+                    failedMessageRetries.remove(messageId)
+                } else {
+                    throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
+                }
+            } catch (e: Exception) {
+                messageDelivery[messageId] = "failed"
+                failedMessageRetries[messageId] = Triple(chat, text, replyToId)
+                error = e.message ?: "Не удалось отправить защищённое сообщение"
+            }
+        }
+    }
+
+
     fun openChat(chat: ChatItem) {
         selected?.let { previous -> chatDrafts[previous.id] = draft }
         selected = chat
@@ -479,53 +528,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    fun dispatchSecureMessage(
-        chat: ChatItem, messageId: String, text: String, replyToId: String?, createdAt: String? = null
-    ) {
-        if (messageDelivery[messageId] == "sending" || messageDelivery[messageId] == "sent") return
-        messageDelivery[messageId] = "sending"
-        failedMessageRetries.remove(messageId)
-        scope.launch {
-            try {
-                val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
-                // Durably queue the plaintext under the Android Keystore key before any ratchet advance or network I/O.
-                withContext(Dispatchers.IO) {
-                    client.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
-                }
-                var delivered = false
-                var lastFailure: Exception? = null
-                for (attempt in 0..2) {
-                    try {
-                        messageSendMutex.withLock {
-                            // Olm/JNI encryption is CPU work; never run it on Compose's main thread.
-                            withContext(Dispatchers.Default) {
-                                if (chat.kind == "direct") {
-                                    api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
-                                } else {
-                                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
-                                }
-                            }
-                        }
-                        delivered = true
-                        break
-                    } catch (e: Exception) {
-                        lastFailure = e
-                        if (attempt < 2) delay(if (attempt == 0) 1_500L else 4_000L)
-                    }
-                }
-                if (delivered) {
-                    messageDelivery[messageId] = "sent"
-                    failedMessageRetries.remove(messageId)
-                } else {
-                    throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
-                }
-            } catch (e: Exception) {
-                messageDelivery[messageId] = "failed"
-                failedMessageRetries[messageId] = Triple(chat, text, replyToId)
-                error = e.message ?: "Не удалось отправить защищённое сообщение"
-            }
-        }
-    }
 
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
         if (text.isBlank()) return
@@ -2409,6 +2411,61 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         }
     }
+
+    if (e2eeRecoveryRequired) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Восстановление защищённых чатов") },
+            text = {
+                Column {
+                    Text("Найдена резервная копия ключей этого аккаунта. Введите ключ восстановления, сохранённый при создании копии.")
+                    OutlinedTextField(value = recoveryCodeInput, onValueChange = { recoveryCodeInput = it.trim().take(64) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true,
+                        label = { Text("Ключ восстановления") })
+                    if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !busy && recoveryCodeInput.isNotBlank(), onClick = {
+                    scope.launch {
+                        busy = true
+                        error = ""
+                        try {
+                            val uid = store.userId ?: throw IOException("Сессия истекла")
+                            val restoredClient = E2eeClient(context.applicationContext, uid)
+                            api.restoreE2eeBackup(restoredClient, recoveryCodeInput)
+                            val available = api.publishE2eeDevice(restoredClient)
+                            e2eeClient = restoredClient
+                            e2eeRecoveryRequired = false
+                            e2eeStatus = "Ключи восстановлены · $available ключей"
+                            recoveryCodeInput = ""
+                            notice = "Защищённые ключи восстановлены. История снова доступна."
+                        } catch (e: Exception) { error = e.message ?: "Не удалось восстановить ключи" }
+                        finally { busy = false }
+                    }
+                }) { Text(if (busy) "Восстанавливаем…" else "Восстановить") }
+            },
+            dismissButton = {
+                TextButton(enabled = !busy, onClick = {
+                    scope.launch {
+                        busy = true
+                        error = ""
+                        try {
+                            val uid = store.userId ?: throw IOException("Сессия истекла")
+                            val freshClient = E2eeClient(context.applicationContext, uid)
+                            val available = api.publishE2eeDevice(freshClient)
+                            api.removeOtherOwnE2eeDevices(freshClient.deviceId())
+                            e2eeClient = freshClient
+                            e2eeRecoveryRequired = false
+                            e2eeStatus = "Создано новое устройство · старые сообщения не расшифруются"
+                            notice = "Начато с нового устройства. Старая история без ключа восстановления недоступна."
+                        } catch (e: Exception) { error = e.message ?: "Не удалось создать новое устройство" }
+                        finally { busy = false }
+                    }
+                }) { Text("Начать без старой истории") }
+            }
+        )
+    }
 }
 
 
@@ -2625,60 +2682,7 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
                     .clip(CircleShape)
                     .background(Bg)
             )
-            if (e2eeRecoveryRequired) {
-                AlertDialog(
-                    onDismissRequest = { },
-                    title = { Text("Восстановление защищённых чатов") },
-                    text = {
-                        Column {
-                            Text("Найдена резервная копия ключей этого аккаунта. Введите ключ восстановления, сохранённый при создании копии.")
-                            OutlinedTextField(value = recoveryCodeInput, onValueChange = { recoveryCodeInput = it.trim().take(64) },
-                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true,
-                                label = { Text("Ключ восстановления") })
-                            if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(enabled = !busy && recoveryCodeInput.isNotBlank(), onClick = {
-                            scope.launch {
-                                busy = true
-                                error = ""
-                                try {
-                                    val uid = store.userId ?: throw IOException("Сессия истекла")
-                                    val restoredClient = E2eeClient(context.applicationContext, uid)
-                                    api.restoreE2eeBackup(restoredClient, recoveryCodeInput)
-                                    val available = api.publishE2eeDevice(restoredClient)
-                                    e2eeClient = restoredClient
-                                    e2eeRecoveryRequired = false
-                                    e2eeStatus = "Ключи восстановлены · $available ключей"
-                                    recoveryCodeInput = ""
-                                    notice = "Защищённые ключи восстановлены. История снова доступна."
-                                } catch (e: Exception) { error = e.message ?: "Не удалось восстановить ключи" }
-                                finally { busy = false }
-                            }
-                        }) { Text(if (busy) "Восстанавливаем…" else "Восстановить") }
-                    },
-                    dismissButton = {
-                        TextButton(enabled = !busy, onClick = {
-                            scope.launch {
-                                busy = true
-                                error = ""
-                                try {
-                                    val uid = store.userId ?: throw IOException("Сессия истекла")
-                                    val freshClient = E2eeClient(context.applicationContext, uid)
-                                    val available = api.publishE2eeDevice(freshClient)
-                                    api.removeOtherOwnE2eeDevices(freshClient.deviceId())
-                                    e2eeClient = freshClient
-                                    e2eeRecoveryRequired = false
-                                    e2eeStatus = "Создано новое устройство · старые сообщения не расшифруются"
-                                    notice = "Начато с нового устройства. Старая история без ключа восстановления недоступна."
-                                } catch (e: Exception) { error = e.message ?: "Не удалось создать новое устройство" }
-                                finally { busy = false }
-                            }
-                        }) { Text("Начать без старой истории") }
-                    }
-                )
-            }
+
         }
     }
 }
