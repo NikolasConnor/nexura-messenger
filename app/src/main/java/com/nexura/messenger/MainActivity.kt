@@ -2886,32 +2886,49 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 }
                             }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(
-                                    onClick = { if (recordingVoice) stopVoiceRecording(chat) else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                                    enabled = !sendingImage,
-                                    modifier = Modifier.size(42.dp).clip(CircleShape).background(if (recordingVoice) Danger.copy(alpha = 0.14f) else Surface2)
-                                ) {
-                                    Icon(if (recordingVoice) Icons.Default.Stop else Icons.Default.Mic,
-                                        if (recordingVoice) "Остановить запись" else "Записать голосовое",
-                                        tint = if (recordingVoice) Danger else Accent)
-                                }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
                                 IconButton(
                                     onClick = { mediaPicker.launch(arrayOf("*/*")) },
-                                    enabled = !sendingImage,
-                                    modifier = Modifier.size(42.dp).clip(CircleShape).background(Surface2)
+                                    enabled = !sendingImage && !recordingVoice,
+                                    modifier = Modifier.size(44.dp).clip(CircleShape)
+                                        .background(Surface2).align(Alignment.Bottom)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = Accent)
-                                    else Icon(Icons.Default.Add, "Прикрепить файл", tint = Accent)
+                                    else Icon(Icons.Default.Add, "Прикрепить фото или файл", tint = Accent, modifier = Modifier.size(23.dp))
                                 }
+                                Spacer(Modifier.width(7.dp))
                                 OutlinedTextField(
-                                    value = draft, onValueChange = {
+                                    value = draft,
+                                    onValueChange = {
                                         draft = it
                                         chatDrafts[chat.id] = it
                                     },
-                                    modifier = Modifier.weight(1f),
-                                    placeholder = { Text("Написать сообщение", fontSize = 14.sp) },
-                                    maxLines = 5, shape = RoundedCornerShape(24.dp), colors = authFieldColors(),
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 132.dp),
+                                    placeholder = { Text("Сообщение", fontSize = 14.sp, color = SecondaryText) },
+                                    minLines = 1,
+                                    maxLines = 4,
+                                    shape = RoundedCornerShape(25.dp),
+                                    textStyle = androidx.compose.ui.text.TextStyle(
+                                        color = MainText,
+                                        fontSize = 15.sp,
+                                        lineHeight = 20.sp
+                                    ),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MainText,
+                                        unfocusedTextColor = MainText,
+                                        cursorColor = Accent,
+                                        focusedContainerColor = Surface2,
+                                        unfocusedContainerColor = Surface2,
+                                        disabledContainerColor = Surface2,
+                                        focusedBorderColor = Accent.copy(alpha = 0.65f),
+                                        unfocusedBorderColor = Color.Transparent,
+                                        disabledBorderColor = Color.Transparent,
+                                        focusedPlaceholderColor = SecondaryText,
+                                        unfocusedPlaceholderColor = SecondaryText
+                                    ),
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                                     keyboardActions = KeyboardActions(onSend = {
                                         val text = draft.trim()
@@ -2921,18 +2938,36 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     })
                                 )
                                 Spacer(Modifier.width(7.dp))
+                                val hasOutgoingContent = draft.isNotBlank() || pendingMediaUri != null
                                 IconButton(
                                     onClick = {
-                                        val text = draft.trim()
-                                        val media = pendingMediaUri
-                                        if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
-                                        else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
+                                        if (hasOutgoingContent) {
+                                            val text = draft.trim()
+                                            val media = pendingMediaUri
+                                            if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
+                                            else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
+                                        } else if (!recordingVoice) {
+                                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        } else {
+                                            stopVoiceRecording(chat)
+                                        }
                                     },
-                                    enabled = (draft.isNotBlank() || pendingMediaUri != null) && !sendingImage,
-                                    modifier = Modifier.size(46.dp).background(if (draft.isNotBlank() || pendingMediaUri != null) Brush.linearGradient(listOf(Accent, Accent2)) else Brush.linearGradient(listOf(Surface2, Surface2)), CircleShape)
+                                    enabled = !sendingImage,
+                                    modifier = Modifier.size(46.dp).clip(CircleShape)
+                                        .background(
+                                            if (hasOutgoingContent || recordingVoice) Brush.linearGradient(listOf(Accent, Accent2))
+                                            else Brush.linearGradient(listOf(Surface2, Surface2))
+                                        )
+                                        .align(Alignment.Bottom)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
-                                    else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank() || pendingMediaUri != null) Bg else SecondaryText)
+                                    else if (hasOutgoingContent) Icon(Icons.Default.Send, "Отправить", tint = Bg, modifier = Modifier.size(21.dp))
+                                    else Icon(
+                                        if (recordingVoice) Icons.Default.Stop else Icons.Default.Mic,
+                                        if (recordingVoice) "Остановить и отправить голосовое" else "Записать голосовое",
+                                        tint = if (recordingVoice) Bg else Accent,
+                                        modifier = Modifier.size(22.dp)
+                                    )
                                 }
                             }
                         }
