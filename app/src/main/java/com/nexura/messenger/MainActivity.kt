@@ -149,6 +149,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val scope = rememberCoroutineScope()
+    val realtimeClient = remember(store) { SupabaseMessagesRealtime(store) }
     var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank()) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -170,6 +171,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var canManagePins by remember { mutableStateOf(false) }
     var lastSyncedMessageTimestamp by remember { mutableStateOf<String?>(null) }
     var lastSyncedMessageId by remember { mutableStateOf<String?>(null) }
+    var realtimeConnected by remember(selected?.id) { mutableStateOf(false) }
     var hasMoreMessages by remember { mutableStateOf(false) }
     var loadingOlderMessages by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
@@ -644,6 +646,42 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    // A single authenticated Supabase Realtime socket listens only to the open conversation.
+    // Every event is merely a hint: fetch through PostgREST and decrypt with the existing E2EE client.
+    LaunchedEffect(signedIn, selected?.id) {
+        val chat = selected
+        realtimeConnected = false
+        if (signedIn && chat != null) {
+            realtimeClient.observeConversation(chat.id).collect { event ->
+                realtimeConnected = event.connected
+                if (event.connected && (event.messageChanged || messages.isEmpty())) {
+                    runCatching {
+                        val latest = api.messages(
+                            chat.id,
+                            e2eeClient,
+                            lastSyncedMessageTimestamp,
+                            afterMessageId = lastSyncedMessageId
+                        )
+                        if (selected?.id == chat.id && latest.isNotEmpty()) {
+                            messages = (messages + latest).distinctBy { it.id }
+                                .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            if (newest != null) {
+                                val timestamp = lastSyncedMessageTimestamp
+                                val id = lastSyncedMessageId
+                                if (timestamp == null || newest.createdAt > timestamp ||
+                                    (newest.createdAt == timestamp && newest.id > id.orEmpty())) {
+                                    lastSyncedMessageTimestamp = newest.createdAt
+                                    lastSyncedMessageId = newest.id
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Keep messages and the chat list responsive; optimize the work, not refresh frequency.
     LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
@@ -651,7 +689,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             var lastReceiptRefresh = 0L
             while (true) {
                 val currentChat = selected
-                delay(if (currentChat != null) retryDelay else maxOf(20_000L, retryDelay))
+                delay(if (currentChat != null && realtimeConnected) 20_000L else if (currentChat != null) retryDelay else maxOf(20_000L, retryDelay))
                 try {
                     if (currentChat != null) {
                         val lastTimestamp = lastSyncedMessageTimestamp
