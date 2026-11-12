@@ -47,6 +47,8 @@ data class MessageItem(
     val mediaFileName: String? = null,
     val mediaMimeType: String? = null
 )
+class E2eePreKeyUnavailableException(message: String) : IOException(message)
+
 data class E2eeRemoteDevice(
     val userId: String,
     val deviceId: String,
@@ -1036,7 +1038,11 @@ class NexuraApi(private val store: SessionStore) {
         }
 
         if (recipients.none { it.userId == peerId }) {
-            throw IOException("Не удалось подготовить ключ для устройства собеседника. Попросите его открыть Nexura для обновления защиты и повторите отправку.")
+            // Keep the encrypted-at-rest outbox item queued. The app retries it
+            // automatically; never ask users to manage cryptographic keys.
+            throw E2eePreKeyUnavailableException(
+                "Ожидаем доступный ключ собеседника. Сообщение отправится автоматически."
+            )
         }
 
         val (latestPeerDevices, latestOwnDevicesRaw) = coroutineScope {
