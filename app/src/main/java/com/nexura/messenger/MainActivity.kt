@@ -89,6 +89,8 @@ import androidx.compose.ui.unit.sp
 import com.nexura.messenger.data.*
 import com.nexura.messenger.calls.NexuraCallDialog
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
