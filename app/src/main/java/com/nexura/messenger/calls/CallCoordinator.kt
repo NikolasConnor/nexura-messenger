@@ -336,7 +336,8 @@ class CallCoordinator(
             "offer" -> {
                 val now = System.currentTimeMillis()
                 val sentAt = signal.optLong("sent_at", now)
-                if (sentAt <= 0L || now - sentAt > CALL_RING_TIMEOUT_MS) {
+                val receivedAt = if (sentAt in 1L..now) sentAt else now
+                if (now - receivedAt > CALL_RING_TIMEOUT_MS) {
                     send(endSignal(id))
                     return
                 }
@@ -346,7 +347,7 @@ class CallCoordinator(
                     return
                 }
                 pendingCallId = id
-                pendingOfferReceivedAtMs = sentAt
+                pendingOfferReceivedAtMs = receivedAt
                 pendingVideo = signal.optBoolean("video")
                 publish(CallUiState(
                     status = if (pendingVideo) "Входящий видеозвонок" else "Входящий звонок",
@@ -542,6 +543,7 @@ class CallCoordinator(
         peerRoomConnected = false
         callId = null
         pendingCallId = null
+        pendingOfferReceivedAtMs = null
         pendingVideo = false
         accepted = false
         videoMode = false
