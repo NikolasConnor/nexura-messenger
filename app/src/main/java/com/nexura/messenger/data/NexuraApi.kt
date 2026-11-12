@@ -22,6 +22,8 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
@@ -74,6 +76,9 @@ class NexuraApi(private val store: SessionStore) {
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
     private val remoteDeviceCache = ConcurrentHashMap<String, Pair<E2eeRemoteDevice, Long>>()
+    // Supabase rotates refresh tokens. Serialize refreshes so simultaneous 401 responses
+    // cannot race and invalidate the token another request has just stored.
+    private val refreshMutex = Mutex()
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
@@ -92,11 +97,13 @@ class NexuraApi(private val store: SessionStore) {
             return builder.build()
         }
 
+        val refreshTokenAtRequestStart = if (auth) store.refreshToken else null
         var response = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
         // Refresh an expired access token once, then retry the original request.
-        if (response.code == 401 && auth && !store.refreshToken.isNullOrBlank()) {
+        // If another request already rotated the token, reuse its fresh access token.
+        if (response.code == 401 && auth) {
             response.close()
-            refreshSession()
+            refreshAfterUnauthorized(refreshTokenAtRequestStart)
             val freshToken = store.accessToken
                 ?: throw IOException("Сессия истекла. Войдите в Nexura ещё раз.")
             response = client.newCall(buildRequest(freshToken)).execute()
@@ -169,10 +176,53 @@ class NexuraApi(private val store: SessionStore) {
             ?: o.optJSONObject("session")?.optJSONObject("user")?.optString("id")
     }
     suspend fun refreshSession() {
-        val refresh = store.refreshToken ?: return
-        val o = JSONObject(call("/auth/v1/token?grant_type=refresh_token", "POST",
-            JSONObject().put("refresh_token", refresh).toString(), auth = false))
-        saveSession(o)
+        refreshMutex.withLock {
+            val refresh = store.refreshToken ?: return@withLock
+            refreshSessionLocked(refresh)
+        }
+    }
+
+    private suspend fun refreshAfterUnauthorized(refreshTokenAtRequestStart: String?) {
+        refreshMutex.withLock {
+            val currentRefreshToken = store.refreshToken
+                ?: throw IOException("Сессия истекла. Войдите в Nexura ещё раз.")
+            // A parallel request may have refreshed the session while this request was in flight.
+            if (!refreshTokenAtRequestStart.isNullOrBlank() &&
+                currentRefreshToken != refreshTokenAtRequestStart &&
+                !store.accessToken.isNullOrBlank()) return@withLock
+            refreshSessionLocked(currentRefreshToken)
+        }
+    }
+
+    private suspend fun refreshSessionLocked(refresh: String) {
+        try {
+            val o = JSONObject(call("/auth/v1/token?grant_type=refresh_token", "POST",
+                JSONObject().put("refresh_token", refresh).toString(), auth = false))
+            saveSession(o)
+            if (store.accessToken.isNullOrBlank() || store.refreshToken.isNullOrBlank()) {
+                throw IOException("Сервер не вернул новую сессию. Войдите в Nexura ещё раз.")
+            }
+        } catch (e: Exception) {
+            val message = (e.message ?: "").lowercase()
+            if (message.contains("refresh token") &&
+                (message.contains("invalid") || message.contains("not found") ||
+                 message.contains("already used") || message.contains("expired"))) {
+                store.clear()
+            }
+            throw e
+        }
+    }
+
+    /** Restores and validates the persisted Supabase session before loading app data. */
+    suspend fun restoreSession() {
+        if (store.accessToken.isNullOrBlank()) refreshSession()
+        if (store.accessToken.isNullOrBlank()) {
+            throw IOException("Сессия не найдена. Войдите в Nexura.")
+        }
+        val user = JSONObject(call("/auth/v1/user", auth = true))
+        val userId = user.optString("id").takeIf { it.isNotBlank() && it != "null" }
+            ?: throw IOException("Не удалось восстановить профиль аккаунта. Войдите в Nexura ещё раз.")
+        store.userId = userId
     }
     suspend fun resendConfirmation(email: String) {
         val redirect = java.net.URLEncoder.encode(AUTH_REDIRECT, "UTF-8")
