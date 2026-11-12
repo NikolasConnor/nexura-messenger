@@ -747,6 +747,28 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 val outgoingClient = e2eeClient
                 if (outgoingClient != null) {
+                    // A fresh install has no local message cache. Fetch one newest message per
+                    // recent chat through the normal E2EE decrypt path so the list can show real
+                    // previews without ever requesting or storing server-side plaintext.
+                    launch {
+                        latestChats.take(50).chunked(4).forEach { batch ->
+                            val previewRows = coroutineScope {
+                                batch.map { chat ->
+                                    async(Dispatchers.IO) {
+                                        runCatching {
+                                            val newest = api.messages(chat.id, outgoingClient, pageSize = 1).lastOrNull()
+                                            if (newest != null && !newest.content.startsWith("🔒") &&
+                                                !newest.content.startsWith("⚠")) {
+                                                localCache.saveMessages(store.userId.orEmpty(), chat.id, listOf(newest))
+                                                chat.id to chatMessagePreview(newest, store.userId.orEmpty())
+                                            } else null
+                                        }.getOrNull()
+                                    }
+                                }.mapNotNull { it.await() }
+                            }
+                            previewRows.forEach { (chatId, preview) -> chatPreviews[chatId] = preview }
+                        }
+                    }
                     val pendingOutgoing = withContext(Dispatchers.IO) {
                         outgoingClient.pendingOutgoingMessages()
                     }
