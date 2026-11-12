@@ -773,7 +773,7 @@ class NexuraApi(private val store: SessionStore) {
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         runCatching { syncE2eeBackupIfEnabled(e2ee) }
-        notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId)
     }
 
     private suspend fun decryptGroupEnvelope(
@@ -1003,7 +1003,7 @@ class NexuraApi(private val store: SessionStore) {
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         runCatching { syncE2eeBackupIfEnabled(e2ee) }
-        notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId)
     }
 
 
