@@ -43,11 +43,14 @@ object E2eeMediaCrypto {
     fun encryptUri(
         resolver: ContentResolver,
         uri: Uri,
-        cacheDir: File
+        cacheDir: File,
+        mimeTypeOverride: String? = null,
+        fileNameOverride: String? = null
     ): EncryptedMediaFile {
         val fileUri = uri.scheme == "file"
         val localFile = if (fileUri) uri.path?.let(::File) else null
-        val mime = resolver.getType(uri)?.lowercase()
+        val mime = mimeTypeOverride?.lowercase()
+            ?: resolver.getType(uri)?.lowercase()
             ?: if (localFile?.extension?.lowercase() == "m4a" || localFile?.extension?.lowercase() == "aac") "audio/mp4"
             else throw IOException("Не удалось определить формат файла")
         val isImage = mime.startsWith("image/")
@@ -63,11 +66,13 @@ object E2eeMediaCrypto {
         if (!isImage && !isVideo && !isAudio && !isDocument) {
             throw IOException("Этот тип файла нельзя отправить. Поддерживаются фото, видео, аудио, PDF, Office, TXT, CSV и ZIP.")
         }
-        val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
-        }?.takeIf { it.isNotBlank() }?.replace(Regex("[^A-Za-z0-9._ -]"), "_")?.take(100)
+        val name = fileNameOverride?.takeIf { it.isNotBlank() }
+            ?: resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }?.takeIf { it.isNotBlank() }
             ?: localFile?.name?.take(100)
             ?: when { isVideo -> "video"; isAudio -> "voice.m4a"; isDocument -> "document"; else -> "photo" }
+        val safeName = name.replace(Regex("[^A-Za-z0-9._ -]"), "_").take(100)
 
         val key = ByteArray(32).also(SecureRandom()::nextBytes)
         val iv = ByteArray(12).also(SecureRandom()::nextBytes)
@@ -98,7 +103,7 @@ object E2eeMediaCrypto {
             }
             if (total == 0L) throw IOException("Файл пустой")
             return EncryptedMediaFile(
-                encrypted, uploadMime, uploadName, total,
+                encrypted, uploadMime, safeName.substringBeforeLast('.', safeName) + uploadName.substringAfterLast('.', "" ).let { if (it.isBlank()) "" else ".$it" }, total,
                 Base64.encodeToString(key, Base64.NO_WRAP),
                 Base64.encodeToString(iv, Base64.NO_WRAP),
                 sha256(encrypted), encrypted.length()
@@ -116,7 +121,7 @@ object E2eeMediaCrypto {
         // Older Android versions use the BitmapFactory fallback.
         val bitmap = try {
             if (Build.VERSION.SDK_INT >= 28) {
-                val source = ImageDecoder.createSource(resolver, uri)
+                val source = localFile?.let { ImageDecoder.createSource(it) } ?: ImageDecoder.createSource(resolver, uri)
                 ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                     decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                     val width = info.size.width.coerceAtLeast(1)
@@ -129,7 +134,7 @@ object E2eeMediaCrypto {
                 }
             } else {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                (localFile?.inputStream() ?: resolver.openInputStream(uri))?.use { BitmapFactory.decodeStream(it, null, bounds) }
                     ?: throw IOException("Галерея не предоставила доступ к изображению")
                 if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
                     throw IOException("Формат изображения не поддерживается на этой версии Android")
@@ -141,7 +146,7 @@ object E2eeMediaCrypto {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 }
-                resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+                (localFile?.inputStream() ?: resolver.openInputStream(uri))?.use { BitmapFactory.decodeStream(it, null, options) }
                     ?: throw IOException("Не удалось декодировать изображение из галереи")
             }
         } catch (error: Exception) {
