@@ -1192,6 +1192,24 @@ class NexuraApi(private val store: SessionStore) {
         if (revokedCount < 0) throw IOException("Некорректный ответ сервера при отзыве устройств")
     }
 
+    /** Lists only the signed-in user's currently active E2EE devices. */
+    suspend fun ownE2eeDevices(): List<E2eeRemoteDevice> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        return activeE2eeDevices(uid)
+    }
+
+    /** Permanently blocks one selected device from E2EE key discovery and OTK replenishment. */
+    suspend fun revokeOwnE2eeDevice(deviceId: String) {
+        val id = normalizeUuid(deviceId)
+        val response = call(
+            "/rest/v1/rpc/revoke_own_e2ee_device",
+            "POST",
+            JSONObject().put("p_device_id", id).toString()
+        ).trim()
+        if (response != "true") throw IOException("Сервер не подтвердил отзыв E2EE-устройства")
+        remoteDeviceCache.entries.removeIf { it.key.endsWith(":$id") }
+    }
+
     suspend fun hasRegisteredE2eeDevice(): Boolean {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val rows = JSONArray(call(
