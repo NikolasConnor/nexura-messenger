@@ -673,6 +673,50 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    // Durable outbox recovery: retry queued encrypted messages while the app is active.
+    // The queue is stored locally under Android Keystore; the server receives ciphertext only.
+    // A bounded backoff avoids hammering Supabase when connectivity or a recipient key is unavailable.
+    LaunchedEffect(signedIn) {
+        if (signedIn) {
+            var retryDelay = 30_000L
+            while (true) {
+                delay(retryDelay)
+                val client = e2eeClient
+                if (client == null || e2eeRecoveryRequired) {
+                    retryDelay = (retryDelay * 2).coerceAtMost(300_000L)
+                    continue
+                }
+                try {
+                    val pending = withContext(Dispatchers.IO) {
+                        client.pendingOutgoingMessages()
+                    }
+                    if (pending.isEmpty()) {
+                        retryDelay = 30_000L
+                        continue
+                    }
+                    // Refresh chat metadata so queued messages can resume even if the
+                    // conversation list was stale when the device came back online.
+                    val latestChats = api.chats()
+                    chats = latestChats
+                    var resumed = 0
+                    pending.forEach { item ->
+                        val target = latestChats.firstOrNull { it.id == item.conversationId } ?: return@forEach
+                        val state = messageDelivery[item.messageId]
+                        if (state != "sending" && state != "sent") {
+                            dispatchSecureMessage(
+                                target, item.messageId, item.plaintext, item.replyToId, item.createdAt
+                            )
+                            resumed++
+                        }
+                    }
+                    retryDelay = if (resumed > 0) 30_000L else (retryDelay * 2).coerceAtMost(300_000L)
+                } catch (_: Exception) {
+                    retryDelay = (retryDelay * 2).coerceAtMost(300_000L)
+                }
+            }
+        }
+    }
+
     // A single authenticated Supabase Realtime socket listens only to the open conversation.
     // Every event is merely a hint: fetch through PostgREST and decrypt with the existing E2EE client.
     LaunchedEffect(signedIn, selected?.id) {
