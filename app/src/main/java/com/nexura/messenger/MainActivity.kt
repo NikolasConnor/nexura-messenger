@@ -211,8 +211,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
     var chatThemeOpen by remember { mutableStateOf(false) }
-    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF0D1118)) }
-    var chatBubbleColor by remember { mutableStateOf(Color(0xFF304B83)) }
+    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
+    var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceFile by remember { mutableStateOf<File?>(null) }
@@ -257,11 +257,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             .edit().putString("active_chat_id", selected?.id).apply()
         selected?.id?.let { chatId ->
             val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
-            chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF0D1118.toInt()))
-            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF304B83.toInt()))
+            chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
+            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
         } ?: run {
-            chatWallpaperColor = Color(0xFF0D1118)
-            chatBubbleColor = Color(0xFF304B83)
+            chatWallpaperColor = Color(0xFF100C1D)
+            chatBubbleColor = Color(0xFF6945C7)
         }
     }
 
@@ -1669,8 +1669,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     if (chatThemeOpen) {
-                        val wallpaperOptions = listOf("Ночь" to Color(0xFF0D1118), "Графит" to Color(0xFF171D27), "Сланец" to Color(0xFF1B2634), "Синий вечер" to Color(0xFF101D32), "Лес" to Color(0xFF14251F), "Бордовый" to Color(0xFF2A1922))
-                        val bubbleOptions = listOf("Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Фиолетовый" to Color(0xFF554078), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
+                        val wallpaperOptions = listOf("Фиолетовая ночь" to Color(0xFF100C1D), "Графит" to Color(0xFF171D27), "Сланец" to Color(0xFF1B2634), "Синий вечер" to Color(0xFF101D32), "Лес" to Color(0xFF14251F), "Бордовый" to Color(0xFF2A1922))
+                        val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
                             containerColor = Surface1,
@@ -2016,7 +2016,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     Column(Modifier.fillMaxSize()) {
                         Row(
-                            Modifier.fillMaxWidth().background(Surface1).padding(horizontal = 8.dp, vertical = 9.dp),
+                            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = { selected = null; peerReadReceiptAt = null; messages = emptyList(); replyTarget = null; loadChats() }) {
@@ -2271,10 +2271,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
                                         Column(
                                             Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(
-                                                topStart = 18.dp, topEnd = 18.dp,
-                                                bottomStart = if (mine) 18.dp else 5.dp,
-                                                bottomEnd = if (mine) 5.dp else 18.dp
-                                            )).background(if (mine) chatBubbleColor else Surface1).padding(horizontal = 14.dp, vertical = 11.dp)
+                                                topStart = 20.dp, topEnd = 20.dp,
+                                                bottomStart = if (mine) 20.dp else 6.dp,
+                                                bottomEnd = if (mine) 6.dp else 20.dp
+                                            )).background(if (mine) chatBubbleColor else Surface2).padding(horizontal = 15.dp, vertical = 12.dp)
                                         ) {
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
@@ -2360,7 +2360,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             } else if (msg.messageType == "image") {
                                                 AsyncImage(model = msg.content, contentDescription = "Изображение", modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
                                             } else {
-                                                Text(msg.content, color = MainText, fontSize = 14.sp)
+                                                Text(msg.content, color = MainText, fontSize = 15.sp, lineHeight = 21.sp)
                                             }
                                             Row(
                                                 Modifier.fillMaxWidth().padding(top = 5.dp),
@@ -2495,7 +2495,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                         Column(
-                            Modifier.fillMaxWidth().background(Surface1).navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)
+                            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 9.dp)
                         ) {
                             if (replyTarget != null) {
                                 Row(
@@ -2577,7 +2577,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
                                     },
                                     enabled = (draft.isNotBlank() || pendingMediaUri != null) && !sendingImage,
-                                    modifier = Modifier.size(46.dp).background(if (draft.isNotBlank() || pendingMediaUri != null) Accent else Surface2, CircleShape)
+                                    modifier = Modifier.size(46.dp).background(if (draft.isNotBlank() || pendingMediaUri != null) Brush.linearGradient(listOf(Accent, Accent2)) else Brush.linearGradient(listOf(Surface2, Surface2)), CircleShape)
                                 ) {
                                     if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
                                     else Icon(Icons.Default.Send, "Отправить", tint = if (draft.isNotBlank() || pendingMediaUri != null) Bg else SecondaryText)
