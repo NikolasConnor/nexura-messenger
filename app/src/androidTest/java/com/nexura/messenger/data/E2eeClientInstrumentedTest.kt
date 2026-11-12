@@ -297,6 +297,45 @@ class E2eeClientInstrumentedTest {
     }
 
     @Test
+    fun oneTimeKeyPoolReplenishesAndSurvivesProcessRestart() {
+        val (userId, client) = newClient()
+        val bundle = JSONObject(client.ensureDevice())
+        val initialKeys = bundle.getJSONArray("one_time_keys")
+        assertEquals(50, initialKeys.length())
+
+        val initialIds = (0 until initialKeys.length()).map {
+            initialKeys.getJSONObject(it).getString("key_id")
+        }
+        client.markPublicKeysPublished(initialIds)
+        assertEquals(0, org.json.JSONArray(client.pendingOneTimeKeysJson()).length())
+
+        client.replenishOneTimeKeys(50)
+        val pendingAfterReplenish = org.json.JSONArray(client.pendingOneTimeKeysJson())
+        assertEquals(50, pendingAfterReplenish.length())
+
+        // A fresh facade simulates app process death/restart. The generated
+        // private account state and stable public key IDs must remain durable.
+        val restored = E2eeClient(context, userId)
+        val restoredPending = org.json.JSONArray(restored.pendingOneTimeKeysJson())
+        assertEquals(50, restoredPending.length())
+        for (index in 0 until restoredPending.length()) {
+            val key = restoredPending.getJSONObject(index)
+            assertEquals(true, restored.verifyPublishedOneTimeKey(
+                bundle.getString("ed25519"),
+                bundle.getString("curve25519"),
+                key.getString("key"),
+                key.getString("signature")
+            ))
+        }
+
+        val newIds = (0 until restoredPending.length()).map {
+            restoredPending.getJSONObject(it).getString("key_id")
+        }
+        restored.markPublicKeysPublished(newIds)
+        assertEquals(0, org.json.JSONArray(restored.pendingOneTimeKeysJson()).length())
+    }
+
+    @Test
     fun oneTimeKeySignatureTamperingIsRejected() {
         val (_, bob) = newClient()
         val bundle = JSONObject(bob.ensureDevice())
