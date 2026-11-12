@@ -792,39 +792,47 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    // A single authenticated Supabase Realtime socket listens only to the open conversation.
-    // Every event is merely a hint: fetch through PostgREST and decrypt with the existing E2EE client.
-    LaunchedEffect(signedIn, selected?.id) {
-        val chat = selected
+    // One authenticated Realtime socket watches the user's recent conversations.
+    // Incoming events are sync hints; ciphertext is fetched and decrypted through the existing E2EE path.
+    LaunchedEffect(signedIn, chats.map { it.id }.take(50)) {
         realtimeConnected = false
-        if (signedIn && chat != null) {
-            var wasConnected = false
-            realtimeClient.observeConversation(chat.id).collect { event ->
+        val watchedIds = chats.map { it.id }.take(50)
+        if (signedIn && watchedIds.isNotEmpty()) {
+            realtimeClient.observeConversations(watchedIds).collect { event ->
                 realtimeConnected = event.connected
-                val justReconnected = event.connected && !wasConnected
-                wasConnected = event.connected
-                if (event.connected && (event.messageChanged || justReconnected)) {
+                val changedChatId = event.changedConversationId
+                if (event.connected && event.messageChanged && changedChatId != null && e2eeClient != null) {
                     runCatching {
-                        val latest = api.messages(
-                            chat.id,
-                            e2eeClient,
-                            lastSyncedMessageTimestamp,
-                            afterMessageId = lastSyncedMessageId
-                        )
-                        if (selected?.id == chat.id && latest.isNotEmpty()) {
-                            messages = (messages + latest).distinctBy { it.id }
+                        val cached = withContext(Dispatchers.IO) {
+                            localCache.readMessages(store.userId.orEmpty(), changedChatId)
+                        }
+                        val newestCached = cached.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                        val latest = if (newestCached == null) {
+                            api.messages(changedChatId, e2eeClient, pageSize = 20)
+                        } else {
+                            api.messages(
+                                changedChatId, e2eeClient, newestCached.createdAt,
+                                afterMessageId = newestCached.id
+                            )
+                        }
+                        if (latest.isNotEmpty()) {
+                            val base = if (selected?.id == changedChatId) messages else cached
+                            val merged = (base + latest).distinctBy { it.id }
                                 .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                             withContext(Dispatchers.IO) {
-                                localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
+                                localCache.saveMessages(store.userId.orEmpty(), changedChatId, merged)
                             }
-                            val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                            if (newest != null) {
-                                val timestamp = lastSyncedMessageTimestamp
-                                val id = lastSyncedMessageId
-                                if (timestamp == null || newest.createdAt > timestamp ||
-                                    (newest.createdAt == timestamp && newest.id > id.orEmpty())) {
-                                    lastSyncedMessageTimestamp = newest.createdAt
-                                    lastSyncedMessageId = newest.id
+                            if (selected?.id == changedChatId) {
+                                messages = merged
+                                val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                if (newest != null) {
+                                    val timestamp = lastSyncedMessageTimestamp
+                                    val id = lastSyncedMessageId
+                                    if (timestamp == null || newest.createdAt > timestamp ||
+                                        (newest.createdAt == timestamp && newest.id > id.orEmpty())) {
+                                        lastSyncedMessageTimestamp = newest.createdAt
+                                        lastSyncedMessageId = newest.id
+                                    }
                                 }
                             }
                         }
