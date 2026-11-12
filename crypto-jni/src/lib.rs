@@ -269,6 +269,22 @@ pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeInvalidat
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeInvalidateSessionsForPrefix(
+    mut env: JNIEnv,
+    _class: JClass,
+    prefix: JString
+) {
+    let result = (|| {
+        let namespace = read_string(&mut env, &prefix)?;
+        if namespace.is_empty() || namespace.len() > 512 {
+            return Err("invalid native session namespace".to_string());
+        }
+        session_manager().invalidate_prefix(&namespace)
+    })();
+    if let Err(error) = result { set_error(&mut env, &error); }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_nexura_messenger_data_E2eeNative_nativeEncryptCached(mut env: JNIEnv, _class: JClass, session_id: JString, session_pickle: JByteArray, plaintext: JByteArray) -> jobjectArray {
     let result = (|| {
         let id = read_string(&mut env, &session_id)?;
