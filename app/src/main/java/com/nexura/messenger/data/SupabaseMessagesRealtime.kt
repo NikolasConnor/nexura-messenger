@@ -21,7 +21,8 @@ import java.util.concurrent.TimeUnit
 
 data class RealtimeMessageEvent(
     val connected: Boolean,
-    val messageChanged: Boolean = false
+    val messageChanged: Boolean = false,
+    val changedConversationId: String? = null
 )
 
 /**
@@ -37,7 +38,16 @@ class SupabaseMessagesRealtime(private val store: SessionStore) {
         .retryOnConnectionFailure(true)
         .build()
 
-    fun observeConversation(conversationId: String): Flow<RealtimeMessageEvent> = flow {
+    fun observeConversation(conversationId: String): Flow<RealtimeMessageEvent> =
+        observeConversations(listOf(conversationId))
+
+    /** One socket can watch all conversations the signed-in user belongs to. */
+    fun observeConversations(conversationIds: List<String>): Flow<RealtimeMessageEvent> = flow {
+        val ids = conversationIds.map(String::trim).filter(String::isNotBlank).distinct().take(50)
+        if (ids.isEmpty()) {
+            emit(RealtimeMessageEvent(connected = false))
+            return@flow
+        }
         var backoff = 1_000L
         while (currentCoroutineContext().isActive) {
             try {
@@ -59,13 +69,16 @@ class SupabaseMessagesRealtime(private val store: SessionStore) {
 
                     socket = socketClient.newWebSocket(request, object : WebSocketListener() {
                         override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-                            val postgresChanges = JSONArray().put(
-                                JSONObject()
-                                    .put("event", "INSERT")
-                                    .put("schema", "public")
-                                    .put("table", "messages")
-                                    .put("filter", "conversation_id=eq.$conversationId")
-                            )
+                            val postgresChanges = JSONArray()
+                            ids.forEach { conversationId ->
+                                postgresChanges.put(
+                                    JSONObject()
+                                        .put("event", "INSERT")
+                                        .put("schema", "public")
+                                        .put("table", "messages")
+                                        .put("filter", "conversation_id=eq.$conversationId")
+                                )
+                            }
                             val payload = JSONObject()
                                 .put("access_token", token)
                                 .put("config", JSONObject()
@@ -96,7 +109,17 @@ class SupabaseMessagesRealtime(private val store: SessionStore) {
                                             close(IllegalStateException("Supabase Realtime отклонил подписку"))
                                         }
                                     }
-                                    "postgres_changes" -> trySend(RealtimeMessageEvent(connected = true, messageChanged = true))
+                                    "postgres_changes" -> {
+                                        val data = message.optJSONObject("payload")?.optJSONObject("data")
+                                        val record = data?.optJSONObject("record")
+                                        val conversationId = record?.optString("conversation_id")
+                                            ?.takeIf { !it.isNullOrBlank() && it != "null" }
+                                        trySend(RealtimeMessageEvent(
+                                            connected = true,
+                                            messageChanged = true,
+                                            changedConversationId = conversationId
+                                        ))
+                                    }
                                     "system" -> {
                                         val payload = message.optJSONObject("payload")
                                         if (payload?.optString("status") == "error") {
