@@ -227,6 +227,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showOnlineStatus by remember { mutableStateOf(true) }
     var readReceiptsEnabled by remember { mutableStateOf(true) }
     var blockedUsers by remember { mutableStateOf(emptyList<UserItem>()) }
+    var ownE2eeDevices by remember { mutableStateOf(emptyList<E2eeRemoteDevice>()) }
+    var deviceToRevoke by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var viewedPresence by remember { mutableStateOf<UserPresence?>(null) }
     var confirmBlockProfile by remember { mutableStateOf<UserProfile?>(null) }
     var savingPrivacy by remember { mutableStateOf(false) }
@@ -1170,6 +1172,37 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                        if (e2eeClient?.hasLocalDevice() == true) {
+                            Card(Modifier.fillMaxWidth().padding(top = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("Устройства с доступом к E2EE", color = MainText, fontWeight = FontWeight.SemiBold)
+                                    Text("Отозванное устройство больше не получит новые ключи и не сможет отправлять защищённые сообщения от этой идентичности.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
+                                    if (ownE2eeDevices.isEmpty()) {
+                                        Text("Активные устройства не найдены. Обновите список.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                                    } else {
+                                        ownE2eeDevices.forEachIndexed { index, device ->
+                                            val currentDevice = device.deviceId == e2eeClient?.deviceId()
+                                            if (index > 0) HorizontalDivider(Modifier.padding(vertical = 10.dp), color = Surface2)
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Lock, null, tint = if (currentDevice) Success else Accent, modifier = Modifier.size(20.dp))
+                                                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                                    Text(if (currentDevice) "Это устройство" else "Другое устройство", color = MainText, fontWeight = FontWeight.Medium)
+                                                    Text("ID: \${device.deviceId.take(8)}…", color = SecondaryText, fontSize = 11.sp)
+                                                }
+                                                if (currentDevice) {
+                                                    Text("Текущее", color = Success, fontSize = 11.sp)
+                                                } else {
+                                                    TextButton(enabled = !busy, onClick = { deviceToRevoke = device }) {
+                                                        Text("Отозвать", color = Danger)
+                                                    }
+                                                }
+                                            }
+                                            Text("Отпечаток: \${runCatching { e2eeClient?.deviceFingerprint(device.curve25519Key, device.ed25519Key) }.getOrNull().orEmpty()}", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(start = 30.dp, top = 3.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
                                 Text("Авторизация", color = MainText, fontWeight = FontWeight.SemiBold)
@@ -1197,6 +1230,28 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                     if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации. Зашифрованные ключи останутся на этом устройстве, а временный криптографический кэш будет очищен.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { val e2eeToClear = e2eeClient; val serverSignOut = runCatching { api.signOut() }; val cacheClear = runCatching { e2eeToClear?.clearVolatileState() }; signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; e2eeClient = null; e2eeStatus = "Шифрование не проверено"; notice = when { cacheClear.isFailure -> "Локальный выход выполнен, но временный E2EE-кэш не удалось полностью очистить. Закройте приложение и запустите снова."; serverSignOut.isFailure -> "Локальный выход выполнен. Сервер не подтвердил отзыв сессии; проверьте подключение и завершите другие сеансы отдельно."; else -> "" } } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
+                    if (deviceToRevoke != null) AlertDialog(
+                        onDismissRequest = { if (!busy) deviceToRevoke = null },
+                        title = { Text("Отозвать E2EE-устройство?") },
+                        text = { Text("Устройство \${deviceToRevoke?.deviceId?.take(8)}… будет отключено от E2EE. Его активные одноразовые ключи удалятся, а повторная регистрация с тем же ID будет заблокирована. Уже сохранённые на нём данные автоматически не стираются.") },
+                        confirmButton = {
+                            TextButton(enabled = !busy, onClick = {
+                                val target = deviceToRevoke ?: return@TextButton
+                                deviceToRevoke = null
+                                scope.launch {
+                                    busy = true; error = ""; notice = ""
+                                    try {
+                                        api.revokeOwnE2eeDevice(target.deviceId)
+                                        ownE2eeDevices = api.ownE2eeDevices()
+                                        notice = "Устройство отозвано. Его старая E2EE-идентичность больше не принимается сервером."
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Не удалось отозвать устройство"
+                                    } finally { busy = false }
+                                }
+                            }) { Text(if (busy) "Отзываем…" else "Отозвать", color = Danger) }
+                        },
+                        dismissButton = { TextButton(enabled = !busy, onClick = { deviceToRevoke = null }) { Text("Отмена") } }
+                    )
                     if (showTerminateOthersDialog) AlertDialog(
                         onDismissRequest = { if (!busy) showTerminateOthersDialog = false },
                         title = { Text("Завершить другие сеансы?") },
@@ -1237,7 +1292,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
