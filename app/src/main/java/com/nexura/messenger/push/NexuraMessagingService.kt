@@ -26,9 +26,9 @@ class NexuraMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val payload = message.data
         val incomingCall = payload["type"] == "incoming_call"
-        val conversationId = payload["conversation_id"]?.let { raw ->
-            runCatching { UUID.fromString(raw).toString() }.getOrNull()
-        }
+        val conversationId = payload["conversation_id"]?.takeIf {
+            it.matches(Regex("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
+        }?.let { raw -> runCatching { UUID.fromString(raw).toString() }.getOrNull() }
         val callId = payload["call_id"]?.takeIf { it.length <= 64 }
         val video = payload["video"] == "true"
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -64,16 +64,12 @@ class NexuraMessagingService : FirebaseMessagingService() {
             )
         }
 
+        // Chat pushes deliberately never display sender names or message previews.
+        // Treat all remote chat payload text as untrusted and keep the notification generic.
         val title = if (incomingCall) {
             if (video) "Входящий видеозвонок" else "Входящий аудиозвонок"
-        } else {
-            payload["title"] ?: message.notification?.title ?: "Nexura"
-        }
-        val body = if (incomingCall) {
-            "Вам звонят в Nexura"
-        } else {
-            payload["body"] ?: message.notification?.body ?: "Новое сообщение"
-        }
+        } else "Nexura"
+        val body = if (incomingCall) "Вам звонят в Nexura" else "Новое сообщение"
 
         val builder = NotificationCompat.Builder(
             this, if (incomingCall) CALL_CHANNEL_ID else MESSAGE_CHANNEL_ID
@@ -83,6 +79,13 @@ class NexuraMessagingService : FirebaseMessagingService() {
             .setContentText(body)
             .setContentIntent(contentIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(
+                NotificationCompat.Builder(this, if (incomingCall) CALL_CHANNEL_ID else MESSAGE_CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.sym_action_chat)
+                    .setContentTitle("Nexura")
+                    .setContentText(if (incomingCall) "Входящий звонок" else "Новое сообщение")
+                    .build()
+            )
             .setCategory(if (incomingCall) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(!incomingCall)
             .setPriority(if (incomingCall) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_DEFAULT)
