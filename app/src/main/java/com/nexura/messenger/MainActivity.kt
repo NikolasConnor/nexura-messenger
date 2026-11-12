@@ -242,6 +242,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var forwardingTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var forwardingBusy by remember { mutableStateOf(false) }
     var editDraft by remember { mutableStateOf("") }
     var e2eeClient by remember { mutableStateOf<E2eeClient?>(null) }
     var e2eeStatus by remember { mutableStateOf("Шифрование не проверено") }
@@ -1670,21 +1671,64 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         val sourceMessage = forwardingTarget!!
                         val destinations = chats.filter { it.id != selected?.id }
                         AlertDialog(
-                            onDismissRequest = { forwardingTarget = null },
-                            title = { Text("Переслать сообщение") },
+                            onDismissRequest = { if (!forwardingBusy) forwardingTarget = null },
+                            title = { Text(if (forwardingBusy) "Пересылаем…" else "Переслать сообщение") },
                             text = {
                                 Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                                    Text("Сообщение будет заново зашифровано для выбранного чата.", color = SecondaryText, fontSize = 12.sp)
+                                    Text(
+                                        if (sourceMessage.messageType == "media")
+                                            "Вложение будет расшифровано на этом устройстве и заново зашифровано для выбранного чата."
+                                        else "Сообщение будет заново зашифровано для выбранного чата.",
+                                        color = SecondaryText, fontSize = 12.sp
+                                    )
                                     Spacer(Modifier.height(10.dp))
                                     destinations.forEach { destination ->
                                         Row(
-                                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
-                                                val messageId = UUID.randomUUID().toString()
-                                                val createdAt = java.time.Instant.now().toString()
-                                                dispatchSecureMessage(destination, messageId, sourceMessage.content, null, createdAt)
-                                                forwardingTarget = null
-                                                notice = "Пересылка добавлена в очередь"
-                                            }.padding(horizontal = 8.dp, vertical = 11.dp),
+                                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                                                .clickable(enabled = !forwardingBusy) {
+                                                    forwardingBusy = true
+                                                    scope.launch {
+                                                        try {
+                                                            if (sourceMessage.messageType == "media") {
+                                                                if (sourceMessage.mediaMimeType.isNullOrBlank() ||
+                                                                    sourceMessage.mediaFileName.isNullOrBlank() ||
+                                                                    sourceMessage.mediaKind !in setOf("image", "video", "audio", "file")) {
+                                                                    throw IOException("Не хватает проверенных данных о вложении для безопасной пересылки")
+                                                                }
+                                                                val sourceUri = Uri.parse(sourceMessage.content)
+                                                                if (sourceUri.scheme != "file" || sourceUri.path.isNullOrBlank()) {
+                                                                    throw IOException("Локальная расшифрованная копия вложения недоступна")
+                                                                }
+                                                                val sourceFile = File(sourceUri.path!!)
+                                                                if (!sourceFile.isFile || sourceFile.length() !in 1..E2eeMediaCrypto.MAX_PLAINTEXT_BYTES) {
+                                                                    throw IOException("Файл вложения отсутствует или превышает лимит 24 МБ")
+                                                                }
+                                                                val encrypted = withContext(Dispatchers.IO) {
+                                                                    E2eeMediaCrypto.encryptUri(
+                                                                        context.contentResolver, sourceUri, context.cacheDir,
+                                                                        sourceMessage.mediaMimeType, sourceMessage.mediaFileName
+                                                                    )
+                                                                }
+                                                                val client = e2eeClient ?: throw IOException("Ключ E2EE ещё не готов")
+                                                                if (destination.kind == "direct") {
+                                                                    api.sendEncryptedMediaMessage(destination.id, client, encrypted, sourceMessage.mediaCaption.orEmpty())
+                                                                } else {
+                                                                    api.sendEncryptedGroupMediaMessage(destination.id, client, encrypted, sourceMessage.mediaCaption.orEmpty())
+                                                                }
+                                                            } else {
+                                                                val messageId = UUID.randomUUID().toString()
+                                                                val createdAt = java.time.Instant.now().toString()
+                                                                dispatchSecureMessage(destination, messageId, sourceMessage.content, null, createdAt)
+                                                            }
+                                                            forwardingTarget = null
+                                                            notice = "Пересылка добавлена в очередь"
+                                                        } catch (e: Exception) {
+                                                            error = e.message ?: "Не удалось переслать сообщение"
+                                                        } finally {
+                                                            forwardingBusy = false
+                                                        }
+                                                    }
+                                                }.padding(horizontal = 8.dp, vertical = 11.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0)
@@ -1698,7 +1742,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (destinations.isEmpty()) Text("Нет других чатов для пересылки.", color = SecondaryText)
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { forwardingTarget = null }) { Text("Отмена") } }
+                            confirmButton = {
+                                TextButton(enabled = !forwardingBusy, onClick = { forwardingTarget = null }) { Text("Отмена") }
+                            }
                         )
                     }
                     if (editingTarget != null) {
@@ -2542,7 +2588,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             leadingIcon = { Text("↩", color = Accent, fontSize = 18.sp) },
                                                             onClick = { replyTarget = msg; openMessageMenu = null }
                                                         )
-                                                        if (msg.encrypted && !msg.securityWarning && msg.messageType == "text" && chats.any { it.id != chat.id }) {
+                                                        if (msg.encrypted && !msg.securityWarning && msg.messageType in setOf("text", "media") && chats.any { it.id != chat.id }) {
                                                             DropdownMenuItem(
                                                                 text = { Text("Переслать") },
                                                                 leadingIcon = { Icon(Icons.Default.ArrowForward, null, tint = Accent) },
