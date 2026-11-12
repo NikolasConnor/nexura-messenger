@@ -49,6 +49,9 @@ fun NexuraCallDialog(
     accessToken: String,
     visible: Boolean,
     autoAction: String = "show",
+    incomingCallId: String? = null,
+    incomingCallerId: String? = null,
+    incomingVideo: Boolean = false,
     onCallFinished: (Long, Boolean, Boolean, String) -> Unit = { _, _, _, _ -> },
     onDismiss: () -> Unit
 ) {
@@ -121,6 +124,9 @@ fun NexuraCallDialog(
             val peerId = api.directPeerUserId(chat.id)
             coordinator = CallCoordinator(context, chat.id, ownUserId, peerId, api, { ui = it }, onCallFinished)
             coordinator?.connect(accessToken)
+            if (!incomingCallId.isNullOrBlank() && !incomingCallerId.isNullOrBlank()) {
+                coordinator?.receiveIncomingPush(incomingCallId, incomingCallerId, incomingVideo)
+            }
         } catch (e: Exception) {
             ui = ui.copy(status = "Не удалось подготовить звонок", error = e.message)
         }
