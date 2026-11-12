@@ -31,6 +31,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
         }?.let { raw -> runCatching { UUID.fromString(raw).toString() }.getOrNull() }
         val callId = payload["call_id"]?.takeIf { it.length <= 64 }
         val video = payload["video"] == "true"
+        val callExpiresAt = System.currentTimeMillis() + CALL_RING_TIMEOUT_MS
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannels(manager)
 
@@ -42,7 +43,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
 
         val baseUri = if (conversationId != null && incomingCall && callId != null) {
             val callerId = payload["caller_id"].orEmpty()
-            "nexura://chat/$conversationId?call=1&call_id=${Uri.encode(callId)}&caller_id=${Uri.encode(callerId)}&video=$video"
+            "nexura://chat/$conversationId?call=1&call_id=${Uri.encode(callId)}&caller_id=${Uri.encode(callerId)}&video=$video&expires_at=$callExpiresAt"
         } else if (conversationId != null) {
             "nexura://chat/$conversationId"
         } else {
@@ -125,7 +126,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
             val launch = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 action = "com.nexura.messenger.INCOMING_CALL"
-                setData(Uri.parse("nexura://chat/$conversationId?call=1&action=show"))
+                setData(Uri.parse("nexura://chat/$conversationId?call=1&action=show&expires_at=$callExpiresAt"))
             }
             runCatching { startActivity(launch) }
         }
