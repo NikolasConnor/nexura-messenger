@@ -652,9 +652,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         val chat = selected
         realtimeConnected = false
         if (signedIn && chat != null) {
+            var wasConnected = false
             realtimeClient.observeConversation(chat.id).collect { event ->
                 realtimeConnected = event.connected
-                if (event.connected && (event.messageChanged || messages.isEmpty())) {
+                val justReconnected = event.connected && !wasConnected
+                wasConnected = event.connected
+                if (event.connected && (event.messageChanged || justReconnected)) {
                     runCatching {
                         val latest = api.messages(
                             chat.id,
