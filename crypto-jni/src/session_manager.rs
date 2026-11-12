@@ -88,6 +88,29 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Atomically evict every cached session belonging to one user namespace.
+    /// Refuse the whole operation if any matching session is currently in use.
+    pub(crate) fn invalidate_prefix(&self, prefix: &str) -> Result<(), String> {
+        if prefix.is_empty() {
+            return Err("session namespace prefix must not be empty".into());
+        }
+        let mut state = self.state.lock().map_err(|_| "session cache lock poisoned")?;
+        let matching: Vec<String> = state.sessions.keys()
+            .filter(|id| id.starts_with(prefix))
+            .cloned()
+            .collect();
+        if matching.iter().any(|id| {
+            state.sessions.get(id).is_some_and(|session| Arc::strong_count(session) > 1)
+        }) {
+            return Err("cannot clear E2EE session cache while a session is in use".into());
+        }
+        for id in matching {
+            state.sessions.remove(&id);
+            state.recency.retain(|entry| entry != &id);
+        }
+        Ok(())
+    }
+
     pub(crate) fn cached_count(&self) -> Result<usize, String> {
         self.state.lock().map(|state| state.sessions.len())
             .map_err(|_| "session cache lock poisoned".into())
