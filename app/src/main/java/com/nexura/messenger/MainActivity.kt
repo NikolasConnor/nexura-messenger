@@ -474,6 +474,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         break
                     } catch (e: Exception) {
                         lastFailure = e
+                        // Do not waste retries on permanent HTTP/client errors. A transient
+                        // network failure keeps the same durable outbox item and message ID.
+                        if (e !is E2eePreKeyUnavailableException && !isRetryableOutboxFailure(e)) throw e
                         if (attempt < 2) delay(if (attempt == 0) 1_500L else 4_000L)
                     }
                 }
@@ -484,9 +487,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
                 }
             } catch (e: Exception) {
-                if (e is E2eePreKeyUnavailableException) {
-                    // The message is safely persisted in the encrypted local outbox.
-                    // Keep it pending and let the retry loop resume delivery.
+                if (e is E2eePreKeyUnavailableException || isRetryableOutboxFailure(e)) {
+                    // Offline/temporary server failures are queued, not shown as a permanent
+                    // send error. The encrypted-at-rest outbox retries with the same UUID.
                     messageDelivery[messageId] = "pending"
                     failedMessageRetries.remove(messageId)
                 } else {
@@ -2465,6 +2468,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 }
                                                             }
                                                         )
+                                                        "sent" -> if (chat.kind == "direct") Text(
+                                                            if (isRead) "✓✓" else "✓",
+                                                            color = if (isRead) Accent else Color(0xFFB7C4D9),
+                                                            fontSize = 11.sp,
+                                                            modifier = Modifier.padding(start = 4.dp)
+                                                        )
                                                         else -> if (chat.kind == "direct") Text(
                                                             if (isRead) "✓✓" else "✓",
                                                             color = if (isRead) Accent else Color(0xFFB7C4D9),
@@ -2902,6 +2911,25 @@ private fun NexuraBottomBar(
             }
         }
     }
+}
+
+private fun isRetryableOutboxFailure(error: Throwable): Boolean {
+    var current: Throwable? = error
+    val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+    while (current != null && visited.add(current)) {
+        if (current is NexuraHttpException) {
+            return current.statusCode == 408 || current.statusCode == 425 ||
+                current.statusCode == 429 || current.statusCode in 500..599
+        }
+        if (current is java.net.UnknownHostException ||
+            current is java.net.ConnectException ||
+            current is java.net.SocketTimeoutException ||
+            current is java.net.SocketException ||
+            current is java.net.NoRouteToHostException ||
+            current is java.io.InterruptedIOException) return true
+        current = current.cause
+    }
+    return false
 }
 
 private fun messageTimeLabel(value: String): String {
