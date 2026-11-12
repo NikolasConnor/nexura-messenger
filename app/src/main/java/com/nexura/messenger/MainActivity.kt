@@ -2284,7 +2284,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     // Keep the chat viewport below the status bar and resize it above the keyboard.
                     // The message area takes the remaining height; the composer stays at the bottom.
-                    Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+                    Box(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+                        Column(Modifier.fillMaxSize()) {
                         Row(
                             Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -2841,11 +2842,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         }
-                        if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
-                        if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                        }
                         Column(
-                            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).navigationBarsPadding().padding(horizontal = 10.dp, vertical = 9.dp)
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                         ) {
+                            if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                            if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                            Column(
+                                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).navigationBarsPadding().padding(horizontal = 10.dp, vertical = 9.dp)
+                            ) {
                             if (replyTarget != null) {
                                 Row(
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
@@ -2971,6 +2976,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     )
                                 }
                             }
+                        }
                         }
                     }
                 }
