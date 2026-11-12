@@ -6,4 +6,4 @@
 - Conversation UUIDs are validated before navigation.
 - The push function remains authenticated and checks conversation membership before sending.
 - Firebase service-account credentials must remain in Supabase Edge Function secrets; never commit them to this repository.
-- The production Supabase push function is currently version 5 and sends generic notifications only.
+- The production `send-chat-push` Edge Function is deployed as version 13 with JWT verification enabled, canonical conversation UUID validation, conversation-membership checks, and generic notification content.
