@@ -236,8 +236,25 @@ class E2eeStateStore(context: Context, userNamespace: String) {
             require(id.isNotBlank() && !restored.containsKey(id)) { "Duplicate E2EE backup state" }
             restored[id] = Base64.decode(row.getString("value"), Base64.NO_WRAP)
         }
-        // A single SharedPreferences commit prevents a partially restored ratchet set.
-        saveBatch(restored)
+        // A restore is a replacement, not a merge: retaining sessions or trust
+        // records from the previous local identity could mix two ratchet states.
+        // Encrypt every row first, then replace the complete namespace in one commit.
+        val editor = preferences.edit().clear()
+        for ((sessionId, serializedState) in restored) {
+            require(serializedState.isNotEmpty()) { "Empty E2EE backup state" }
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            cipher.updateAAD(aad(sessionId))
+            val encrypted = cipher.doFinal(serializedState)
+            val encoded = VERSION + ":" +
+                Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
+                Base64.encodeToString(encrypted, Base64.NO_WRAP)
+            val key = storageKey(sessionId)
+            editor.putString(key, encoded)
+            editor.putString(idKey(key), sessionId)
+        }
+        editor.putLong(REVISION_KEY, revision() + 1L)
+        check(editor.commit()) { "Unable to atomically replace encrypted E2EE backup state" }
     }
 
     @Synchronized
