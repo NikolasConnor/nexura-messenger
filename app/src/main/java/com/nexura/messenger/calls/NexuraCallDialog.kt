@@ -30,6 +30,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
@@ -56,6 +59,7 @@ fun NexuraCallDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycle = (context as? ComponentActivity)?.lifecycle
     val scope = rememberCoroutineScope()
     var coordinator by remember { mutableStateOf<CallCoordinator?>(null) }
     var ui by remember { mutableStateOf(CallUiState()) }
@@ -130,6 +134,13 @@ fun NexuraCallDialog(
     }
     DisposableEffect(chat.id) {
         onDispose { coordinator?.close() }
+    }
+    DisposableEffect(lifecycle, coordinator) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) coordinator?.onAppForeground()
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
     }
 
     LaunchedEffect(coordinator, incomingCallId, incomingCallerId, incomingVideo) {
@@ -208,7 +219,9 @@ fun NexuraCallDialog(
         if (!ui.incoming && !ui.active && !visible) autoActionHandled = false
     }
 
-    if (!visible && !ui.incoming && !ui.active && ui.error.isNullOrBlank()) return
+    // A completed/expired call may leave a diagnostic in ui.error. Never keep a
+    // full-screen call surface alive solely because an old error string remains.
+    if (!visible && !ui.incoming && !ui.active) return
 
     Dialog(
         onDismissRequest = { if (ui.active || ui.incoming) coordinator?.end(); onDismiss() },
