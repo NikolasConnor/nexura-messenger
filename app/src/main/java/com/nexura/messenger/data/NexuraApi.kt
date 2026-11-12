@@ -301,16 +301,22 @@ class NexuraApi(private val store: SessionStore) {
     }
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
-        // Fetch memberships and the aggregate unread counters concurrently.
+        // Fetch the conversation list, peer profiles and unread counters in two
+        // requests instead of four serial round trips. PostgREST embeds the peer
+        // membership and profile through the declared foreign keys.
         val (membershipJson, unreadJson) = coroutineScope {
             val memberships = async {
-                call("/rest/v1/conversation_members?select=conversation_id,conversations(id,kind,title,last_message_at)&user_id=eq.$uid&order=joined_at.desc")
+                call(
+                    "/rest/v1/conversation_members?select=conversation_id," +
+                        "conversations(id,kind,title,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))" +
+                        "&user_id=eq.$uid&order=joined_at.desc" +
+                        "&conversations.conversation_members.user_id=neq.$uid"
+                )
             }
             val unread = async { call("/rest/v1/rpc/get_my_unread_counts", "POST", "{}") }
             memberships.await() to unread.await()
         }
-        val raw = JSONArray(membershipJson)
-        // Aggregate unread counts in Postgres; do not download thousands of message rows.
+
         val unreadRows = JSONArray(unreadJson)
         val unreadByChat = mutableMapOf<String, Int>()
         for (i in 0 until unreadRows.length()) {
@@ -319,41 +325,40 @@ class NexuraApi(private val store: SessionStore) {
             if (id.isNotBlank() && id != "null") unreadByChat[id] = row.optInt("unread_count")
         }
 
-        val base = (0 until raw.length()).mapNotNull { i ->
+        val raw = JSONArray(membershipJson)
+        return (0 until raw.length()).mapNotNull { i ->
             val membership = raw.optJSONObject(i) ?: return@mapNotNull null
-            val c = membership.optJSONObject("conversations") ?: return@mapNotNull null
-            val id = c.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
-            val kind = c.optString("kind").takeIf { it != "null" } ?: "direct"
-            val unread = unreadByChat[id] ?: 0
-            val title = c.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: if (kind == "direct") "Пользователь" else "Группа"
-            ChatItem(id, title, kind, c.optString("last_message_at").takeIf { it.isNotBlank() && it != "null" }, unread)
-        }
-        val directIds = base.filter { it.kind == "direct" }.map { it.id }
-        if (directIds.isEmpty()) return base
-        val membershipRows = JSONArray(call("/rest/v1/conversation_members?select=conversation_id,user_id&conversation_id=in.(${directIds.joinToString(",")})&user_id=neq.$uid"))
-        val peerByChat = mutableMapOf<String, String>()
-        val peerIds = mutableSetOf<String>()
-        for (i in 0 until membershipRows.length()) {
-            val row = membershipRows.optJSONObject(i) ?: continue
-            val chatId = row.optString("conversation_id")
-            val peerId = row.optString("user_id")
-            if (chatId.isNotBlank() && peerId.isNotBlank() && peerId != "null") { peerByChat[chatId] = peerId; peerIds.add(peerId) }
-        }
-        if (peerIds.isEmpty()) return base
-        val profileRows = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&id=in.(${peerIds.joinToString(",")})"))
-        val profiles = mutableMapOf<String, Pair<String, String>>()
-        for (i in 0 until profileRows.length()) {
-            val p = profileRows.optJSONObject(i) ?: continue
-            val id = p.optString("id")
-            val name = p.optString("display_name").takeIf { it.isNotBlank() && it != "null" } ?: p.optString("username").takeIf { it.isNotBlank() && it != "null" } ?: "Пользователь"
-            val avatar = p.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂"
-            profiles[id] = name to avatar
-        }
-        return base.map { chat ->
-            if (chat.kind != "direct") chat else {
-                val profile = profiles[peerByChat[chat.id]]
-                chat.copy(title = profile?.first ?: "Пользователь", avatar = profile?.second ?: "🙂", peerUserId = peerByChat[chat.id])
-            }
+            val conversation = membership.optJSONObject("conversations") ?: return@mapNotNull null
+            val id = conversation.optString("id").takeIf { it.isNotBlank() && it != "null" }
+                ?: return@mapNotNull null
+            val kind = conversation.optString("kind").takeIf { it != "null" } ?: "direct"
+            val title = conversation.optString("title").takeIf { it.isNotBlank() && it != "null" }
+                ?: if (kind == "direct") "Пользователь" else "Группа"
+
+            var peerId: String? = null
+            var avatar = "🙂"
+            val displayTitle = if (kind == "direct") {
+                val peers = conversation.optJSONArray("conversation_members")
+                val peer = peers?.optJSONObject(0)
+                peerId = peer?.optString("user_id")?.takeIf { it.isNotBlank() && it != "null" }
+                val profile = peer?.optJSONObject("profiles")
+                avatar = profile?.optString("avatar_url")
+                    ?.takeIf { it.isNotBlank() && it != "null" } ?: "🙂"
+                profile?.optString("display_name")
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+                    ?: profile?.optString("username")?.takeIf { it.isNotBlank() && it != "null" }
+                    ?: title
+            } else title
+
+            ChatItem(
+                id = id,
+                title = displayTitle,
+                kind = kind,
+                updated = conversation.optString("last_message_at").takeIf { it.isNotBlank() && it != "null" },
+                unreadCount = unreadByChat[id] ?: 0,
+                avatar = avatar,
+                peerUserId = peerId
+            )
         }
     }
     suspend fun messages(
