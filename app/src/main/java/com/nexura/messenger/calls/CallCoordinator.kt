@@ -188,10 +188,18 @@ class CallCoordinator(
         armConnectionTimeout(expectedId)
         scope.launch {
             try {
+                // A notification action can accept before the Realtime socket finishes joining.
+                // Wait briefly instead of dropping the answer signal on a not-yet-ready socket.
+                var attempts = 0
+                while (!ready && attempts < 80 && callId == expectedId && !closed) {
+                    delay(150)
+                    attempts++
+                }
+                if (!ready) throw IOException("Не удалось подключиться к серверу сигнализации")
                 joinLiveKit(expectedId, videoMode)
             } catch (error: Exception) {
                 if (callId == expectedId && !closed) {
-                    failCall("Не удалось подключиться к LiveKit", error.message ?: "Проверьте настройки LiveKit")
+                    failCall("Не удалось подключиться к звонку", error.message ?: "Проверьте интернет и повторите попытку")
                 }
             }
         }
