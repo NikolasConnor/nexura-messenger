@@ -2361,7 +2361,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         Column(Modifier.weight(1f).padding(start = 11.dp)) {
                                                             Text(msg.mediaFileName ?: "Документ", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 2)
                                                             Text(msg.mediaMimeType ?: "ФАЙЛ · E2EE", color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
-                                                            Text("Нажмите, чтобы открыть", color = Accent2, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                                                            Text("Нажмите, чтобы открыть", color = Accent, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
                                                         }
                                                     }
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
@@ -2782,7 +2782,7 @@ private fun AudioMessagePlayer(uri: Uri, caption: String?) {
                 if (playing) "Остановить голосовое" else "Прослушать голосовое", tint = Bg, modifier = Modifier.size(26.dp))
         }
         Column(Modifier.weight(1f).padding(start = 11.dp)) {
-            Text("ГОЛОСОВОЕ СООБЩЕНИЕ", color = Accent2, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, maxLines = 1)
+            Text("ГОЛОСОВОЕ СООБЩЕНИЕ", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, maxLines = 1)
             Text(caption?.takeIf { it.isNotBlank() } ?: "Защищённое аудио", color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2, modifier = Modifier.padding(top = 3.dp))
             Text(if (playing) "Воспроизводится" else if (loading) "Загрузка аудио…" else "Нажмите для прослушивания",
                 color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
