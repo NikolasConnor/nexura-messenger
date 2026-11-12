@@ -100,11 +100,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
-private val Bg = Color(0xFF0D1118)
-private val Surface1 = Color(0xFF171D27)
-private val Surface2 = Color(0xFF242D3A)
-private val Accent = Color(0xFF78AFFF)
-private val Accent2 = Color(0xFF8E9DDA)
+private val Bg = Color(0xFF0B0914)
+private val Surface1 = Color(0xFF151126)
+private val Surface2 = Color(0xFF211A35)
+private val Accent = Color(0xFF9B6BFF)
+private val Accent2 = Color(0xFF6842D8)
 private val MainText = Color(0xFFF5F7FB)
 private val SecondaryText = Color(0xFFA4AFBF)
 private val Danger = Color(0xFFFF858D)
