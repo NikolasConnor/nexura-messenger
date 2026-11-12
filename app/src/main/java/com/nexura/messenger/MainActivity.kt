@@ -2339,7 +2339,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }
                                                 } else if (msg.mediaKind == "file") {
                                                     Row(
-                                                        Modifier.width(230.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
+                                                        Modifier.width(250.dp).clip(RoundedCornerShape(16.dp))
+                                                            .background(Brush.linearGradient(listOf(Color(0xFF29203E), Surface2)))
+                                                            .border(1.dp, Accent.copy(alpha = 0.20f), RoundedCornerShape(16.dp))
                                                             .clickable {
                                                                 try {
                                                                     val local = File(mediaUri.path ?: throw IOException("Файл недоступен"))
@@ -2349,10 +2351,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             }.padding(12.dp),
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
-                                                        Icon(Icons.Default.Description, null, tint = Accent, modifier = Modifier.size(32.dp))
-                                                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                                                            Text(msg.mediaFileName ?: "Документ", color = MainText, fontWeight = FontWeight.Medium, maxLines = 1)
-                                                            Text(msg.mediaMimeType ?: "Файл · E2EE", color = SecondaryText, fontSize = 11.sp, maxLines = 1)
+                                                        Box(
+                                                            Modifier.size(46.dp).clip(RoundedCornerShape(13.dp))
+                                                                .background(Brush.linearGradient(listOf(Accent.copy(alpha = 0.24f), Accent2.copy(alpha = 0.12f)))),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(Icons.Default.Description, "Документ", tint = Accent, modifier = Modifier.size(26.dp))
+                                                        }
+                                                        Column(Modifier.weight(1f).padding(start = 11.dp)) {
+                                                            Text(msg.mediaFileName ?: "Документ", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 2)
+                                                            Text(msg.mediaMimeType ?: "ФАЙЛ · E2EE", color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+                                                            Text("Нажмите, чтобы открыть", color = Accent2, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
                                                         }
                                                     }
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
@@ -2719,8 +2728,10 @@ private fun AudioMessagePlayer(uri: Uri, caption: String?) {
         }
     }
     Row(
-        Modifier.widthIn(min = 190.dp, max = 250.dp).clip(RoundedCornerShape(14.dp))
-            .background(Surface2).padding(horizontal = 10.dp, vertical = 8.dp),
+        Modifier.widthIn(min = 220.dp, max = 270.dp).clip(RoundedCornerShape(17.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF2B2044), Surface2)))
+            .border(1.dp, Accent.copy(alpha = 0.22f), RoundedCornerShape(17.dp))
+            .padding(horizontal = 11.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(
@@ -2763,16 +2774,20 @@ private fun AudioMessagePlayer(uri: Uri, caption: String?) {
                     }
                 }
             },
-            modifier = Modifier.size(42.dp)
+            modifier = Modifier.size(46.dp).clip(CircleShape)
+                .background(Brush.linearGradient(listOf(Accent, Accent2)))
         ) {
-            if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Accent, strokeWidth = 2.dp)
+            if (loading) CircularProgressIndicator(Modifier.size(21.dp), color = Bg, strokeWidth = 2.dp)
             else Icon(if (playing) Icons.Default.Stop else Icons.Default.PlayArrow,
-                if (playing) "Остановить голосовое" else "Прослушать голосовое", tint = Accent)
+                if (playing) "Остановить голосовое" else "Прослушать голосовое", tint = Bg, modifier = Modifier.size(26.dp))
         }
-        Column(Modifier.weight(1f)) {
-            Text("Голосовое сообщение", color = MainText, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text(caption ?: "Аудио защищено сквозным шифрованием", color = SecondaryText, fontSize = 10.sp, maxLines = 1)
+        Column(Modifier.weight(1f).padding(start = 11.dp)) {
+            Text("ГОЛОСОВОЕ СООБЩЕНИЕ", color = Accent2, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, maxLines = 1)
+            Text(caption?.takeIf { it.isNotBlank() } ?: "Защищённое аудио", color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2, modifier = Modifier.padding(top = 3.dp))
+            Text(if (playing) "Воспроизводится" else if (loading) "Загрузка аудио…" else "Нажмите для прослушивания",
+                color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
         }
+        Icon(Icons.Default.Mic, null, tint = Accent.copy(alpha = 0.8f), modifier = Modifier.padding(start = 5.dp).size(18.dp))
     }
 }
 
