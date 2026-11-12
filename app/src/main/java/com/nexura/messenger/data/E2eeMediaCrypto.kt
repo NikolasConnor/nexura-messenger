@@ -78,11 +78,11 @@ object E2eeMediaCrypto {
         val iv = ByteArray(12).also(SecureRandom()::nextBytes)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
-        val optimizedImage = if (mime.startsWith("image/")) optimizeImage(resolver, uri, cacheDir, mime) else null
+        val optimizedImage = if (mime.startsWith("image/")) optimizeImage(resolver, uri, cacheDir, mime, localFile) else null
         val uploadMime = optimizedImage?.second ?: mime
         val uploadName = if (optimizedImage != null) {
-            name.substringBeforeLast(".", name) + when (uploadMime) { "image/png" -> ".png"; "image/webp" -> ".webp"; else -> ".jpg" }
-        } else name
+            safeName.substringBeforeLast(".", safeName) + when (uploadMime) { "image/png" -> ".png"; "image/webp" -> ".webp"; else -> ".jpg" }
+        } else safeName
         val encrypted = File.createTempFile("nexura-media-", ".enc", cacheDir)
         var total = 0L
         try {
@@ -103,7 +103,7 @@ object E2eeMediaCrypto {
             }
             if (total == 0L) throw IOException("Файл пустой")
             return EncryptedMediaFile(
-                encrypted, uploadMime, safeName.substringBeforeLast('.', safeName) + uploadName.substringAfterLast('.', "" ).let { if (it.isBlank()) "" else ".$it" }, total,
+                encrypted, uploadMime, uploadName, total,
                 Base64.encodeToString(key, Base64.NO_WRAP),
                 Base64.encodeToString(iv, Base64.NO_WRAP),
                 sha256(encrypted), encrypted.length()
@@ -116,7 +116,7 @@ object E2eeMediaCrypto {
         }
     }
 
-    private fun optimizeImage(resolver: ContentResolver, uri: Uri, cacheDir: File, mime: String): Pair<File, String> {
+    private fun optimizeImage(resolver: ContentResolver, uri: Uri, cacheDir: File, mime: String, localFile: File? = null): Pair<File, String> {
         // ImageDecoder supports modern Android image codecs (including HEIC on supported versions).
         // Older Android versions use the BitmapFactory fallback.
         val bitmap = try {
