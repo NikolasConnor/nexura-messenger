@@ -153,6 +153,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val scope = rememberCoroutineScope()
     val realtimeClient = remember(store) { SupabaseMessagesRealtime(store) }
+    val localCache = remember(context) { LocalCacheStore(context.applicationContext) }
     var signedIn by remember { mutableStateOf(!store.accessToken.isNullOrBlank() || !store.refreshToken.isNullOrBlank()) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -432,7 +433,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         scope.launch {
             busy = true
             try {
-                chats = api.chats()
+                val latestChats = api.chats()
+                chats = latestChats
+                withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
                 error = ""
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось загрузить чаты"
@@ -514,8 +517,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         chatSearchQuery = ""
         scope.launch {
             try {
-                // Start with a smaller first page on low-memory phones. Older
-                // history remains available through the existing cursor paging.
+                // Render the encrypted local snapshot immediately; network sync follows.
+                val cachedMessages = withContext(Dispatchers.IO) {
+                    localCache.readMessages(store.userId.orEmpty(), chat.id)
+                }
+                if (selected?.id != chat.id) return@launch
+                if (cachedMessages.isNotEmpty()) {
+                    messages = cachedMessages
+                    hasMoreMessages = true
+                    val cachedNewest = cachedMessages.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                    lastSyncedMessageTimestamp = cachedNewest?.createdAt
+                    lastSyncedMessageId = cachedNewest?.id
+                }
+                // Start with a smaller first network page on low-memory phones.
                 val loadedMessages = withContext(Dispatchers.IO) {
                     api.messages(chat.id, e2eeClient, pageSize = 20)
                 }
@@ -532,7 +546,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 messages = (loadedMessages + pendingItems).distinctBy { it.id }
                     .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                hasMoreMessages = loadedMessages.size >= 20
+                withContext(Dispatchers.IO) {
+                    localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
+                }
+                hasMoreMessages = loadedMessages.size >= 20 || cachedMessages.isNotEmpty()
                 val newest = loadedMessages.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                 lastSyncedMessageTimestamp = newest?.createdAt ?: "1970-01-01T00:00:00Z"
                 lastSyncedMessageId = newest?.id
@@ -588,6 +605,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             "text", replyToId, encrypted = true, securityWarning = false
         )
         messages = (messages + optimistic).distinctBy { it.id }.sortedBy { it.createdAt }
+        scope.launch(Dispatchers.IO) {
+            localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
+        }
         dispatchSecureMessage(chat, messageId, text, replyToId, createdAt)
     }
 
@@ -635,6 +655,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
             }
             try {
+                // Load the last known conversation list before waiting for Supabase.
+                val cachedChats = withContext(Dispatchers.IO) {
+                    localCache.readChats(store.userId.orEmpty())
+                }
+                if (cachedChats.isNotEmpty()) chats = cachedChats
                 api.restoreSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
                 val initialPrivacy = api.privacySettings()
@@ -648,7 +673,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         .onFailure { e2eeStatus = "Не удалось подготовить E2EE: ${it.message ?: "ошибка устройства"}" }
                         .getOrNull()
                 } else null
-                chats = api.chats()
+                val latestChats = api.chats()
+                chats = latestChats
+                withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
                 if (localE2eeClient != null) {
                     val hadLocalDevice = localE2eeClient.hasLocalDevice()
                     val previousServerDevice = !hadLocalDevice && api.hasRegisteredE2eeDevice()
@@ -787,6 +814,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (selected?.id == chat.id && latest.isNotEmpty()) {
                             messages = (messages + latest).distinctBy { it.id }
                                 .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            withContext(Dispatchers.IO) {
+                                localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
+                            }
                             val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                             if (newest != null) {
                                 val timestamp = lastSyncedMessageTimestamp
@@ -822,6 +852,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         if (selected?.id == currentChat.id && latest.isNotEmpty()) {
                             messages = (messages + latest).distinctBy { it.id }.sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            withContext(Dispatchers.IO) {
+                                localCache.saveMessages(store.userId.orEmpty(), currentChat.id, messages)
+                            }
                             val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                             if (newest != null) {
                                 val currentTimestamp = lastSyncedMessageTimestamp
@@ -833,8 +866,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
-                    } else {
-                        chats = api.chats()
+                    } else if (System.currentTimeMillis() - lastReceiptRefresh >= 60_000L) {
+                        val latestChats = api.chats()
+                        chats = latestChats
+                        withContext(Dispatchers.IO) {
+                            localCache.saveChats(store.userId.orEmpty(), latestChats)
+                        }
+                        lastReceiptRefresh = System.currentTimeMillis()
                     }
                     retryDelay = 2_500L
                 } catch (_: Exception) {
@@ -2243,6 +2281,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 suppressNextAutoScroll = true
                                                                 messages = (additions + messages).distinctBy { it.id }
                                                                     .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                                                withContext(Dispatchers.IO) {
+                                                                    localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
+                                                                }
                                                                 withFrameNanos { }
                                                                 messageListState.scrollToItem(anchorIndex + additions.size, anchorOffset)
                                                             }
