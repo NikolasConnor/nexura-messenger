@@ -716,8 +716,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                 }
-                val pushToken = FirebaseMessaging.getInstance().token.await()
-                if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
+                // Persistently retry FCM token registration when network/auth becomes available.
+                com.nexura.messenger.push.PushTokenSyncWorker.enqueue(context)
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось восстановить сессию"
                 if (store.accessToken.isNullOrBlank() && store.refreshToken.isNullOrBlank()) signedIn = false
