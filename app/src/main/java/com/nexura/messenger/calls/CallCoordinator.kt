@@ -54,6 +54,7 @@ class CallCoordinator(
     @Volatile private var callId: String? = null
     private var pendingCallId: String? = null
     private var pendingVideo = false
+    private var pendingOfferReceivedAtMs: Long? = null
     private var videoMode = false
     private var ready = false
     private var closed = false
@@ -135,6 +136,7 @@ class CallCoordinator(
             .put("from", ownUserId)
             .put("to", peerUserId)
             .put("video", video)
+            .put("sent_at", System.currentTimeMillis())
         if (!send(invite)) {
             failCall("Не удалось вызвать", "Сигнал вызова не отправлен. Проверьте интернет.")
             return
@@ -176,6 +178,7 @@ class CallCoordinator(
         answerSent = false
         callId = expectedId
         pendingCallId = null
+        pendingOfferReceivedAtMs = null
         pendingVideo = false
         startKeepAlive(videoMode)
         publish(CallUiState(
@@ -331,12 +334,19 @@ class CallCoordinator(
         if (id.isBlank()) return
         when (signal.optString("type")) {
             "offer" -> {
+                val now = System.currentTimeMillis()
+                val sentAt = signal.optLong("sent_at", now)
+                if (sentAt <= 0L || now - sentAt > CALL_RING_TIMEOUT_MS) {
+                    send(endSignal(id))
+                    return
+                }
                 if (id.isBlank() || id == callId || id == pendingCallId) return
                 if (room != null || callId != null || pendingCallId != null || lastState?.active == true) {
                     send(JSONObject().put("type", "busy").put("call_id", id).put("from", ownUserId).put("to", peerUserId))
                     return
                 }
                 pendingCallId = id
+                pendingOfferReceivedAtMs = sentAt
                 pendingVideo = signal.optBoolean("video")
                 publish(CallUiState(
                     status = if (pendingVideo) "Входящий видеозвонок" else "Входящий звонок",
@@ -350,7 +360,6 @@ class CallCoordinator(
                     if (pendingCallId == id && !closed) {
                         send(endSignal(id))
                         finish()
-                        publish(CallUiState(status = "Готово к звонку", error = "Пропущенный вызов"))
                     }
                 }
             }
@@ -380,6 +389,16 @@ class CallCoordinator(
                 finish()
                 publish(CallUiState(status = "Готово к звонку", outgoing = wasOutgoing, error = message))
             }
+        }
+    }
+
+    /** Re-check an unanswered offer after the device wakes from its lock screen. */
+    fun onAppForeground() {
+        val id = pendingCallId ?: return
+        val receivedAt = pendingOfferReceivedAtMs ?: return
+        if (System.currentTimeMillis() - receivedAt >= CALL_RING_TIMEOUT_MS) {
+            send(endSignal(id))
+            finish()
         }
     }
 
@@ -539,6 +558,10 @@ class CallCoordinator(
         roomEventsJob?.cancel()
         roomEventsJob = null
         runCatching { context.stopService(Intent(context, CallKeepAliveService::class.java)) }
+    }
+
+    companion object {
+        private const val CALL_RING_TIMEOUT_MS = 35_000L
     }
 
     fun close() {
