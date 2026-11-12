@@ -3144,7 +3144,6 @@ private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = MainText
 )
 
-@Composable
 private fun chatMessagePreview(message: MessageItem, ownUserId: String): String {
     val body = when (message.messageType.lowercase()) {
         "call" -> "Звонок"
@@ -3164,6 +3163,7 @@ private fun chatMessagePreview(message: MessageItem, ownUserId: String): String 
     return (prefix + body).replace(Regex("\\s+"), " ").take(100)
 }
 
+@Composable
 private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean) {
     val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
     val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
