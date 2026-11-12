@@ -2411,11 +2411,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     ) { Icon(Icons.Default.MoreVert, "Действия с сообщением", tint = Color(0xFFB7C4D9), modifier = Modifier.size(15.dp)) }
                                                     DropdownMenu(
                                                         expanded = openMessageMenu == msg.id,
-                                                        onDismissRequest = { openMessageMenu = null }
+                                                        onDismissRequest = { openMessageMenu = null },
+                                                        modifier = Modifier.width(236.dp)
+                                                            .background(Surface1)
                                                     ) {
-                                                        DropdownMenuItem(text = { Text("Ответить") }, onClick = { replyTarget = msg; openMessageMenu = null })
+                                                        Text(
+                                                            "СООБЩЕНИЕ",
+                                                            color = SecondaryText,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 1.sp,
+                                                            modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 5.dp)
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Ответить") },
+                                                            leadingIcon = { Text("↩", color = Accent, fontSize = 18.sp) },
+                                                            onClick = { replyTarget = msg; openMessageMenu = null }
+                                                        )
                                                         DropdownMenuItem(
                                                             text = { Text("Копировать текст") },
+                                                            leadingIcon = { Text("▣", color = Accent, fontSize = 17.sp) },
                                                             onClick = {
                                                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                                                 clipboard.setPrimaryClip(ClipData.newPlainText("Nexura message", msg.content))
@@ -2423,9 +2438,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 openMessageMenu = null
                                                             }
                                                         )
+                                                        HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
+                                                        Text(
+                                                            "РЕАКЦИЯ",
+                                                            color = SecondaryText,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 1.sp,
+                                                            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 3.dp)
+                                                        )
                                                         listOf("👍", "❤️", "😂", "😮", "🔥", "👏").forEach { emoji ->
                                                             DropdownMenuItem(
-                                                                text = { Text("$emoji Реакция") },
+                                                                text = { Text("$emoji   Поставить реакцию") },
                                                                 onClick = {
                                                                     openMessageMenu = null
                                                                     scope.launch {
@@ -2438,8 +2462,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             )
                                                         }
                                                         if (canManagePins) {
+                                                            HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
                                                             DropdownMenuItem(
                                                                 text = { Text(if (pinnedMessageId == msg.id) "Открепить" else "Закрепить в чате") },
+                                                                leadingIcon = { Text("⌖", color = Accent, fontSize = 18.sp) },
                                                                 onClick = {
                                                                     openMessageMenu = null
                                                                     scope.launch {
@@ -2452,11 +2478,25 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             )
                                                         }
                                                         if (mine && msg.messageType == "text") {
+                                                            HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
+                                                            Text(
+                                                                "УПРАВЛЕНИЕ",
+                                                                color = SecondaryText,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                letterSpacing = 1.sp,
+                                                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 3.dp)
+                                                            )
                                                             if (!msg.securityWarning && (pinnedMessageId != msg.id || canManagePins)) {
-                                                                DropdownMenuItem(text = { Text("Изменить") }, onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null })
+                                                                DropdownMenuItem(
+                                                                    text = { Text("Изменить") },
+                                                                    leadingIcon = { Text("✎", color = Accent, fontSize = 17.sp) },
+                                                                    onClick = { editingTarget = msg; editDraft = msg.content; openMessageMenu = null }
+                                                                )
                                                             }
                                                             DropdownMenuItem(
                                                                 text = { Text("Удалить", color = Danger) },
+                                                                leadingIcon = { Text("⌫", color = Danger, fontSize = 17.sp) },
                                                                 onClick = {
                                                                     openMessageMenu = null
                                                                     scope.launch {
@@ -2470,7 +2510,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 }
                                                             )
                                                         }
-                                                    }
+                                                    }}
                                                 }
                                             }
                                             val reactionsForMessage = messageReactions[msg.id].orEmpty()
