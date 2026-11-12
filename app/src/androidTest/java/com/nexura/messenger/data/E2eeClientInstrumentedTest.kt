@@ -124,6 +124,34 @@ class E2eeClientInstrumentedTest {
     }
 
     @Test
+    fun backupRestoreReplacesStaleLocalRatchetStateAtomically() {
+        val user = "restore-${UUID.randomUUID()}"
+        val store = E2eeStateStore(context, user)
+        val restoredValue = "restored-ratchet".toByteArray(StandardCharsets.UTF_8)
+        val staleValue = "stale-session-from-old-device".toByteArray(StandardCharsets.UTF_8)
+        try {
+            store.save("stale-session", staleValue)
+            val snapshot = JSONObject()
+                .put("format", 1)
+                .put("user", user)
+                .put("states", org.json.JSONArray().put(
+                    JSONObject()
+                        .put("id", "restored-session")
+                        .put("value", Base64.encodeToString(restoredValue, Base64.NO_WRAP))
+                ))
+                .toString()
+                .toByteArray(StandardCharsets.UTF_8)
+
+            store.restoreBackupSnapshot(snapshot)
+
+            assertArrayEquals(restoredValue, store.load("restored-session"))
+            assertEquals(null, store.load("stale-session"))
+        } finally {
+            store.clearAll()
+        }
+    }
+
+    @Test
     fun stateStoreBatchPersistsRelatedValuesTogether() {
         val store = E2eeStateStore(context, "batch-${UUID.randomUUID()}")
         val first = "ratchet-state".toByteArray(StandardCharsets.UTF_8)
