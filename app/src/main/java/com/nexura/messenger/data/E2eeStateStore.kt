@@ -133,12 +133,49 @@ class E2eeStateStore(context: Context, userNamespace: String) {
 
     @Synchronized
     fun delete(sessionId: String) {
-        require(sessionId.isNotBlank()) { "sessionId must not be blank" }
-        val key = storageKey(sessionId)
-        check(preferences.edit().remove(key).remove(idKey(key))
-            .putLong(REVISION_KEY, revision() + 1L).commit()) {
-            "Unable to delete encrypted E2EE state"
+        deleteBatch(listOf(sessionId))
+    }
+
+    /** Atomically persists encrypted state updates and removes related outbox entries. */
+    @Synchronized
+    @Throws(GeneralSecurityException::class)
+    fun saveBatchAndDelete(states: Map<String, ByteArray>, sessionIdsToDelete: Collection<String>) {
+        require(states.isNotEmpty() || sessionIdsToDelete.isNotEmpty()) { "No E2EE state changes supplied" }
+        val editor = preferences.edit()
+        for ((sessionId, serializedState) in states) {
+            require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+            require(serializedState.isNotEmpty()) { "serializedState must not be empty" }
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            cipher.updateAAD(aad(sessionId))
+            val encrypted = cipher.doFinal(serializedState)
+            val encoded = VERSION + ":" +
+                Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
+                Base64.encodeToString(encrypted, Base64.NO_WRAP)
+            val key = storageKey(sessionId)
+            editor.putString(key, encoded)
+            editor.putString(idKey(key), sessionId)
         }
+        for (sessionId in sessionIdsToDelete) {
+            require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+            val key = storageKey(sessionId)
+            editor.remove(key).remove(idKey(key))
+        }
+        editor.putLong(REVISION_KEY, revision() + 1L)
+        check(editor.commit()) { "Unable to atomically persist E2EE outbox state" }
+    }
+
+    @Synchronized
+    fun deleteBatch(sessionIds: Collection<String>) {
+        require(sessionIds.isNotEmpty()) { "sessionIds must not be empty" }
+        val editor = preferences.edit()
+        for (sessionId in sessionIds) {
+            require(sessionId.isNotBlank()) { "sessionId must not be blank" }
+            val key = storageKey(sessionId)
+            editor.remove(key).remove(idKey(key))
+        }
+        editor.putLong(REVISION_KEY, revision() + 1L)
+        check(editor.commit()) { "Unable to delete encrypted E2EE state batch" }
     }
 
     /** Removes all saved protocol states and the Keystore wrapping key. */
