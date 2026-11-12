@@ -449,8 +449,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         scope.launch {
             try {
                 val loadedMessages = api.messages(chat.id, e2eeClient, pageSize = 30)
+                val pendingForChat = withContext(Dispatchers.IO) {
+                    e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == chat.id }
+                }
                 if (selected?.id == chat.id) {
-                    messages = loadedMessages
+                    val pendingItems = pendingForChat.map { pending ->
+                        MessageItem(
+                            pending.messageId, store.userId.orEmpty(), pending.plaintext, pending.createdAt,
+                            "text", pending.replyToId, encrypted = true, securityWarning = false
+                        )
+                    }
+                    messages = (loadedMessages + pendingItems).distinctBy { it.id }
+                        .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                     hasMoreMessages = loadedMessages.size >= 30
                     val newest = loadedMessages.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                     lastSyncedMessageTimestamp = newest?.createdAt ?: "1970-01-01T00:00:00Z"
@@ -459,6 +469,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     pinnedMessageId = api.pinnedMessage(chat.id)
                     canManagePins = api.canManageConversation(chat.id)
                 }
+                pendingForChat.forEach { pending ->
+                    dispatchSecureMessage(chat, pending.messageId, pending.plaintext, pending.replyToId, pending.createdAt)
+                }
                 api.markChatRead(chat.id, readReceiptsEnabled)
                 peerReadReceiptAt = api.peerReadReceiptAt(chat.id, chat.peerUserId)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
@@ -466,28 +479,50 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    fun dispatchSecureMessage(chat: ChatItem, messageId: String, text: String, replyToId: String?) {
+    fun dispatchSecureMessage(
+        chat: ChatItem, messageId: String, text: String, replyToId: String?, createdAt: String? = null
+    ) {
+        if (messageDelivery[messageId] == "sending" || messageDelivery[messageId] == "sent") return
         messageDelivery[messageId] = "sending"
         failedMessageRetries.remove(messageId)
         scope.launch {
-            messageSendMutex.withLock {
-                try {
-                    val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
-                    // Olm/JNI encryption is CPU work; never run it on Compose's main thread.
-                    withContext(Dispatchers.Default) {
-                        if (chat.kind == "direct") {
-                            api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
-                        } else {
-                            api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+            try {
+                val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
+                // Durably queue the plaintext under the Android Keystore key before any ratchet advance or network I/O.
+                withContext(Dispatchers.IO) {
+                    client.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
+                }
+                var delivered = false
+                var lastFailure: Exception? = null
+                for (attempt in 0..2) {
+                    try {
+                        messageSendMutex.withLock {
+                            // Olm/JNI encryption is CPU work; never run it on Compose's main thread.
+                            withContext(Dispatchers.Default) {
+                                if (chat.kind == "direct") {
+                                    api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
+                                } else {
+                                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+                                }
+                            }
                         }
+                        delivered = true
+                        break
+                    } catch (e: Exception) {
+                        lastFailure = e
+                        if (attempt < 2) delay(if (attempt == 0) 1_500L else 4_000L)
                     }
+                }
+                if (delivered) {
                     messageDelivery[messageId] = "sent"
                     failedMessageRetries.remove(messageId)
-                } catch (e: Exception) {
-                    messageDelivery[messageId] = "failed"
-                    failedMessageRetries[messageId] = Triple(chat, text, replyToId)
-                    error = e.message ?: "Не удалось отправить защищённое сообщение"
+                } else {
+                    throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
                 }
+            } catch (e: Exception) {
+                messageDelivery[messageId] = "failed"
+                failedMessageRetries[messageId] = Triple(chat, text, replyToId)
+                error = e.message ?: "Не удалось отправить защищённое сообщение"
             }
         }
     }
@@ -498,12 +533,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         draft = ""
         chatDrafts[chat.id] = ""
         replyTarget = null
+        val createdAt = java.time.Instant.now().toString()
         val optimistic = MessageItem(
-            messageId, store.userId.orEmpty(), text, java.time.Instant.now().toString(),
+            messageId, store.userId.orEmpty(), text, createdAt,
             "text", replyToId, encrypted = true, securityWarning = false
         )
         messages = (messages + optimistic).distinctBy { it.id }.sortedBy { it.createdAt }
-        dispatchSecureMessage(chat, messageId, text, replyToId)
+        dispatchSecureMessage(chat, messageId, text, replyToId, createdAt)
     }
 
     LaunchedEffect(authCallback) {
