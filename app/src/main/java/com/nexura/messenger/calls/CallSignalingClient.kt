@@ -38,8 +38,8 @@ class CallSignalingClient(
         .retryOnConnectionFailure(true)
         .build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val ownTopic = "realtime:user:$ownUserId"
-    private val peerTopic = "realtime:user:$peerUserId"
+    private val ownTopic = "user:$ownUserId"
+    private val peerTopic = "user:$peerUserId"
     private val joined = mutableSetOf<String>()
     private val lock = Any()
     @Volatile private var socket: WebSocket? = null
