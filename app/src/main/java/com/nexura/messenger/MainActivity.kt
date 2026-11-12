@@ -244,6 +244,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var recoveryCodeInput by remember { mutableStateOf("") }
     var backupRecoveryCode by remember { mutableStateOf("") }
     var backupBusy by remember { mutableStateOf(false) }
+    var keyRefreshBusy by remember { mutableStateOf(false) }
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
@@ -663,8 +664,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         e2eeStatus = "Защита обновлена · $available ключей"
                         retryDelay = 120_000L
                         delay(120_000L)
-                    } catch (_: Exception) {
-                        // Retry quietly; a temporary network/server issue must not block chats.
+                    } catch (e: Exception) {
+                        // Keep the failure visible so users know why key replenishment failed.
+                        e2eeStatus = "Не удалось обновить ключи: ${e.message ?: "ошибка сети или сервера"}"
                         delay(retryDelay)
                         retryDelay = (retryDelay * 2).coerceAtMost(300_000L)
                     }
@@ -1032,7 +1034,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
                                 Text("Сквозное шифрование", color = MainText, fontWeight = FontWeight.SemiBold)
-                                Text(e2eeStatus, color = if (e2eeStatus.startsWith("Устройство зарегистрировано")) Success else Color(0xFFFFC56E), fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                                Text(e2eeStatus, color = if (e2eeStatus.startsWith("Устройство зарегистрировано") || e2eeStatus.startsWith("Защита обновлена")) Success else Color(0xFFFFC56E), fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
                                 val client = e2eeClient
                                 val bundle = runCatching { JSONObject(if (client?.hasLocalDevice() == true) client.ensureDevice() else "{}") }.getOrNull()
                                 if (client != null && bundle != null && bundle.has("curve25519") && bundle.has("ed25519")) {
@@ -1041,6 +1043,29 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Text("Сравните отпечатки устройств лично или по другому доверенному каналу. Текст, фото и видео шифруются до отправки. В личном чате пока поддерживается одно активное устройство собеседника.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
                                 if (client != null && client.hasLocalDevice()) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            scope.launch {
+                                                keyRefreshBusy = true
+                                                try {
+                                                    val available = withContext(Dispatchers.IO) {
+                                                        api.publishE2eeDevice(client)
+                                                    }
+                                                    e2eeStatus = "Защита обновлена · $available ключей"
+                                                    notice = "Одноразовые ключи защиты обновлены."
+                                                } catch (e: Exception) {
+                                                    e2eeStatus = "Не удалось обновить ключи: ${e.message ?: "ошибка сети или сервера"}"
+                                                } finally {
+                                                    keyRefreshBusy = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !keyRefreshBusy,
+                                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(if (keyRefreshBusy) "Обновляем ключи…" else "Обновить ключи защиты")
+                                    }
                                     OutlinedButton(onClick = {
                                         scope.launch {
                                             backupBusy = true
