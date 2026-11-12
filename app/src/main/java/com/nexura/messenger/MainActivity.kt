@@ -253,6 +253,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
     var showCallDialog by remember { mutableStateOf(false) }
     var pendingCallAction by remember { mutableStateOf(authCallback?.getQueryParameter("action") ?: "show") }
+    var pendingIncomingCallId by remember { mutableStateOf(authCallback?.getQueryParameter("call_id")) }
+    var pendingIncomingCallerId by remember { mutableStateOf(authCallback?.getQueryParameter("caller_id")) }
+    var pendingIncomingVideo by remember { mutableStateOf(authCallback?.getQueryParameter("video") == "true") }
     LaunchedEffect(selected?.id, store.userId) {
         context.getSharedPreferences("nexura_runtime", android.content.Context.MODE_PRIVATE)
             .edit().putString("active_chat_id", selected?.id).apply()
@@ -615,6 +618,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
             if (targetChat != null && authCallback?.getQueryParameter("call") == "1") {
                 pendingCallAction = authCallback.getQueryParameter("action") ?: "show"
+                pendingIncomingCallId = authCallback.getQueryParameter("call_id")
+                pendingIncomingCallerId = authCallback.getQueryParameter("caller_id")
+                pendingIncomingVideo = authCallback.getQueryParameter("video") == "true"
                 showCallDialog = true
             }
         }
@@ -1644,6 +1650,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             accessToken = store.accessToken!!,
                             visible = showCallDialog,
                             autoAction = pendingCallAction,
+                            incomingCallId = pendingIncomingCallId,
+                            incomingCallerId = pendingIncomingCallerId,
+                            incomingVideo = pendingIncomingVideo,
                             onCallFinished = { duration, outgoing, video, result ->
                                 if (outgoing) scope.launch {
                                     try {
@@ -1666,7 +1675,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 }
                             },
-                            onDismiss = { showCallDialog = false; pendingCallAction = "show" }
+                            onDismiss = { showCallDialog = false; pendingCallAction = "show"; pendingIncomingCallId = null; pendingIncomingCallerId = null; pendingIncomingVideo = false }
                         )
                     }
                     if (chatThemeOpen) {
