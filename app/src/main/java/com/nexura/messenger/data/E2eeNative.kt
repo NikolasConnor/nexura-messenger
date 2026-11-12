@@ -45,6 +45,7 @@ internal object E2eeNative {
 
     external fun nativeCacheSession(sessionId: String, sessionPickle: ByteArray): Boolean
     external fun nativeInvalidateSession(sessionId: String)
+    external fun nativeInvalidateSessionsForPrefix(prefix: String)
     external fun nativeEncryptCached(sessionId: String, sessionPickle: ByteArray, plaintext: ByteArray): Array<ByteArray>
     external fun nativeDecryptCached(sessionId: String, sessionPickle: ByteArray, envelope: String): Array<ByteArray>
 
