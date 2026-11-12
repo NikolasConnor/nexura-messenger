@@ -11,6 +11,14 @@ import java.util.UUID
  * Account/session pickles are encrypted at rest by E2eeStateStore before
  * persistence. The server-facing public bundle contains no private material.
  */
+data class E2eePendingOutgoingMessage(
+    val conversationId: String,
+    val messageId: String,
+    val plaintext: String,
+    val replyToId: String?,
+    val createdAt: String
+)
+
 class E2eeClient(context: Context, userId: String) {
     private val store = E2eeStateStore(context.applicationContext, userId)
     private val nativeSessionNamespace = userId
@@ -340,9 +348,86 @@ class E2eeClient(context: Context, userId: String) {
 
     @Synchronized
     fun markGroupOutboundDelivered(conversationId: String, messageId: String, recipients: List<E2eeGroupRecipientEnvelope>) {
-        recipients.forEach { recipient ->
-            store.delete(groupOutboxKey(conversationId, messageId, recipient.userId, recipient.deviceId))
+        val pending = pendingOutgoingMessages().filterNot { it.messageId == messageId && it.conversationId == conversationId }
+        val queueBytes = org.json.JSONArray().apply {
+            pending.forEach { item ->
+                put(org.json.JSONObject()
+                    .put("conversation_id", item.conversationId)
+                    .put("message_id", item.messageId)
+                    .put("plaintext", item.plaintext)
+                    .put("reply_to_id", item.replyToId)
+                    .put("created_at", item.createdAt))
+            }
+        }.toString().toByteArray(StandardCharsets.UTF_8)
+        val deletions = recipients.map { groupOutboxKey(conversationId, messageId, it.userId, it.deviceId) }
+        store.saveBatchAndDelete(mapOf(PENDING_OUTGOING_KEY to queueBytes), deletions)
+    }
+
+    /** Durable client-side queue. The plaintext is encrypted at rest by E2eeStateStore. */
+    @Synchronized
+    fun savePendingOutgoing(
+        conversationId: String, messageId: String, plaintext: String,
+        replyToId: String? = null, createdAt: String? = null
+    ): E2eePendingOutgoingMessage {
+        require(conversationId.isNotBlank() && messageId.isNotBlank() && plaintext.isNotBlank())
+        val existing = pendingOutgoingMessages().firstOrNull { it.messageId == messageId }
+        if (existing != null) {
+            require(existing.conversationId == conversationId && existing.plaintext == plaintext &&
+                existing.replyToId == replyToId) { "Ожидающее сообщение с таким ID уже содержит другие данные" }
+            return existing
         }
+        val item = E2eePendingOutgoingMessage(
+            conversationId, messageId, plaintext, replyToId,
+            createdAt?.takeIf { it.isNotBlank() } ?: java.time.Instant.now().toString()
+        )
+        val all = pendingOutgoingMessages() + item
+        require(all.size <= 200) { "Слишком много сообщений ожидает отправки. Подключитесь к сети и повторите." }
+        val json = org.json.JSONArray().apply {
+            all.forEach { row ->
+                put(org.json.JSONObject()
+                    .put("conversation_id", row.conversationId)
+                    .put("message_id", row.messageId)
+                    .put("plaintext", row.plaintext)
+                    .put("reply_to_id", row.replyToId)
+                    .put("created_at", row.createdAt))
+            }
+        }
+        store.save(PENDING_OUTGOING_KEY, json.toString().toByteArray(StandardCharsets.UTF_8))
+        return item
+    }
+
+    @Synchronized
+    fun pendingOutgoingMessages(): List<E2eePendingOutgoingMessage> {
+        val bytes = store.load(PENDING_OUTGOING_KEY) ?: return emptyList()
+        val json = org.json.JSONArray(String(bytes, StandardCharsets.UTF_8))
+        return (0 until json.length()).map { index ->
+            val row = json.getJSONObject(index)
+            E2eePendingOutgoingMessage(
+                row.getString("conversation_id"),
+                row.getString("message_id"),
+                row.getString("plaintext"),
+                row.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" },
+                row.getString("created_at")
+            )
+        }
+    }
+
+    @Synchronized
+    fun removePendingOutgoing(conversationId: String, messageId: String) {
+        val remaining = pendingOutgoingMessages().filterNot {
+            it.conversationId == conversationId && it.messageId == messageId
+        }
+        val json = org.json.JSONArray().apply {
+            remaining.forEach { row ->
+                put(org.json.JSONObject()
+                    .put("conversation_id", row.conversationId)
+                    .put("message_id", row.messageId)
+                    .put("plaintext", row.plaintext)
+                    .put("reply_to_id", row.replyToId)
+                    .put("created_at", row.createdAt))
+            }
+        }
+        store.save(PENDING_OUTGOING_KEY, json.toString().toByteArray(StandardCharsets.UTF_8))
     }
 
     fun decryptGroupMessage(
@@ -619,5 +704,6 @@ class E2eeClient(context: Context, userId: String) {
         const val PUBLIC_BUNDLE_KEY = "olm-public-device-bundle"
         const val PUBLISHED_KEY_IDS = "olm-published-one-time-key-ids"
         const val RECOVERY_KEY = "cloud-backup-recovery-key"
+        const val PENDING_OUTGOING_KEY = "pending-outgoing-messages"
     }
 }
