@@ -2285,7 +2285,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     // Keep the chat viewport below the status bar and resize it above the keyboard.
                     // The message area takes the remaining height; the composer stays at the bottom.
                     Box(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-                        Column(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
                         Row(
                             Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
