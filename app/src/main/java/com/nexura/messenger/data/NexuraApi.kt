@@ -48,6 +48,7 @@ data class MessageItem(
     val mediaMimeType: String? = null
 )
 class E2eePreKeyUnavailableException(message: String) : IOException(message)
+class NexuraHttpException(val statusCode: Int, message: String) : IOException(message)
 
 data class E2eeRemoteDevice(
     val userId: String,
@@ -120,7 +121,7 @@ class NexuraApi(private val store: SessionStore) {
                 } catch (_: Exception) {
                     responseText
                 }
-                throw IOException(message.ifBlank { "HTTP ${it.code}" })
+                throw NexuraHttpException(it.code, message.ifBlank { "HTTP ${it.code}" })
             }
             responseText
         }
