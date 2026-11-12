@@ -475,9 +475,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
                 }
             } catch (e: Exception) {
-                messageDelivery[messageId] = "failed"
-                failedMessageRetries[messageId] = Triple(chat, text, replyToId)
-                error = e.message ?: "Не удалось отправить защищённое сообщение"
+                if (e is E2eePreKeyUnavailableException) {
+                    // The message is safely persisted in the encrypted local outbox.
+                    // Keep it pending and let the retry loop resume delivery.
+                    messageDelivery[messageId] = "pending"
+                    failedMessageRetries.remove(messageId)
+                } else {
+                    messageDelivery[messageId] = "failed"
+                    failedMessageRetries[messageId] = Triple(chat, text, replyToId)
+                    error = e.message ?: "Не удалось отправить защищённое сообщение"
+                }
             }
         }
     }
@@ -2333,6 +2340,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 if (mine) {
                                                     when (messageDelivery[msg.id]) {
                                                         "sending" -> Text("◷", color = Color(0xFFB7C4D9), fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp))
+                                                        "pending" -> Text("Ожидает ключ · авто", color = Color(0xFFB7C4D9), fontSize = 10.sp, modifier = Modifier.padding(start = 5.dp))
                                                         "failed" -> Text(
                                                             "Не отправлено · Повторить",
                                                             color = Danger,
