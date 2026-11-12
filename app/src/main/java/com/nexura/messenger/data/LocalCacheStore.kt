@@ -108,11 +108,11 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
                 .put("avatar", chat.avatar)
                 .put("peer", chat.peerUserId))
         }
-        put(userId, "chats", array.toString())
+        runCatching { put(userId, "chats", array.toString()) }
     }
 
     fun readChats(userId: String): List<ChatItem> {
-        val raw = get(userId, "chats") ?: return emptyList()
+        val raw = runCatching { get(userId, "chats") }.getOrNull() ?: return emptyList()
         return runCatching {
         val array = JSONArray(raw)
         (0 until array.length()).mapNotNull { index ->
@@ -151,11 +151,11 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
                     .put("mediaName", message.mediaFileName)
                     .put("mediaMime", message.mediaMimeType))
             }
-        put(userId, "messages:$chatId", array.toString())
+        runCatching { put(userId, "messages:$chatId", array.toString()) }
     }
 
     fun readMessages(userId: String, chatId: String): List<MessageItem> {
-        val raw = get(userId, "messages:$chatId") ?: return emptyList()
+        val raw = runCatching { get(userId, "messages:$chatId") }.getOrNull() ?: return emptyList()
         return runCatching {
         val array = JSONArray(raw)
         (0 until array.length()).mapNotNull { index ->
