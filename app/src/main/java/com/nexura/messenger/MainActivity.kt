@@ -2024,7 +2024,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                     }
-                    Column(Modifier.fillMaxSize()) {
+                    // Resize the whole chat viewport for the IME so the composer remains anchored at the bottom.
+                    Column(Modifier.fillMaxSize().imePadding()) {
                         Row(
                             Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -2568,7 +2569,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                         Column(
-                            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 9.dp)
+                            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).navigationBarsPadding().padding(horizontal = 10.dp, vertical = 9.dp)
                         ) {
                             if (replyTarget != null) {
                                 Row(
