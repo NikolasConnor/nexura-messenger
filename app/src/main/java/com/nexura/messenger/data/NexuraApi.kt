@@ -1672,15 +1672,23 @@ class NexuraApi(private val store: SessionStore) {
     }
 
     suspend fun findUsers(query: String): List<UserItem> {
-        val encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val cleanQuery = query.trim()
+        if (cleanQuery.length < 2) return emptyList()
+        // Encode user input as a single PostgREST filter value. A space must be %20,
+        // not '+', because '+' is not consistently decoded as a space in raw filter expressions.
+        val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8").replace("+", "%20")
         val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)&limit=20"))
+        val currentUserId = store.userId
         return (0 until raw.length()).mapNotNull { i ->
             val p = raw.optJSONObject(i) ?: return@mapNotNull null
             val id = p.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
-            val name = p.optString("display_name").takeIf { it.isNotBlank() && it != "null" } ?: p.optString("username").takeIf { it.isNotBlank() && it != "null" } ?: "Пользователь"
+            val name = p.optString("display_name").takeIf { it.isNotBlank() && it != "null" }
+                ?: p.optString("username").takeIf { it.isNotBlank() && it != "null" }
+                ?: "Пользователь"
             val avatar = p.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂"
             UserItem(id, name, avatar)
-        }.filter { it.id != store.userId }
+        }.filter { it.id != currentUserId && it.id.isNotBlank() }
+            .distinctBy { it.id }
     }
     private fun normalizeUuid(value: String): String {
         val raw = value.trim()
