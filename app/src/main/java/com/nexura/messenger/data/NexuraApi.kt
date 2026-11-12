@@ -714,12 +714,8 @@ class NexuraApi(private val store: SessionStore) {
         return rows.getJSONObject(0)
     }
     suspend fun groupMemberIds(conversationId: String): List<String> {
+        // Security-sensitive send paths always fetch fresh membership before and after encryption.
         val chatId = normalizeUuid(conversationId)
-        val now = System.currentTimeMillis()
-        groupMemberCache[chatId]?.let { cached ->
-            if (cached.second > now) return cached.first
-            groupMemberCache.remove(chatId, cached)
-        }
         val rows = JSONArray(call(
             "/rest/v1/conversation_members?select=user_id&conversation_id=eq.$chatId&order=joined_at.asc"
         ))
@@ -727,8 +723,19 @@ class NexuraApi(private val store: SessionStore) {
         if (ids.size !in 2..E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
             throw IOException("В группе должно быть от 2 до ${E2eeGroupMessageEnvelope.MAX_RECIPIENTS} участников")
         }
-        groupMemberCache[chatId] = ids to (now + 60_000L)
         return ids
+    }
+
+    private suspend fun cachedGroupMemberIds(conversationId: String): List<String> {
+        val chatId = normalizeUuid(conversationId)
+        val now = System.currentTimeMillis()
+        groupMemberCache[chatId]?.let { cached ->
+            if (cached.second > now) return cached.first
+            groupMemberCache.remove(chatId, cached)
+        }
+        return groupMemberIds(chatId).also { ids ->
+            groupMemberCache[chatId] = ids to (now + 60_000L)
+        }
     }
 
     suspend fun sendEncryptedGroupMessage(
@@ -859,7 +866,7 @@ class NexuraApi(private val store: SessionStore) {
         if (envelope.conversationId != normalizeUuid(chatId) || envelope.senderUserId != senderId) {
             throw IOException("Групповой конверт не соответствует чату или отправителю")
         }
-        val members = groupMemberIds(chatId)
+        val members = cachedGroupMemberIds(chatId)
         if (senderId !in members || uid !in members) throw IOException("Отправитель или получатель не состоит в группе")
         val deviceCacheKey = "$senderId:${envelope.senderDeviceId}"
         val now = System.currentTimeMillis()
@@ -876,7 +883,7 @@ class NexuraApi(private val store: SessionStore) {
             E2eeRemoteDevice(
                 senderId, envelope.senderDeviceId, row.optString("curve25519_key"),
                 row.optString("ed25519_key"), row.optString("protocol"), row.optInt("bundle_version")
-            ).also { remoteDeviceCache[deviceCacheKey] = it to (now + 300_000L) }
+            ).also { remoteDeviceCache[deviceCacheKey] = it to (now + 60_000L) }
         }
         if (senderDevice.curve25519Key != envelope.senderCurve25519 ||
             senderDevice.protocol != "olm-v1" || senderDevice.bundleVersion != 1) {
