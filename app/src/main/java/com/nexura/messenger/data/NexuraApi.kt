@@ -21,6 +21,7 @@ import org.json.JSONTokener
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -1533,8 +1534,23 @@ class NexuraApi(private val store: SessionStore) {
             pathParts[1] != normalizeUuid(senderId)) {
             throw IOException("Медиафайл не привязан к отправителю и этому чату")
         }
-        val cached = File(storeMediaCacheDir(), "$messageId.dec")
-        if (cached.exists() && cached.length() > 0) return android.net.Uri.fromFile(cached).toString()
+        if (!messageId.matches(Regex("^[0-9a-fA-F-]{36}$"))) {
+            throw IOException("Некорректный ID сообщения с вложением")
+        }
+        val cacheDir = storeMediaCacheDir()
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) throw IOException("Не удалось подготовить кэш медиа")
+        val cached = File(cacheDir, "$messageId.dec")
+        val cacheDigest = File(cacheDir, "$messageId.dec.sha256")
+        // Never trust a plaintext cache entry merely because the file exists.
+        // A sidecar digest detects truncation or accidental modification between reads.
+        val cachedDigest = runCatching { cacheDigest.readText().trim() }.getOrNull()
+        if (cached.exists() && cached.length() == payload.optLong("size", -1L) &&
+            cachedDigest != null && cachedDigest.matches(Regex("^[0-9a-f]{64}$")) &&
+            cachedDigest == sha256MediaFile(cached)) {
+            return android.net.Uri.fromFile(cached).toString()
+        }
+        cached.delete()
+        cacheDigest.delete()
         val url = signedAttachmentUrl(path, "nexura-chat-media")
         val request = Request.Builder().url(url).get().build()
         val mediaClient = client.newBuilder()
@@ -1572,14 +1588,38 @@ class NexuraApi(private val store: SessionStore) {
                     cached.delete()
                     throw IOException("Размер расшифрованного медиа не совпадает с метаданными")
                 }
+                val digest = sha256MediaFile(cached)
+                val tempDigest = File.createTempFile("nexura-cache-", ".sha256", cacheDir)
+                try {
+                    tempDigest.writeText(digest)
+                    if (!tempDigest.renameTo(cacheDigest)) {
+                        throw IOException("Не удалось сохранить контрольную сумму медиа")
+                    }
+                } finally {
+                    tempDigest.delete()
+                }
             }
             return android.net.Uri.fromFile(cached).toString()
         } catch (error: Exception) {
             cached.delete()
+            cacheDigest.delete()
             throw error
         } finally {
             encrypted.delete()
         }
+    }
+
+    private fun sha256MediaFile(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun storeMediaCacheDir(): File = store.mediaCacheDir
