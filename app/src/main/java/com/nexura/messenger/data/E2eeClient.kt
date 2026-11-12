@@ -630,6 +630,21 @@ class E2eeClient(context: Context, userId: String) {
         store.delete(outboxKey(conversationId, messageId))
     }
 
+    /**
+     * Evict this account's in-memory Olm sessions and account object without
+     * deleting encrypted Android Keystore-backed state. Safe to call on logout:
+     * a later login can restore the protocol state from encrypted local storage.
+     */
+    @Synchronized
+    fun clearVolatileState() {
+        synchronized(accountOperationLock) {
+            E2eeNative.nativeInvalidateSessionsForPrefix("$nativeSessionNamespace|")
+            if (store.hasLocalDevice()) {
+                E2eeNative.nativeInvalidateAccount(nativeAccountId())
+            }
+        }
+    }
+
     /** Permanently remove this user's local E2EE identity and all local sessions. */
     @Synchronized
     fun clearLocalIdentity() {
