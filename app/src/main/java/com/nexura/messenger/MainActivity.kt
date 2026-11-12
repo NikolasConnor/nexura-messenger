@@ -508,34 +508,64 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         chatSearchQuery = ""
         scope.launch {
             try {
-                val loadedMessages = api.messages(chat.id, e2eeClient, pageSize = 30)
+                // Start with a smaller first page on low-memory phones. Older
+                // history remains available through the existing cursor paging.
+                val loadedMessages = withContext(Dispatchers.IO) {
+                    api.messages(chat.id, e2eeClient, pageSize = 20)
+                }
                 val pendingForChat = withContext(Dispatchers.IO) {
                     e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == chat.id }
                 }
-                if (selected?.id == chat.id) {
-                    val pendingItems = pendingForChat.map { pending ->
-                        MessageItem(
-                            pending.messageId, store.userId.orEmpty(), pending.plaintext, pending.createdAt,
-                            "text", pending.replyToId, encrypted = true, securityWarning = false
-                        )
-                    }
-                    messages = (loadedMessages + pendingItems).distinctBy { it.id }
-                        .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                    hasMoreMessages = loadedMessages.size >= 30
-                    val newest = loadedMessages.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                    lastSyncedMessageTimestamp = newest?.createdAt ?: "1970-01-01T00:00:00Z"
-                    lastSyncedMessageId = newest?.id
-                    messageReactions = api.messageReactions(chat.id)
-                    pinnedMessageId = api.pinnedMessage(chat.id)
-                    canManagePins = api.canManageConversation(chat.id)
+                if (selected?.id != chat.id) return@launch
+
+                val pendingItems = pendingForChat.map { pending ->
+                    MessageItem(
+                        pending.messageId, store.userId.orEmpty(), pending.plaintext, pending.createdAt,
+                        "text", pending.replyToId, encrypted = true, securityWarning = false
+                    )
                 }
+                messages = (loadedMessages + pendingItems).distinctBy { it.id }
+                    .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                hasMoreMessages = loadedMessages.size >= 20
+                val newest = loadedMessages.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                lastSyncedMessageTimestamp = newest?.createdAt ?: "1970-01-01T00:00:00Z"
+                lastSyncedMessageId = newest?.id
+
                 pendingForChat.forEach { pending ->
                     dispatchSecureMessage(chat, pending.messageId, pending.plaintext, pending.replyToId, pending.createdAt)
                 }
-                api.markChatRead(chat.id, readReceiptsEnabled)
-                peerReadReceiptAt = api.peerReadReceiptAt(chat.id, chat.peerUserId)
-                chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
-            } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
+
+                // These metadata requests are independent. Run them together after
+                // the messages are already visible so they cannot delay chat opening.
+                val metadata = kotlinx.coroutines.coroutineScope {
+                    val reactionsJob = async { runCatching { api.messageReactions(chat.id) }.getOrDefault(emptyMap()) }
+                    val pinnedJob = async { runCatching { api.pinnedMessage(chat.id) }.getOrNull() }
+                    val manageJob = async { runCatching { api.canManageConversation(chat.id) }.getOrDefault(false) }
+                    val receiptJob = async {
+                        runCatching { api.peerReadReceiptAt(chat.id, chat.peerUserId) }.getOrNull()
+                    }
+                    val readJob = async { runCatching { api.markChatRead(chat.id, readReceiptsEnabled) } }
+                    val result = listOf(
+                        reactionsJob.await(), pinnedJob.await(), manageJob.await(), receiptJob.await()
+                    )
+                    readJob.await()
+                    result
+                }
+                @Suppress("UNCHECKED_CAST")
+                val reactions = metadata[0] as Map<String, List<Pair<String, Int>>>
+                val pinned = metadata[1] as String?
+                val manage = metadata[2] as Boolean
+                val receipt = metadata[3] as String?
+                if (selected?.id == chat.id) {
+                    messageReactions = reactions
+                    pinnedMessageId = pinned
+                    canManagePins = manage
+                    peerReadReceiptAt = receipt
+                    chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
+                }
+            } catch (e: Exception) {
+                if (selected?.id == chat.id) error = e.message ?: "Не удалось загрузить сообщения"
+            }
         }
     }
 
