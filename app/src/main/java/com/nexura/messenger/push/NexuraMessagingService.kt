@@ -52,8 +52,11 @@ class NexuraMessagingService : FirebaseMessagingService() {
             conversationId?.hashCode() ?: (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
         }
 
-        val baseUri = if (conversationId != null) {
-            "nexura://chat/$conversationId?call=1"
+        val baseUri = if (conversationId != null && incomingCall && callId != null) {
+            val callerId = payload["caller_id"].orEmpty()
+            "nexura://chat/$conversationId?call=1&call_id=${Uri.encode(callId)}&caller_id=${Uri.encode(callerId)}&video=$video"
+        } else if (conversationId != null) {
+            "nexura://chat/$conversationId"
         } else {
             "nexura://"
         }
