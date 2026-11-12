@@ -643,6 +643,32 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 error = e.message ?: "Не удалось восстановить сессию"
                 if (store.accessToken.isNullOrBlank()) signedIn = false
             }
+
+            // Keep the recipient's public one-time-key pool replenished automatically.
+            // This runs while Nexura is active, so people never need to open key settings.
+            launch {
+                delay(30_000L)
+                var retryDelay = 30_000L
+                while (true) {
+                    val client = e2eeClient
+                    if (client == null || e2eeRecoveryRequired) {
+                        delay(60_000L)
+                        continue
+                    }
+                    try {
+                        val available = withContext(Dispatchers.IO) {
+                            api.publishE2eeDevice(client)
+                        }
+                        e2eeStatus = "Защита обновлена · $available ключей"
+                        retryDelay = 120_000L
+                        delay(120_000L)
+                    } catch (_: Exception) {
+                        // Retry quietly; a temporary network/server issue must not block chats.
+                        delay(retryDelay)
+                        retryDelay = (retryDelay * 2).coerceAtMost(300_000L)
+                    }
+                }
+            }
         }
     }
 
