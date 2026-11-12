@@ -47,7 +47,7 @@ class E2eeClient(context: Context, userId: String) {
         SESSION_OPERATION_LOCKS[Math.floorMod(key.hashCode(), SESSION_OPERATION_LOCKS.size)]
 
     @Synchronized
-    fun ensureDevice(oneTimeKeyCount: Int = 20): String {
+    fun ensureDevice(oneTimeKeyCount: Int = 50): String {
         return synchronized(accountOperationLock) {
 
         require(oneTimeKeyCount in 1..50) { "oneTimeKeyCount must be between 1 and 50" }
