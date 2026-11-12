@@ -582,6 +582,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                 }
+                val outgoingClient = e2eeClient
+                if (outgoingClient != null) {
+                    val pendingOutgoing = withContext(Dispatchers.IO) {
+                        outgoingClient.pendingOutgoingMessages()
+                    }
+                    pendingOutgoing.forEach { pending ->
+                        val targetChat = chats.firstOrNull { it.id == pending.conversationId }
+                        if (targetChat != null) {
+                            dispatchSecureMessage(
+                                targetChat, pending.messageId, pending.plaintext,
+                                pending.replyToId, pending.createdAt
+                            )
+                        }
+                    }
+                }
                 val pushToken = FirebaseMessaging.getInstance().token.await()
                 if (pushToken.isNotBlank()) api.registerPushToken(pushToken)
             } catch (e: Exception) {
