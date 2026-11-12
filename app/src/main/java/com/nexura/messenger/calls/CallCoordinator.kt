@@ -100,6 +100,18 @@ class CallCoordinator(
         )
     }
 
+    /** Rehydrates an incoming offer delivered by FCM after the app was not subscribed to Realtime. */
+    fun receiveIncomingPush(id: String, callerId: String, video: Boolean) {
+        if (closed || callerId != peerUserId || id.isBlank() || id.length > 64) return
+        runCatching { UUID.fromString(id) }.getOrElse { return }
+        receive(JSONObject()
+            .put("type", "offer")
+            .put("call_id", id)
+            .put("from", callerId)
+            .put("to", ownUserId)
+            .put("video", video))
+    }
+
     fun start(video: Boolean) {
         if (!ready || closed || room != null || callId != null) {
             publish((lastState ?: CallUiState()).copy(error = "Сервер звонков ещё подключается"))
