@@ -529,8 +529,12 @@ class NexuraApi(private val store: SessionStore) {
         uploadPendingKeys()
 
         var available = countAvailableE2eeKeys(uid, deviceId)
-        if (available < 10) {
-            e2ee.replenishOneTimeKeys(20)
+        // Keep a larger offline-delivery reserve. A recipient does not need
+        // an active Auth session to receive: senders consume these published
+        // public OTKs while the device is offline, then the device decrypts
+        // queued ciphertext after its next login.
+        if (available < 25) {
+            e2ee.replenishOneTimeKeys(50)
             uploadPendingKeys()
             available = countAvailableE2eeKeys(uid, deviceId)
         }
