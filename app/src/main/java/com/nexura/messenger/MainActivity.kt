@@ -91,6 +91,7 @@ import com.nexura.messenger.data.*
 import com.nexura.messenger.calls.NexuraCallDialog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -198,6 +199,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         mutableStateListOf<String>().apply { addAll(prefs.getStringSet("favorite_chat_ids", emptySet()).orEmpty()) }
     }
     val chatDrafts = remember { mutableStateMapOf<String, String>() }
+    val chatPreviews = remember { mutableStateMapOf<String, String>() }
     var showChatFilter by remember { mutableStateOf(false) }
     var openMessageMenu by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -261,6 +263,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingIncomingCallId by remember { mutableStateOf(authCallback?.getQueryParameter("call_id")) }
     var pendingIncomingCallerId by remember { mutableStateOf(authCallback?.getQueryParameter("caller_id")) }
     var pendingIncomingVideo by remember { mutableStateOf(authCallback?.getQueryParameter("video") == "true") }
+    LaunchedEffect(selected?.id, messages) {
+        val chatId = selected?.id ?: return@LaunchedEffect
+        messages.lastOrNull()?.let { latest ->
+            chatPreviews[chatId] = chatMessagePreview(latest, store.userId.orEmpty())
+        }
+    }
+
     LaunchedEffect(selected?.id, store.userId) {
         context.getSharedPreferences("nexura_runtime", android.content.Context.MODE_PRIVATE)
             .edit().putString("active_chat_id", selected?.id).apply()
@@ -645,11 +654,40 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 openChat(targetChat)
             }
             if (targetChat != null && authCallback?.getQueryParameter("call") == "1") {
-                pendingCallAction = authCallback.getQueryParameter("action") ?: "show"
-                pendingIncomingCallId = authCallback.getQueryParameter("call_id")
-                pendingIncomingCallerId = authCallback.getQueryParameter("caller_id")
-                pendingIncomingVideo = authCallback.getQueryParameter("video") == "true"
-                showCallDialog = true
+                // Notification/deep-link call intents are valid only during the ring window.
+                // This prevents an old lock-screen notification from resurrecting a finished call.
+                val expiresAt = authCallback.getQueryParameter("expires_at")?.toLongOrNull()
+                if (expiresAt != null && expiresAt > System.currentTimeMillis()) {
+                    pendingCallAction = authCallback.getQueryParameter("action") ?: "show"
+                    pendingIncomingCallId = authCallback.getQueryParameter("call_id")
+                    pendingIncomingCallerId = authCallback.getQueryParameter("caller_id")
+                    pendingIncomingVideo = authCallback.getQueryParameter("video") == "true"
+                    showCallDialog = true
+                } else {
+                    showCallDialog = false
+                    pendingIncomingCallId = null
+                    pendingIncomingCallerId = null
+                    pendingIncomingVideo = false
+                    pendingCallAction = "show"
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(signedIn, e2eeClient, chats.map { it.id }) {
+        val client = e2eeClient
+        if (signedIn && client != null && !e2eeRecoveryRequired) {
+            // Populate previews from the newest decrypted message without blocking chat opening.
+            chats.take(30).chunked(5).forEach { batch ->
+                val previews = kotlinx.coroutines.coroutineScope {
+                    batch.map { chat -> async(Dispatchers.IO) {
+                        val latest = runCatching { api.messages(chat.id, client, pageSize = 1).lastOrNull() }.getOrNull()
+                        chat.id to latest
+                    } }.awaitAll()
+                }
+                previews.forEach { (chatId, latest) ->
+                    if (latest != null) chatPreviews[chatId] = chatMessagePreview(latest, store.userId.orEmpty())
+                }
             }
         }
     }
@@ -667,7 +705,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val cachedChats = withContext(Dispatchers.IO) {
                     localCache.readChats(store.userId.orEmpty())
                 }
-                if (cachedChats.isNotEmpty()) chats = cachedChats
+                if (cachedChats.isNotEmpty()) {
+                    chats = cachedChats
+                    val cachedPreviews = withContext(Dispatchers.IO) {
+                        cachedChats.mapNotNull { cachedChat ->
+                            localCache.readMessages(store.userId.orEmpty(), cachedChat.id)
+                                .lastOrNull()?.let { cachedChat.id to chatMessagePreview(it, store.userId.orEmpty()) }
+                        }
+                    }
+                    chatPreviews.clear()
+                    cachedPreviews.forEach { (chatId, preview) -> chatPreviews[chatId] = preview }
+                }
                 api.restoreSession()
                 api.myProfile() // Create a profile row for accounts that have not opened settings yet.
                 val initialPrivacy = api.privacySettings()
@@ -1681,7 +1729,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
-                                                Text(if (chat.kind == "group") "Групповой чат" else "Личная переписка", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp), maxLines = 1)
+                                                Text(chatPreviews[chat.id] ?: if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp).weight(1f), maxLines = 1)
                                                 Spacer(Modifier.weight(1f))
                                                 if (chat.unreadCount > 0) {
                                                     Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
@@ -3117,6 +3165,25 @@ private fun authFieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
+private fun chatMessagePreview(message: MessageItem, ownUserId: String): String {
+    val body = when (message.messageType.lowercase()) {
+        "call" -> "Звонок"
+        "image", "photo" -> message.mediaCaption?.takeIf { it.isNotBlank() } ?: "Фото"
+        "video" -> message.mediaCaption?.takeIf { it.isNotBlank() } ?: "Видео"
+        "voice", "audio" -> "Голосовое сообщение"
+        "file" -> message.mediaFileName?.let { "Файл: $it" } ?: "Файл"
+        else -> when (message.mediaKind?.lowercase()) {
+            "image", "photo" -> message.mediaCaption?.takeIf { it.isNotBlank() } ?: "Фото"
+            "video" -> message.mediaCaption?.takeIf { it.isNotBlank() } ?: "Видео"
+            "voice", "audio" -> "Голосовое сообщение"
+            "file" -> message.mediaFileName?.let { "Файл: $it" } ?: "Файл"
+            else -> message.content.trim().ifBlank { "Сообщение" }
+        }
+    }
+    val prefix = if (message.senderId == ownUserId) "Вы: " else ""
+    return (prefix + body).replace(Regex("\\s+"), " ").take(100)
+}
+
 private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean) {
     val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
     val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
