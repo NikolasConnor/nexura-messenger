@@ -1043,29 +1043,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Text("Сравните отпечатки устройств лично или по другому доверенному каналу. Текст, фото и видео шифруются до отправки. В личном чате пока поддерживается одно активное устройство собеседника.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
                                 if (client != null && client.hasLocalDevice()) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            scope.launch {
-                                                keyRefreshBusy = true
-                                                try {
-                                                    val available = withContext(Dispatchers.IO) {
-                                                        api.publishE2eeDevice(client)
-                                                    }
-                                                    e2eeStatus = "Защита обновлена · $available ключей"
-                                                    notice = "Одноразовые ключи защиты обновлены."
-                                                } catch (e: Exception) {
-                                                    e2eeStatus = "Не удалось обновить ключи: ${e.message ?: "ошибка сети или сервера"}"
-                                                } finally {
-                                                    keyRefreshBusy = false
-                                                }
-                                            }
-                                        },
-                                        enabled = !keyRefreshBusy,
-                                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Text(if (keyRefreshBusy) "Обновляем ключи…" else "Обновить ключи защиты")
-                                    }
                                     OutlinedButton(onClick = {
                                         scope.launch {
                                             backupBusy = true
