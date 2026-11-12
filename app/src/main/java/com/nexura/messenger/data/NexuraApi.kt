@@ -900,12 +900,21 @@ class NexuraApi(private val store: SessionStore) {
         }
         if (peerDevices.isEmpty()) throw IOException("У собеседника пока нет активных устройств Nexura")
         // A sender cannot manufacture private one-time keys for another device.
+        // Skip peer replicas whose OTK pool is exhausted only when that device has
+        // no established Olm session; another usable peer device can still receive.
+        val peerDevicesWithKeys = peerDevices.filter { device ->
+            e2ee.hasGroupSession(chatId, device.userId, device.deviceId) ||
+                countAvailableE2eeKeys(device.userId, device.deviceId) > 0
+        }
+        if (peerDevicesWithKeys.isEmpty()) {
+            throw IOException("У собеседника закончились одноразовые ключи защиты. Попросите его открыть Nexura и подождать обновления ключей, затем отправьте сообщение ещё раз.")
+        }
         // Offline own devices may have exhausted their published OTK pool; skip
         // those replicas instead of failing the entire direct-message send.
         val ownOtherDevices = ownDevicesWithAvailableKeys(
             uid, ownDevices.filterNot { it.deviceId == ownDeviceId }
         )
-        val allTargets = (peerDevices + ownOtherDevices).distinctBy { "${it.userId}:${it.deviceId}" }
+        val allTargets = (peerDevicesWithKeys + ownOtherDevices).distinctBy { "${it.userId}:${it.deviceId}" }
         if (allTargets.size > E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
             throw IOException("Слишком много активных устройств для одной защищённой отправки")
         }
@@ -944,7 +953,16 @@ class NexuraApi(private val store: SessionStore) {
                         throw error
                     }
                 } else {
-                    consumeE2eePreKey(chatId, device.userId, device.deviceId)
+                    try {
+                        consumeE2eePreKey(chatId, device.userId, device.deviceId)
+                    } catch (error: Exception) {
+                        // Another sender may consume the last key after our count.
+                        // Continue only because a different usable replica may remain.
+                        if (error.message.orEmpty().contains("no available one-time key", ignoreCase = true)) {
+                            continue
+                        }
+                        throw error
+                    }
                 }
                 if (preKey.optString("ed25519_key") != device.ed25519Key ||
                     preKey.optString("curve25519_key") != device.curve25519Key) {
@@ -963,6 +981,10 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
 
+        if (recipients.none { it.userId == peerId }) {
+            throw IOException("Не удалось подготовить ключ для устройства собеседника. Попросите его открыть Nexura для обновления защиты и повторите отправку.")
+        }
+
         val (latestPeerDevices, latestOwnDevicesRaw) = coroutineScope {
             val peer = async { activeE2eeDevices(peerId) }
             val own = async { activeE2eeDevices(uid) }
@@ -975,7 +997,8 @@ class NexuraApi(private val store: SessionStore) {
             it.deviceId != ownDeviceId && it.deviceId in selectedOwnDeviceIds
         }
         val latestTargets = (latestPeerDevices + latestOwnDevices).distinctBy { "${it.userId}:${it.deviceId}" }
-        if (latestTargets.map { "${it.userId}:${it.deviceId}" }.toSet() != allTargets.map { "${it.userId}:${it.deviceId}" }.toSet()) {
+        if (latestTargets.map { "${it.userId}:${it.deviceId}" }.toSet() !=
+            (peerDevices + ownOtherDevices).map { "${it.userId}:${it.deviceId}" }.toSet()) {
             throw IOException("Список устройств одного из участников изменился во время отправки. Повторите отправку.")
         }
         val envelope = E2eeGroupMessageEnvelope(
