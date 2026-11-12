@@ -99,6 +99,7 @@ class E2eeClientInstrumentedTest {
 
         // A new facade instance simulates process restart; persisted session and
         // local message cache must be decrypted from Android Keystore-backed storage.
+        alice.clearVolatileState()
         val aliceAfterRestart = E2eeClient(context, aliceId)
         assertArrayEquals(replyText, aliceAfterRestart.decryptDirectMessage(conversationId, replyEnvelope, replyMessageId))
         assertArrayEquals(replyText, aliceAfterRestart.cachedMessage(conversationId, replyMessageId))
