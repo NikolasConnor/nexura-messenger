@@ -1175,15 +1175,21 @@ class NexuraApi(private val store: SessionStore) {
 
 
 
-    /** Called only when the user explicitly abandons an unrecoverable old device. */
+    /**
+     * Permanently revokes every other registered device while preserving the
+     * newly confirmed current device. The server keeps tombstones, disables
+     * the old device rows, and deletes their unused one-time public keys.
+     */
     suspend fun removeOtherOwnE2eeDevices(keepDeviceId: String) {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        val keep = java.net.URLEncoder.encode(keepDeviceId, "UTF-8")
-        call(
-            "/rest/v1/e2ee_devices?user_id=eq.$uid&device_id=neq.$keep",
-            "DELETE",
-            prefer = "return=minimal"
+        val keep = normalizeUuid(keepDeviceId)
+        val result = call(
+            "/rest/v1/rpc/revoke_other_own_e2ee_devices",
+            "POST",
+            JSONObject().put("p_keep_device_id", keep).toString()
         )
+        val revokedCount = result.trim().toIntOrNull()
+            ?: throw IOException("Сервер не подтвердил отзыв старых E2EE-устройств")
+        if (revokedCount < 0) throw IOException("Некорректный ответ сервера при отзыве устройств")
     }
 
     suspend fun hasRegisteredE2eeDevice(): Boolean {
