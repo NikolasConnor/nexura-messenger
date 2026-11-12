@@ -633,9 +633,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     LaunchedEffect(authCallback, signedIn, chats) {
         val targetChatId = if (authCallback?.scheme == "nexura" && authCallback.host == "chat") {
-            authCallback.pathSegments.firstOrNull()?.let { raw ->
-                runCatching { UUID.fromString(raw).toString() }.getOrNull()
-            }
+            authCallback.pathSegments.firstOrNull()?.takeIf { raw ->
+                raw.matches(Regex("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
+            }?.let { raw -> runCatching { UUID.fromString(raw).toString() }.getOrNull() }
         } else null
         if (signedIn && targetChatId != null) {
             val targetChat = chats.firstOrNull { it.id.equals(targetChatId, ignoreCase = true) }
