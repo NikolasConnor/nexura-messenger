@@ -1233,7 +1233,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     if (deviceToRevoke != null) AlertDialog(
                         onDismissRequest = { if (!busy) deviceToRevoke = null },
                         title = { Text("Отозвать E2EE-устройство?") },
-                        text = { Text("Устройство ${deviceToRevoke?.deviceId?.take(8)}… будет отключено от E2EE. Его активные одноразовые ключи удалятся, а повторная регистрация с тем же ID будет заблокирована. Уже сохранённые на нём данные автоматически не стираются.") },
+                        text = { Text("Устройство ${deviceToRevoke?.deviceId?.take(8)}… будет отключено от E2EE. Его активные одноразовые ключи удалятся, а повторная регистрация с тем же ID будет заблокирована. Уже сохранённые данные не стираются, а вход в аккаунт может остаться активным. Для завершения всех остальных входов используйте отдельную кнопку ниже.") },
                         confirmButton = {
                             TextButton(enabled = !busy, onClick = {
                                 val target = deviceToRevoke ?: return@TextButton
