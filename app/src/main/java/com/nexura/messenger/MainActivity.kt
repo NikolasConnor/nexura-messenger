@@ -2457,7 +2457,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 if (mine) {
                                                     when (messageDelivery[msg.id]) {
                                                         "sending" -> Text("◷", color = Color(0xFFB7C4D9), fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp))
-                                                        "pending" -> Text("Ожидает ключ · авто", color = Color(0xFFB7C4D9), fontSize = 10.sp, modifier = Modifier.padding(start = 5.dp))
+                                                        "pending" -> Text("В очереди · авто", color = Color(0xFFB7C4D9), fontSize = 10.sp, modifier = Modifier.padding(start = 5.dp))
                                                         "failed" -> Text(
                                                             "Не отправлено · Повторить",
                                                             color = Danger,
