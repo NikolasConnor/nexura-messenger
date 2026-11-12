@@ -15,24 +15,12 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.nexura.messenger.MainActivity
 import java.util.UUID
-import kotlinx.coroutines.launch
 
 class NexuraMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        kotlinx.coroutines.CoroutineScope(
-            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
-        ).launch {
-            try {
-                val store = com.nexura.messenger.data.SessionStore(applicationContext)
-                if (store.accessToken.isNullOrBlank()) return@launch
-                val api = com.nexura.messenger.data.NexuraApi(store)
-                if (store.userId.isNullOrBlank()) api.refreshSession()
-                if (!store.userId.isNullOrBlank()) api.registerPushToken(token)
-            } catch (_: Exception) {
-                // MainActivity retries registration after the next successful sign-in.
-            }
-        }
+        // WorkManager keeps registration pending across process death and network loss.
+        PushTokenSyncWorker.enqueue(applicationContext)
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
