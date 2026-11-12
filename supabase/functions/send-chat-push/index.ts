@@ -48,7 +48,10 @@ Deno.serve(async (req: Request) => {
     if (!userResponse.ok) return Response.json({ error: "Unauthorized" }, { status: 401, headers: cors });
     const user = await userResponse.json();
     const { conversation_id } = await req.json();
-    if (typeof conversation_id !== "string") return Response.json({ error: "conversation_id is required" }, { status: 400, headers: cors });
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (typeof conversation_id !== "string" || !uuidPattern.test(conversation_id)) {
+      return Response.json({ error: "A valid conversation_id UUID is required" }, { status: 400, headers: cors });
+    }
 
     const headers = { apikey: serviceKey, Authorization: "Bearer " + serviceKey };
     const membersResponse = await fetch(url + "/rest/v1/conversation_members?select=user_id&conversation_id=eq." + encodeURIComponent(conversation_id), { headers });
