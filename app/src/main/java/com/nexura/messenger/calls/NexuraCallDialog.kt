@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -239,6 +240,16 @@ fun NexuraCallDialog(
                 }
                 Box(Modifier.background(Color(0xFF263B50), androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(horizontal = 11.dp, vertical = 7.dp)) {
                     Text("NEXURA", color = Color(0xFFB8D6FF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                }
+                IconButton(onClick = {
+                    when {
+                        ui.incoming -> coordinator?.decline()
+                        ui.active -> coordinator?.end()
+                    }
+                    com.nexura.messenger.push.NexuraMessagingService.cancelIncomingCall(context, chat.id)
+                    onDismiss()
+                }) {
+                    Icon(Icons.Default.Close, contentDescription = "Закрыть экран звонка", tint = Color.White)
                 }
             }
             if (ui.video && ui.active) {
