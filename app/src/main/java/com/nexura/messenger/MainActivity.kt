@@ -759,7 +759,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             val newest = api.messages(chat.id, outgoingClient, pageSize = 1).lastOrNull()
                                             if (newest != null && !newest.content.startsWith("🔒") &&
                                                 !newest.content.startsWith("⚠")) {
-                                                localCache.saveMessages(store.userId.orEmpty(), chat.id, listOf(newest))
+                                                val existing = localCache.readMessages(store.userId.orEmpty(), chat.id)
+                                                localCache.saveMessages(
+                                                    store.userId.orEmpty(), chat.id,
+                                                    (existing + newest).distinctBy { it.id }
+                                                )
                                                 chat.id to chatMessagePreview(newest, store.userId.orEmpty())
                                             } else null
                                         }.getOrNull()
