@@ -241,6 +241,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var creatingGroup by remember { mutableStateOf(false) }
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var forwardingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editDraft by remember { mutableStateOf("") }
     var e2eeClient by remember { mutableStateOf<E2eeClient?>(null) }
     var e2eeStatus by remember { mutableStateOf("Шифрование не проверено") }
@@ -1665,6 +1666,41 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                 }
                 else -> {
+                    if (forwardingTarget != null) {
+                        val sourceMessage = forwardingTarget!!
+                        val destinations = chats.filter { it.id != selected?.id }
+                        AlertDialog(
+                            onDismissRequest = { forwardingTarget = null },
+                            title = { Text("Переслать сообщение") },
+                            text = {
+                                Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                                    Text("Сообщение будет заново зашифровано для выбранного чата.", color = SecondaryText, fontSize = 12.sp)
+                                    Spacer(Modifier.height(10.dp))
+                                    destinations.forEach { destination ->
+                                        Row(
+                                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
+                                                val messageId = UUID.randomUUID().toString()
+                                                val createdAt = java.time.Instant.now().toString()
+                                                dispatchSecureMessage(destination, messageId, sourceMessage.content, null, createdAt)
+                                                forwardingTarget = null
+                                                notice = "Пересылка добавлена в очередь"
+                                            }.padding(horizontal = 8.dp, vertical = 11.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0)
+                                            Column(Modifier.weight(1f).padding(start = 11.dp)) {
+                                                Text(destination.title, color = MainText, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                                Text(if (destination.kind == "group") "Группа" else "Личный чат", color = SecondaryText, fontSize = 11.sp)
+                                            }
+                                            Icon(Icons.Default.ArrowForward, "Переслать", tint = Accent)
+                                        }
+                                    }
+                                    if (destinations.isEmpty()) Text("Нет других чатов для пересылки.", color = SecondaryText)
+                                }
+                            },
+                            confirmButton = { TextButton(onClick = { forwardingTarget = null }) { Text("Отмена") } }
+                        )
+                    }
                     if (editingTarget != null) {
                         AlertDialog(
                             onDismissRequest = { editingTarget = null },
@@ -2506,6 +2542,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             leadingIcon = { Text("↩", color = Accent, fontSize = 18.sp) },
                                                             onClick = { replyTarget = msg; openMessageMenu = null }
                                                         )
+                                                        if (msg.encrypted && !msg.securityWarning && msg.messageType == "text" && chats.any { it.id != chat.id }) {
+                                                            DropdownMenuItem(
+                                                                text = { Text("Переслать") },
+                                                                leadingIcon = { Icon(Icons.Default.ArrowForward, null, tint = Accent) },
+                                                                onClick = { forwardingTarget = msg; openMessageMenu = null }
+                                                            )
+                                                        }
                                                         DropdownMenuItem(
                                                             text = { Text("Копировать текст") },
                                                             leadingIcon = { Text("▣", color = Accent, fontSize = 17.sp) },
