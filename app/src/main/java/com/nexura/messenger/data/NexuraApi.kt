@@ -79,6 +79,7 @@ class NexuraApi(private val store: SessionStore) {
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
     private val remoteDeviceCache = ConcurrentHashMap<String, Pair<E2eeRemoteDevice, Long>>()
+    private val groupMemberCache = ConcurrentHashMap<String, Pair<List<String>, Long>>()
     // Supabase rotates refresh tokens. Serialize refreshes so simultaneous 401 responses
     // cannot race and invalidate the token another request has just stored.
     private val refreshMutex = Mutex()
@@ -494,7 +495,8 @@ class NexuraApi(private val store: SessionStore) {
             }
             }.sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
         }
-        if (e2ee != null) runCatching { syncE2eeBackupIfEnabled(e2ee) }
+        // Backup synchronization is intentionally not part of message paging/polling.
+        // It runs during device setup and explicit backup maintenance, not on every refresh.
         return rendered
     }
     /**
@@ -712,13 +714,20 @@ class NexuraApi(private val store: SessionStore) {
         return rows.getJSONObject(0)
     }
     suspend fun groupMemberIds(conversationId: String): List<String> {
+        val chatId = normalizeUuid(conversationId)
+        val now = System.currentTimeMillis()
+        groupMemberCache[chatId]?.let { cached ->
+            if (cached.second > now) return cached.first
+            groupMemberCache.remove(chatId, cached)
+        }
         val rows = JSONArray(call(
-            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(conversationId)}&order=joined_at.asc"
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.$chatId&order=joined_at.asc"
         ))
         val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("user_id") }.distinct()
         if (ids.size !in 2..E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
             throw IOException("В группе должно быть от 2 до ${E2eeGroupMessageEnvelope.MAX_RECIPIENTS} участников")
         }
+        groupMemberCache[chatId] = ids to (now + 60_000L)
         return ids
     }
 
@@ -852,14 +861,25 @@ class NexuraApi(private val store: SessionStore) {
         }
         val members = groupMemberIds(chatId)
         if (senderId !in members || uid !in members) throw IOException("Отправитель или получатель не состоит в группе")
-        val senderRows = JSONArray(call(
-            "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
-                "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
-        ))
-        if (senderRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
-        val sender = senderRows.getJSONObject(0)
-        if (sender.optString("curve25519_key") != envelope.senderCurve25519 ||
-            sender.optString("protocol") != "olm-v1" || sender.optInt("bundle_version") != 1) {
+        val deviceCacheKey = "$senderId:${envelope.senderDeviceId}"
+        val now = System.currentTimeMillis()
+        val cachedDevice = remoteDeviceCache[deviceCacheKey]
+        val senderDevice = if (cachedDevice != null && cachedDevice.second > now) {
+            cachedDevice.first
+        } else {
+            val senderRows = JSONArray(call(
+                "/rest/v1/e2ee_devices?select=device_id,curve25519_key,ed25519_key,protocol,bundle_version" +
+                    "&user_id=eq.$senderId&device_id=eq.${envelope.senderDeviceId}&is_active=eq.true&limit=1"
+            ))
+            if (senderRows.length() != 1) throw IOException("Устройство отправителя не зарегистрировано")
+            val row = senderRows.getJSONObject(0)
+            E2eeRemoteDevice(
+                senderId, envelope.senderDeviceId, row.optString("curve25519_key"),
+                row.optString("ed25519_key"), row.optString("protocol"), row.optInt("bundle_version")
+            ).also { remoteDeviceCache[deviceCacheKey] = it to (now + 300_000L) }
+        }
+        if (senderDevice.curve25519Key != envelope.senderCurve25519 ||
+            senderDevice.protocol != "olm-v1" || senderDevice.bundleVersion != 1) {
             throw IOException("Идентичность отправителя группы не подтверждена")
         }
         val myDeviceId = e2ee.deviceId()
@@ -872,7 +892,7 @@ class NexuraApi(private val store: SessionStore) {
             return e2ee.cachedMessage(chatId, messageId)?.toString(Charsets.UTF_8)
                 ?: throw IOException("Локальная копия группового сообщения недоступна")
         }
-        e2ee.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, sender.optString("curve25519_key"), sender.optString("ed25519_key"))
+        e2ee.trustRemoteDeviceOnFirstUse(senderId, envelope.senderDeviceId, senderDevice.curve25519Key, senderDevice.ed25519Key)
         val recipient = envelope.recipients.singleOrNull {
             it.userId == uid && it.deviceId == myDeviceId
         } ?: throw IOException("Это групповое сообщение не адресовано данному устройству")
