@@ -111,8 +111,10 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
         put(userId, "chats", array.toString())
     }
 
-    fun readChats(userId: String): List<ChatItem> = runCatching {
-        val array = JSONArray(get(userId, "chats") ?: return emptyList())
+    fun readChats(userId: String): List<ChatItem> {
+        val raw = get(userId, "chats") ?: return emptyList()
+        return runCatching {
+        val array = JSONArray(raw)
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val id = item.optString("id")
@@ -127,7 +129,8 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
                 peerUserId = item.optString("peer").takeIf { it.isNotBlank() && it != "null" }
             )
         }
-    }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList())
+    }
 
     fun saveMessages(userId: String, chatId: String, messages: List<MessageItem>) {
         val array = JSONArray()
@@ -151,8 +154,10 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
         put(userId, "messages:$chatId", array.toString())
     }
 
-    fun readMessages(userId: String, chatId: String): List<MessageItem> = runCatching {
-        val array = JSONArray(get(userId, "messages:$chatId") ?: return emptyList())
+    fun readMessages(userId: String, chatId: String): List<MessageItem> {
+        val raw = get(userId, "messages:$chatId") ?: return emptyList()
+        return runCatching {
+        val array = JSONArray(raw)
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val id = item.optString("id")
@@ -173,7 +178,8 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
                 mediaMimeType = item.optString("mediaMime").takeIf { it.isNotBlank() && it != "null" }
             )
         }
-    }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList())
+    }
 
     fun clearUser(userId: String) {
         if (userId.isNotBlank()) writableDatabase.delete(TABLE, "user_id=?", arrayOf(userId))
