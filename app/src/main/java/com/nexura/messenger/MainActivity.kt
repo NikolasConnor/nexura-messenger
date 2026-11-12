@@ -447,6 +447,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             try {
                 val latestChats = api.chats()
                 chats = latestChats
+                // ChatItem intentionally contains no server-side plaintext preview: message bodies are E2EE.
+                // Seed each row from this account's encrypted-at-rest local message cache.
+                val cachedPreviews = withContext(Dispatchers.IO) {
+                    latestChats.mapNotNull { chat ->
+                        localCache.readMessages(store.userId.orEmpty(), chat.id)
+                            .maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            ?.let { chat.id to chatMessagePreview(it, store.userId.orEmpty()) }
+                    }
+                }
+                chatPreviews.clear()
+                cachedPreviews.forEach { (chatId, preview) -> chatPreviews[chatId] = preview }
                 withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
                 error = ""
             } catch (e: Exception) {
@@ -853,6 +864,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             )
                         }
                         if (latest.isNotEmpty()) {
+                            val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            // Keep the chat-list row in sync even when the changed conversation is not open.
+                            // Only decrypted plaintext returned by the existing E2EE path is eligible.
+                            if (newest != null && !newest.content.startsWith("🔒") && !newest.content.startsWith("⚠")) {
+                                chatPreviews[changedChatId] = chatMessagePreview(newest, store.userId.orEmpty())
+                            }
                             val base = if (selected?.id == changedChatId) messages else cached
                             val merged = (base + latest).distinctBy { it.id }
                                 .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
