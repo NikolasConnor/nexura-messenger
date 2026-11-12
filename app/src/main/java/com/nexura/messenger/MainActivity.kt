@@ -180,6 +180,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chatSearchQuery by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
     var searching by remember { mutableStateOf(false) }
+    var openingDirectUserId by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var homeTab by remember { mutableStateOf("chats") }
     var deviceContacts by remember { mutableStateOf(emptyList<DeviceContact>()) }
@@ -1151,7 +1152,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         OutlinedTextField(
                                             value = groupSearch,
-                                            onValueChange = { groupSearch = it },
+                                            onValueChange = { groupSearch = it; groupUsers = emptyList(); error = "" },
                                             modifier = Modifier.weight(1f),
                                             singleLine = true,
                                             placeholder = { Text("Имя или username") },
@@ -1160,17 +1161,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             colors = authFieldColors(),
                                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                             keyboardActions = KeyboardActions(onSearch = {
-                                                if (groupSearch.length >= 2) scope.launch {
+                                                if (groupSearch.trim().length >= 2 && !searching) scope.launch {
+                                                    searching = true
+                                                    error = ""
                                                     try { groupUsers = api.findUsers(groupSearch) }
                                                     catch (e: Exception) { error = e.message ?: "Не удалось найти участников" }
+                                                    finally { searching = false }
                                                 }
                                             })
                                         )
                                         IconButton(
                                             onClick = {
-                                                if (groupSearch.length >= 2) scope.launch {
+                                                if (groupSearch.trim().length >= 2 && !searching) scope.launch {
+                                                    searching = true
+                                                    error = ""
                                                     try { groupUsers = api.findUsers(groupSearch) }
                                                     catch (e: Exception) { error = e.message ?: "Не удалось найти участников" }
+                                                    finally { searching = false }
                                                 }
                                             },
                                             enabled = groupSearch.length >= 2 && !searching
@@ -1382,22 +1389,40 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Text("Результаты поиска", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
                             users.forEach { user ->
                                 Row(
-                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surface1).clickable {
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surface1).clickable(
+                                        enabled = openingDirectUserId == null
+                                    ) {
+                                        if (openingDirectUserId != null) return@clickable
+                                        openingDirectUserId = user.id
                                         scope.launch {
+                                            error = ""
                                             try {
+                                                // The RPC is idempotent for a user pair; refresh the list and
+                                                // reuse the canonical chat instead of adding a duplicate locally.
                                                 val id = api.createDirect(user.id)
-                                                val chat = ChatItem(id, user.displayName, "direct", null, avatar = user.avatar, peerUserId = user.id)
-                                                selected = chat
+                                                val refreshedChats = api.chats()
+                                                chats = refreshedChats
+                                                val chat = refreshedChats.firstOrNull { it.id == id }
+                                                    ?: ChatItem(id, user.displayName, "direct", null, avatar = user.avatar, peerUserId = user.id)
+                                                if (refreshedChats.none { it.id == id }) chats = refreshedChats + chat
                                                 openChat(chat)
-                                                loadChats()
-                                            } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
+                                                homeTab = "chats"
+                                            } catch (e: Exception) {
+                                                error = e.message ?: "Не удалось открыть чат"
+                                            } finally {
+                                                openingDirectUserId = null
+                                            }
                                         }
                                     }.padding(vertical = 11.dp, horizontal = 11.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Avatar(user.displayName, user.avatar)
                                     Text(user.displayName, color = MainText, modifier = Modifier.padding(start = 12.dp).weight(1f))
-                                    Text("Написать", color = Accent, fontSize = 12.sp)
+                                    Text(
+                                        if (openingDirectUserId == user.id) "Открываем…" else "Написать",
+                                        color = if (openingDirectUserId == null || openingDirectUserId == user.id) Accent else SecondaryText,
+                                        fontSize = 12.sp
+                                    )
                                 }
                             }
                         }
