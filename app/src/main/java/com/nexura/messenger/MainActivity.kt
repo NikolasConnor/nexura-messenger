@@ -1711,7 +1711,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
                                                 Text(chatPreviews[chat.id] ?: if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp).weight(1f), maxLines = 1)
-                                                Spacer(Modifier.weight(1f))
                                                 if (chat.unreadCount > 0) {
                                                     Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
                                                         Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
