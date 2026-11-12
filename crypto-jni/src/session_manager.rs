@@ -171,6 +171,34 @@ mod tests {
     }
 
     #[test]
+    fn invalidates_only_the_requested_user_namespace() {
+        let manager = SessionManager::new(4);
+        let first = manager.get_or_load("user-a|chat-1", sample_session).unwrap();
+        let second = manager.get_or_load("user-a|chat-2", sample_session).unwrap();
+        let other = manager.get_or_load("user-b|chat-1", sample_session).unwrap();
+        drop((first, second, other));
+
+        manager.invalidate_prefix("user-a|").unwrap();
+
+        assert_eq!(manager.cached_count().unwrap(), 1);
+        assert!(manager.get_or_load("user-b|chat-1", || panic!("other user's session must remain cached")).is_ok());
+    }
+
+    #[test]
+    fn namespace_invalidation_is_all_or_nothing_when_session_is_in_use() {
+        let manager = SessionManager::new(4);
+        let first = manager.get_or_load("user-a|chat-1", sample_session).unwrap();
+        let second = manager.get_or_load("user-a|chat-2", sample_session).unwrap();
+        drop(second);
+
+        assert!(manager.invalidate_prefix("user-a|").is_err());
+        assert_eq!(manager.cached_count().unwrap(), 2);
+        drop(first);
+        manager.invalidate_prefix("user-a|").unwrap();
+        assert_eq!(manager.cached_count().unwrap(), 0);
+    }
+
+    #[test]
     fn evicted_session_can_be_restored_from_pickle() {
         let manager = SessionManager::new(1);
         let original = sample_session().unwrap();
