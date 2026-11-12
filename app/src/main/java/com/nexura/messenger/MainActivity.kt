@@ -91,7 +91,6 @@ import com.nexura.messenger.data.*
 import com.nexura.messenger.calls.NexuraCallDialog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -669,24 +668,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     pendingIncomingCallerId = null
                     pendingIncomingVideo = false
                     pendingCallAction = "show"
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(signedIn, e2eeClient, chats.map { it.id }) {
-        val client = e2eeClient
-        if (signedIn && client != null && !e2eeRecoveryRequired) {
-            // Populate previews from the newest decrypted message without blocking chat opening.
-            chats.take(30).chunked(5).forEach { batch ->
-                val previews = kotlinx.coroutines.coroutineScope {
-                    batch.map { chat -> async(Dispatchers.IO) {
-                        val latest = runCatching { api.messages(chat.id, client, pageSize = 1).lastOrNull() }.getOrNull()
-                        chat.id to latest
-                    } }.awaitAll()
-                }
-                previews.forEach { (chatId, latest) ->
-                    if (latest != null) chatPreviews[chatId] = chatMessagePreview(latest, store.userId.orEmpty())
                 }
             }
         }
