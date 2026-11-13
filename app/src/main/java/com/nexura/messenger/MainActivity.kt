@@ -51,7 +51,6 @@ import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
