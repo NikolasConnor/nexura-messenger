@@ -25,6 +25,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateColorAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -2538,6 +2548,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
                                             )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                                .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
                                                     onClick = { },
                                                     onLongClick = { openMessageMenu = msg.id }
@@ -2747,20 +2758,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
                                                             listOf("👍", "❤️", "😂", "😮", "😢", "🔥", "👏", "🙏").forEach { emoji ->
-                                                                Box(
-                                                                    Modifier.size(34.dp).clip(CircleShape)
-                                                                        .background(Surface2)
-                                                                        .clickable {
-                                                                            openMessageMenu = null
-                                                                            scope.launch {
-                                                                                try {
-                                                                                    api.toggleMessageReaction(chat.id, msg.id, emoji)
-                                                                                    messageReactions = api.messageReactions(chat.id)
-                                                                                } catch (e: Exception) { error = e.message ?: "Не удалось поставить реакцию" }
-                                                                            }
-                                                                        },
-                                                                    contentAlignment = Alignment.Center
-                                                                ) { Text(emoji, fontSize = 19.sp) }
+                                                                AnimatedReactionPickerItem(
+                                                                    emoji = emoji,
+                                                                    onClick = {
+                                                                        openMessageMenu = null
+                                                                        scope.launch {
+                                                                            try {
+                                                                                api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                                messageReactions = api.messageReactions(chat.id)
+                                                                            } catch (e: Exception) { error = e.message ?: "Не удалось поставить реакцию" }
+                                                                        }
+                                                                    }
+                                                                )
                                                             }
                                                         }
                                                         if (canManagePins) {
@@ -2816,36 +2825,33 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 }
                                             }
                                             val reactionsForMessage = messageReactions[msg.id].orEmpty()
-                                            if (reactionsForMessage.isNotEmpty()) {
+                                            AnimatedVisibility(
+                                                visible = reactionsForMessage.isNotEmpty(),
+                                                enter = fadeIn() + expandVertically(),
+                                                exit = fadeOut() + shrinkVertically()
+                                            ) {
                                                 Row(
                                                     Modifier.fillMaxWidth().padding(top = 7.dp),
                                                     horizontalArrangement = Arrangement.Start,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     reactionsForMessage.forEach { reaction ->
-                                                        Row(
-                                                            Modifier.padding(end = 6.dp).clip(RoundedCornerShape(18.dp))
-                                                                .background(if (reaction.selectedByMe) Accent.copy(alpha = 0.30f) else Surface2)
-                                                                .border(
-                                                                    1.dp,
-                                                                    if (reaction.selectedByMe) Accent else SecondaryText.copy(alpha = 0.20f),
-                                                                    RoundedCornerShape(18.dp)
-                                                                )
-                                                                .clickable {
-                                                                    scope.launch {
-                                                                        try {
-                                                                            api.toggleMessageReaction(chat.id, msg.id, reaction.emoji)
-                                                                            messageReactions = api.messageReactions(chat.id)
-                                                                        } catch (e: Exception) { error = e.message ?: "Не удалось изменить реакцию" }
-                                                                    }
-                                                                }.padding(horizontal = 10.dp, vertical = 6.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Text(reaction.emoji, fontSize = 14.sp)
-                                                            Text(" ${reaction.count}", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                                        }
+                                                        AnimatedReactionChip(
+                                                            emoji = reaction.emoji,
+                                                            count = reaction.count,
+                                                            selected = reaction.selectedByMe,
+                                                            onClick = {
+                                                                scope.launch {
+                                                                    try {
+                                                                        api.toggleMessageReaction(chat.id, msg.id, reaction.emoji)
+                                                                        messageReactions = api.messageReactions(chat.id)
+                                                                    } catch (e: Exception) { error = e.message ?: "Не удалось изменить реакцию" }
+                                                                }
+                                                            }
+                                                        )
                                                     }
                                                 }
+                                            }
                                             }
                                         }
                                     }
@@ -3258,6 +3264,61 @@ private fun chatMessagePreview(message: MessageItem, ownUserId: String): String 
     }
     val prefix = if (message.senderId == ownUserId) "Вы: " else ""
     return (prefix + body).replace(Regex("\\s+"), " ").take(100)
+}
+
+@Composable
+private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
+    var pressed by remember(emoji) { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 1.22f else 1f,
+        animationSpec = spring(dampingRatio = 0.38f, stiffness = 620f),
+        label = "reaction-picker-scale"
+    )
+    LaunchedEffect(pressed) {
+        if (pressed) {
+            delay(150)
+            pressed = false
+        }
+    }
+    Box(
+        Modifier.size(36.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape).background(Surface2)
+            .clickable { pressed = true; onClick() },
+        contentAlignment = Alignment.Center
+    ) { Text(emoji, fontSize = 20.sp) }
+}
+
+@Composable
+private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+    var pulse by remember(emoji) { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (pulse || selected) 1.08f else 1f,
+        animationSpec = spring(dampingRatio = 0.42f, stiffness = 500f),
+        label = "reaction-chip-scale"
+    )
+    val chipColor by animateColorAsState(
+        targetValue = if (selected) Accent.copy(alpha = 0.30f) else Surface2,
+        animationSpec = spring(stiffness = 420f),
+        label = "reaction-chip-color"
+    )
+    LaunchedEffect(pulse) {
+        if (pulse) {
+            delay(180)
+            pulse = false
+        }
+    }
+    Row(
+        Modifier.padding(end = 6.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(18.dp)).background(chipColor)
+            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.20f), RoundedCornerShape(18.dp))
+            .clickable { pulse = true; onClick() }
+            .animateContentSize(spring(dampingRatio = 0.78f, stiffness = 520f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(emoji, fontSize = 14.sp)
+        Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 @Composable
