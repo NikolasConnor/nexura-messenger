@@ -82,21 +82,29 @@ class CallCoordinator(
             peerUserId,
             { signal -> scope.launch { receive(signal) } },
             {
-                ready = true
-                val previous = lastState
-                if (previous?.active == true) {
-                    publish(previous.copy(status = if (previous.connected) "На связи" else "Соединяем…", error = null))
-                } else {
-                    publish(CallUiState(status = "Готово к звонку"))
+                // OkHttp invokes WebSocket callbacks off the main thread. All coordinator
+                // state and Compose UI updates must be serialized on the main dispatcher.
+                scope.launch {
+                    if (closed) return@launch
+                    ready = true
+                    val previous = lastState
+                    if (previous?.active == true) {
+                        publish(previous.copy(status = if (previous.connected) "На связи" else "Соединяем…", error = null))
+                    } else {
+                        publish(CallUiState(status = "Готово к звонку"))
+                    }
                 }
             },
             { message ->
-                ready = false
-                val previous = lastState ?: CallUiState()
-                publish(previous.copy(
-                    status = if (previous.active) "Восстанавливаем связь…" else "Ошибка связи",
-                    error = message
-                ))
+                scope.launch {
+                    if (closed) return@launch
+                    ready = false
+                    val previous = lastState ?: CallUiState()
+                    publish(previous.copy(
+                        status = if (previous.active) "Восстанавливаем связь…" else "Ошибка связи",
+                        error = message
+                    ))
+                }
             }
         )
     }
@@ -464,7 +472,16 @@ class CallCoordinator(
     private fun send(
         signal: JSONObject,
         onAcknowledged: ((Boolean, String?) -> Unit)? = null
-    ): Boolean = signaling?.sendSignal(signal, onAcknowledged) == true
+    ): Boolean {
+        val mainThreadCallback = onAcknowledged?.let { callback ->
+            { accepted: Boolean, detail: String? ->
+                scope.launch {
+                    if (!closed) callback(accepted, detail)
+                }
+            }
+        }
+        return signaling?.sendSignal(signal, mainThreadCallback) == true
+    }
 
     private fun endSignal(id: String) = JSONObject()
         .put("type", "end").put("call_id", id).put("from", ownUserId).put("to", peerUserId)
