@@ -1917,7 +1917,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     try {
                                         val client = e2eeClient ?: throw IllegalStateException("Не удалось сохранить историю звонка: E2EE не готово")
                                         val record = org.json.JSONObject()
-                                            .put("kind", if (video) "video" else "audio")
+                                            .put("kind", "audio")
                                             .put("duration_seconds", duration)
                                             .put("direction", if (outgoing) "outgoing" else "incoming")
                                             .put("result", result)
@@ -2341,12 +2341,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }) {
                                     Icon(Icons.Default.Call, "Голосовой звонок", tint = Accent)
                                 }
-                                IconButton(onClick = {
-                                    pendingCallAction = "start_video"
-                                    showCallDialog = true
-                                }) {
-                                    Icon(Icons.Default.Videocam, "Видеозвонок", tint = Accent)
-                                }
                             }
                             IconButton(onClick = { chatThemeOpen = true }) {
                                 Icon(Icons.Default.Palette, "Оформление чата", tint = if (chatThemeOpen) Accent else SecondaryText)
@@ -2574,7 +2568,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                             if (msg.messageType == "call" && msg.encrypted) {
                                                 val call = runCatching { org.json.JSONObject(msg.content) }.getOrNull()
-                                                val video = call?.optString("kind") == "video"
                                                 val outgoing = call?.optString("direction") == "outgoing"
                                                 val duration = call?.optLong("duration_seconds", 0L) ?: 0L
                                                 val minutes = duration / 60L
@@ -2582,11 +2575,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 val result = call?.optString("result").orEmpty()
                                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                                     Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF253C56)), contentAlignment = Alignment.Center) {
-                                                        Icon(if (video) Icons.Default.Videocam else Icons.Default.Call, null, tint = Color.White)
+                                                        Icon(Icons.Default.Call, null, tint = Color.White)
                                                     }
                                                     Column {
                                                         Text(
-                                                            (if (outgoing) "Исходящий " else "Входящий ") + if (video) "видеозвонок" else "аудиозвонок",
+                                                            (if (outgoing) "Исходящий " else "Входящий ") + "аудиозвонок",
                                                             color = MainText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
                                                         )
                                                         Text(
