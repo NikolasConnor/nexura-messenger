@@ -939,7 +939,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 // Realtime is only a sync hint. Count newly fetched, successfully
                                 // decrypted incoming messages once; local cache cursor prevents
                                 // duplicate notifications from inflating the unread badge.
-                                val incomingCount = latest.count {
+                                // Without a local cursor this is an initial history snapshot, not a delta.
+                                // The server-provided unread count is authoritative in that case.
+                                val incomingCount = if (newestCached == null) 0 else latest.count {
                                     it.senderId != store.userId && !it.content.startsWith("🔒") &&
                                         !it.content.startsWith("⚠")
                                 }
@@ -998,7 +1000,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 }
                             } else {
-                                val incomingCount = latest.count {
+                                // A first-time history fetch is not an unread delta.
+                                val incomingCount = if (newestCached == null) 0 else latest.count {
                                     it.senderId != userId && !it.content.startsWith("🔒") &&
                                         !it.content.startsWith("⚠")
                                 }
