@@ -75,6 +75,7 @@ class NexuraApi(private val store: SessionStore) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
+        .callTimeout(35, TimeUnit.SECONDS)
         .writeTimeout(25, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
@@ -165,6 +166,10 @@ class NexuraApi(private val store: SessionStore) {
         val result = JSONObject(call("/auth/v1/token?grant_type=password", "POST",
             JSONObject().put("email", email).put("password", password).toString(), auth = false))
         saveSession(result)
+        if (store.accessToken.isNullOrBlank() || store.refreshToken.isNullOrBlank() || store.userId.isNullOrBlank()) {
+            store.clear()
+            throw IOException("Supabase подтвердил вход, но не вернул полную сессию. Повторите вход.")
+        }
     }
     suspend fun signUp(email: String, password: String, displayName: String) {
         val redirect = java.net.URLEncoder.encode(AUTH_REDIRECT, "UTF-8")
