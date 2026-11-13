@@ -473,13 +473,15 @@ class CallCoordinator(
         signal: JSONObject,
         onAcknowledged: ((Boolean, String?) -> Unit)? = null
     ): Boolean {
-        val mainThreadCallback = onAcknowledged?.let { callback ->
-            { accepted: Boolean, detail: String? ->
-                scope.launch {
-                    if (!closed) callback(accepted, detail)
+        val mainThreadCallback: ((Boolean, String?) -> Unit)? =
+            onAcknowledged?.let { callback ->
+                { accepted: Boolean, detail: String? ->
+                    scope.launch {
+                        if (!closed) callback(accepted, detail)
+                    }
+                    Unit
                 }
             }
-        }
         return signaling?.sendSignal(signal, mainThreadCallback) == true
     }
 
