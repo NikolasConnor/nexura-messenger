@@ -73,10 +73,10 @@ class NexuraApi(private val store: SessionStore) {
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .callTimeout(35, TimeUnit.SECONDS)
-        .writeTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(40, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
@@ -85,6 +85,26 @@ class NexuraApi(private val store: SessionStore) {
     // Supabase rotates refresh tokens. Serialize refreshes so simultaneous 401 responses
     // cannot race and invalidate the token another request has just stored.
     private val refreshMutex = Mutex()
+
+    private suspend fun executeWithTransientRetry(
+        request: Request,
+        allowRetry: Boolean
+    ): okhttp3.Response {
+        var retries = 0
+        while (true) {
+            try {
+                return client.newCall(request).execute()
+            } catch (e: IOException) {
+                val transientSocketFailure =
+                    e is java.net.SocketException ||
+                    e is java.net.SocketTimeoutException ||
+                    e is java.net.UnknownHostException
+                if (!allowRetry || !transientSocketFailure || retries >= 1) throw e
+                retries++
+                kotlinx.coroutines.delay(900L)
+            }
+        }
+    }
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
@@ -104,7 +124,11 @@ class NexuraApi(private val store: SessionStore) {
         }
 
         val refreshTokenAtRequestStart = if (auth) store.refreshToken else null
-        var response = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
+        val initialRequest = buildRequest(if (auth) store.accessToken else null)
+        // Retry only safe reads and password sign-in. Never blindly replay message,
+        // upload, refresh-token, or other state-changing requests after a broken socket.
+        val safeToRetry = method == "GET" || path == "/auth/v1/token?grant_type=password"
+        var response = executeWithTransientRetry(initialRequest, safeToRetry)
         // Refresh an expired access token once, then retry the original request.
         // If another request already rotated the token, reuse its fresh access token.
         if (response.code == 401 && auth) {
