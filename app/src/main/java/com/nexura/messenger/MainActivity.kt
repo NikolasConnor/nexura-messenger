@@ -894,7 +894,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 realtimeConnected = event.connected
                 val changedChatId = event.changedConversationId
                 if (event.connected && event.messageChanged && changedChatId != null && e2eeClient != null) {
-                    conversationSyncMutex.withLock {
                     runCatching {
                         val cached = withContext(Dispatchers.IO) {
                             localCache.readMessages(store.userId.orEmpty(), changedChatId)
@@ -923,8 +922,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             if (selected?.id == changedChatId) {
                                 messages = merged
-                                // The open conversation is already visible; its read marker is
-                                // advanced by the existing markChatRead path, so don't add a badge.
                                 val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                                 if (newest != null) {
                                     val timestamp = lastSyncedMessageTimestamp
@@ -933,83 +930,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         (newest.createdAt == timestamp && newest.id > id.orEmpty())) {
                                         lastSyncedMessageTimestamp = newest.createdAt
                                         lastSyncedMessageId = newest.id
-                                    }
-                                }
-                            } else {
-                                // Realtime is only a sync hint. Count newly fetched, successfully
-                                // decrypted incoming messages once; local cache cursor prevents
-                                // duplicate notifications from inflating the unread badge.
-                                // Without a local cursor this is an initial history snapshot, not a delta.
-                                // The server-provided unread count is authoritative in that case.
-                                val incomingCount = if (newestCached == null) 0 else latest.count {
-                                    it.senderId != store.userId && !it.content.startsWith("🔒") &&
-                                        !it.content.startsWith("⚠")
-                                }
-                                if (incomingCount > 0) {
-                                    chats = chats.map { chat ->
-                                        if (chat.id == changedChatId) {
-                                            chat.copy(unreadCount = chat.unreadCount + incomingCount)
-                                        } else chat
-                                    }
-                                }
-                            }
-
-                    }
-                }
-            }
-        }
-    }
-    }
-
-    // A successful Realtime re-subscription is also a catch-up checkpoint.
-    // Events may have been missed while the app was stopped or the network was unavailable.
-    // Fetch from each chat's encrypted local-cache cursor; only decrypted messages update UI.
-    LaunchedEffect(signedIn, realtimeConnected, chats.map { it.id }.take(50)) {
-        val client = e2eeClient
-        if (signedIn && realtimeConnected && client != null) {
-            val userId = store.userId.orEmpty()
-            chats.map { it.id }.take(50).forEach { chatId ->
-                conversationSyncMutex.withLock {
-                    runCatching {
-                        val cached = withContext(Dispatchers.IO) {
-                            localCache.readMessages(userId, chatId)
-                        }
-                        val newestCached = cached.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                        val latest = if (newestCached == null) {
-                            api.messages(chatId, client, pageSize = 20)
-                        } else {
-                            api.messages(chatId, client, newestCached.createdAt, afterMessageId = newestCached.id)
-                        }
-                        if (latest.isNotEmpty()) {
-                            val merged = (cached + latest).distinctBy { it.id }
-                                .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                            withContext(Dispatchers.IO) { localCache.saveMessages(userId, chatId, merged) }
-                            val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                            if (newest != null && !newest.content.startsWith("🔒") && !newest.content.startsWith("⚠")) {
-                                chatPreviews[chatId] = chatMessagePreview(newest, userId)
-                            }
-                            if (selected?.id == chatId) {
-                                messages = (messages + latest).distinctBy { it.id }
-                                    .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                                if (newest != null) {
-                                    val timestamp = lastSyncedMessageTimestamp
-                                    val id = lastSyncedMessageId
-                                    if (timestamp == null || newest.createdAt > timestamp ||
-                                        (newest.createdAt == timestamp && newest.id > id.orEmpty())) {
-                                        lastSyncedMessageTimestamp = newest.createdAt
-                                        lastSyncedMessageId = newest.id
-                                    }
-                                }
-                            } else {
-                                // A first-time history fetch is not an unread delta.
-                                val incomingCount = if (newestCached == null) 0 else latest.count {
-                                    it.senderId != userId && !it.content.startsWith("🔒") &&
-                                        !it.content.startsWith("⚠")
-                                }
-                                if (incomingCount > 0) {
-                                    chats = chats.map { chat ->
-                                        if (chat.id == chatId) chat.copy(unreadCount = chat.unreadCount + incomingCount)
-                                        else chat
                                     }
                                 }
                             }
