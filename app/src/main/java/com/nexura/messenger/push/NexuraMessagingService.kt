@@ -31,6 +31,15 @@ class NexuraMessagingService : FirebaseMessagingService() {
         }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannels(manager)
+        // Match Telegram-style behavior: suppress only the chat currently open on screen.
+        // Other conversations and all background notifications remain enabled.
+        if (conversationId != null) {
+            val runtime = getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE)
+            val appVisible = runtime.getBoolean("activity_visible", false)
+            val activeConversation = runtime.getString("active_conversation_id", null)
+            if (appVisible && activeConversation == conversationId) return
+        }
+
         val notificationId = conversationId?.hashCode()
             ?: (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
