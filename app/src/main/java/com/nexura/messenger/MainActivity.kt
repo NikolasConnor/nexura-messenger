@@ -2843,7 +2843,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         }
-                        }
                         Column(
                             Modifier.fillMaxWidth()
                         ) {
@@ -2977,6 +2976,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     )
                                 }
                             }
+                        }
                         }
                         }
                     }
