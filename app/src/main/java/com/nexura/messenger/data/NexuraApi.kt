@@ -82,13 +82,15 @@ private object SupabaseDohDns : Dns {
         .connectTimeout(2500, TimeUnit.MILLISECONDS)
         .readTimeout(2500, TimeUnit.MILLISECONDS)
         .callTimeout(3500, TimeUnit.MILLISECONDS)
-        .dns { hostname ->
-            when (hostname.lowercase()) {
-                "cloudflare-dns.com" -> listOf(InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)))
-                "dns.google" -> listOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)))
-                else -> Dns.SYSTEM.lookup(hostname)
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                return when (hostname.lowercase()) {
+                    "cloudflare-dns.com" -> listOf(InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)))
+                    "dns.google" -> listOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)))
+                    else -> Dns.SYSTEM.lookup(hostname)
+                }
             }
-        }
+        })
         .build()
 
     override fun lookup(hostname: String): List<InetAddress> {
