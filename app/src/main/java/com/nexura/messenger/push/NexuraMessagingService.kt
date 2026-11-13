@@ -30,7 +30,6 @@ class NexuraMessagingService : FirebaseMessagingService() {
             it.matches(Regex("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
         }?.let { raw -> runCatching { UUID.fromString(raw).toString() }.getOrNull() }
         val callId = payload["call_id"]?.takeIf { it.length <= 64 }
-        val video = payload["video"] == "true"
         val callExpiresAt = System.currentTimeMillis() + CALL_RING_TIMEOUT_MS
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannels(manager)
@@ -43,7 +42,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
 
         val baseUri = if (conversationId != null && incomingCall && callId != null) {
             val callerId = payload["caller_id"].orEmpty()
-            "nexura://chat/$conversationId?call=1&call_id=${Uri.encode(callId)}&caller_id=${Uri.encode(callerId)}&video=$video&expires_at=$callExpiresAt"
+            "nexura://chat/$conversationId?call=1&call_id=${Uri.encode(callId)}&caller_id=${Uri.encode(callerId)}&expires_at=$callExpiresAt"
         } else if (conversationId != null) {
             "nexura://chat/$conversationId"
         } else {
@@ -68,7 +67,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
         // Chat pushes deliberately never display sender names or message previews.
         // Treat all remote chat payload text as untrusted and keep the notification generic.
         val title = if (incomingCall) {
-            if (video) "Входящий видеозвонок" else "Входящий аудиозвонок"
+            "Входящий аудиозвонок"
         } else "Nexura"
         val body = if (incomingCall) "Вам звонят в Nexura" else "Новое сообщение"
 
@@ -159,7 +158,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
                     "Входящие звонки",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
-                    description = "Входящие аудио- и видеозвонки Nexura"
+                    description = "Входящие аудиозвонки Nexura"
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                     setBypassDnd(false)
                     setSound(
