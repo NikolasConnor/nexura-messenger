@@ -992,7 +992,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     val timestamp = lastSyncedMessageTimestamp
                                     val id = lastSyncedMessageId
                                     if (timestamp == null || newest.createdAt > timestamp ||
-                                        (timestamp == id && newest.id > id.orEmpty())) {
+                                        (newest.createdAt == timestamp && newest.id > id.orEmpty())) {
                                         lastSyncedMessageTimestamp = newest.createdAt
                                         lastSyncedMessageId = newest.id
                                     }
