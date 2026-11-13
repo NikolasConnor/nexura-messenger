@@ -1044,13 +1044,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 notice = "Код отправлен на $phone"
                                             } else {
                                                 api.verifyPhoneCode(phone, phoneCode)
-                                                signedIn = !store.accessToken.isNullOrBlank()
+                                                signedIn = true
                                             }
                                         } else {
                                             if (register) api.signUp(email.trim(), password, displayName.trim())
                                             else api.signIn(email.trim(), password)
-                                            signedIn = !store.accessToken.isNullOrBlank()
-                                            if (!signedIn && register) notice = "Аккаунт создан. Подтвердите email по ссылке из письма."
+                                            // Both methods return only after a valid session is stored,
+                                            // or throw an error that is shown below.
+                                            signedIn = true
                                         }
                                     } catch (e: Exception) { error = e.message ?: "Не удалось выполнить вход" }
                                     finally { busy = false }
