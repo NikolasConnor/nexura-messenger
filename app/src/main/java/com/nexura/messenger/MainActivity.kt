@@ -31,6 +31,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateColorAsState
 import androidx.compose.animation.core.spring
@@ -2961,6 +2962,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 )
                                 Spacer(Modifier.width(7.dp))
                                 val hasOutgoingContent = draft.isNotBlank() || pendingMediaUri != null
+                                val sendButtonScale by animateFloatAsState(
+                                    targetValue = if (hasOutgoingContent || recordingVoice) 1.06f else 1f,
+                                    animationSpec = spring(dampingRatio = 0.62f, stiffness = 420f),
+                                    label = "composer-action-scale"
+                                )
                                 IconButton(
                                     onClick = {
                                         if (hasOutgoingContent) {
@@ -2975,7 +2981,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                     },
                                     enabled = !sendingImage,
-                                    modifier = Modifier.size(46.dp).clip(CircleShape)
+                                    modifier = Modifier.size(46.dp)
+                                        .graphicsLayer { scaleX = sendButtonScale; scaleY = sendButtonScale }
+                                        .clip(CircleShape)
                                         .background(
                                             if (hasOutgoingContent || recordingVoice) Brush.linearGradient(listOf(Accent, Accent2))
                                             else Brush.linearGradient(listOf(Surface2, Surface2))
@@ -3361,16 +3369,19 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
                 }
             }
         }
-        if (hasUnread) {
+        AnimatedVisibility(
+            visible = hasUnread,
+            enter = fadeIn() + scaleIn(initialScale = 0.45f),
+            exit = fadeOut() + shrinkVertically(),
+            modifier = Modifier.align(Alignment.BottomEnd)
+        ) {
             Box(
-                Modifier.align(Alignment.BottomEnd).size(12.dp)
-                    .clip(CircleShape)
+                Modifier.size(12.dp).clip(CircleShape)
                     .background(Accent)
                     .padding(2.dp)
                     .clip(CircleShape)
                     .background(Bg)
             )
-
         }
     }
 }
