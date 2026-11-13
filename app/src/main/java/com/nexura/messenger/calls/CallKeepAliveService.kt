@@ -22,10 +22,9 @@ class CallKeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val video = intent?.getBooleanExtra(EXTRA_VIDEO, false) == true
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle(if (video) "Видеозвонок Nexura" else "Звонок Nexura")
+            .setContentTitle("Аудиозвонок Nexura")
             .setContentText("Звонок продолжается")
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
@@ -33,9 +32,7 @@ class CallKeepAliveService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            if (video) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            startForeground(NOTIFICATION_ID, notification, type)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -45,7 +42,6 @@ class CallKeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        const val EXTRA_VIDEO = "video"
         private const val CHANNEL_ID = "nexura_active_call"
         private const val NOTIFICATION_ID = 7402
     }
