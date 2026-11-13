@@ -181,6 +181,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var busy by remember { mutableStateOf(false) }
     var chats by remember { mutableStateOf(emptyList<ChatItem>()) }
     var selected by remember { mutableStateOf<ChatItem?>(null) }
+
+    // Avoid showing a push for the conversation the user is already reading.
+    // The Activity visibility flag ensures this never suppresses notifications in the background.
+    LaunchedEffect(selected?.id) {
+        context.getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE)
+            .edit().putString("active_conversation_id", selected?.id).apply()
+    }
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
     var messageReactions by remember { mutableStateOf(emptyMap<String, List<MessageReaction>>()) }
     var pinnedMessageId by remember { mutableStateOf<String?>(null) }
