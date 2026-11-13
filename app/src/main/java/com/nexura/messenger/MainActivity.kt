@@ -70,6 +70,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -2603,7 +2604,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             } else if (msg.messageType == "media" && msg.encrypted) {
                                                 val mediaUri = Uri.parse(msg.content)
                                                 if (msg.mediaKind == "audio") {
-                                                    AudioMessagePlayer(mediaUri, msg.mediaCaption)
+                                                    AudioMessagePlayer(mediaUri, msg.mediaCaption, msg.mediaFileName, msg.mediaMimeType)
                                                 } else if (msg.mediaKind == "video") {
                                                     Box(
                                                         Modifier.width(230.dp).height(150.dp).clip(RoundedCornerShape(12.dp))
@@ -3067,79 +3068,176 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
 
 @Composable
-private fun AudioMessagePlayer(uri: Uri, caption: String?) {
+private fun AudioMessagePlayer(
+    uri: Uri,
+    caption: String?,
+    fileName: String?,
+    mimeType: String?
+) {
     val context = LocalContext.current
     var player by remember(uri) { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember(uri) { mutableStateOf(false) }
     var loading by remember(uri) { mutableStateOf(false) }
-    DisposableEffect(uri) {
-        onDispose {
-            runCatching { player?.stop() }
-            runCatching { player?.release() }
-            player = null
+    var prepared by remember(uri) { mutableStateOf(false) }
+    var durationMs by remember(uri) { mutableLongStateOf(0L) }
+    var positionMs by remember(uri) { mutableLongStateOf(0L) }
+    val activePlayer = rememberUpdatedState(player)
+
+    LaunchedEffect(player, playing, prepared) {
+        while (playing && prepared) {
+            val current = player ?: break
+            if (!runCatching { current.isPlaying }.getOrDefault(false)) break
+            positionMs = runCatching { current.currentPosition.toLong() }.getOrDefault(positionMs)
+            delay(250)
         }
     }
-    Row(
-        Modifier.widthIn(min = 220.dp, max = 270.dp).clip(RoundedCornerShape(17.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF2B2044), Surface2)))
-            .border(1.dp, Accent.copy(alpha = 0.22f), RoundedCornerShape(17.dp))
-            .padding(horizontal = 11.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+
+    DisposableEffect(uri) {
+        onDispose {
+            runCatching { activePlayer.value?.stop() }
+            runCatching { activePlayer.value?.release() }
+        }
+    }
+
+    fun formatTime(value: Long): String {
+        val seconds = (value.coerceAtLeast(0L) / 1000L)
+        return String.format(Locale.getDefault(), "%d:%02d", seconds / 60L, seconds % 60L)
+    }
+
+    val title = fileName?.takeIf { it.isNotBlank() && it != "voice.m4a" }
+        ?: if (mimeType?.startsWith("audio/") == true) "Аудиофайл" else "Голосовое сообщение"
+    val subtitle = caption?.takeIf { it.isNotBlank() } ?: mimeType?.uppercase(Locale.getDefault()) ?: "ЗАЩИЩЁННОЕ АУДИО"
+
+    Column(
+        Modifier.widthIn(min = 245.dp, max = 300.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF30234B), Surface2)))
+            .border(1.dp, Accent.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
+            .padding(horizontal = 12.dp, vertical = 11.dp)
     ) {
-        IconButton(
-            onClick = {
-                if (playing) {
-                    runCatching { player?.pause() }
-                    playing = false
-                } else if (player != null) {
-                    runCatching { player?.start(); playing = true }
-                } else {
-                    loading = true
-                    try {
-                        val next = MediaPlayer()
-                        player = next
-                        next.setDataSource(context, uri)
-                        next.setOnPreparedListener {
-                            loading = false
-                            it.start()
-                            playing = true
-                        }
-                        next.setOnCompletionListener {
-                            playing = false
-                            runCatching { it.seekTo(0) }
-                        }
-                        next.setOnErrorListener { mp, _, _ ->
-                            loading = false
-                            playing = false
-                            runCatching { mp.release() }
-                            player = null
-                            Toast.makeText(context, "Не удалось воспроизвести аудио", Toast.LENGTH_SHORT).show()
-                            true
-                        }
-                        next.prepareAsync()
-                    } catch (_: Exception) {
-                        loading = false
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = {
+                    if (playing) {
+                        runCatching { player?.pause() }
                         playing = false
-                        runCatching { player?.release() }
-                        player = null
-                        Toast.makeText(context, "Не удалось открыть голосовое сообщение", Toast.LENGTH_SHORT).show()
+                    } else if (prepared && player != null) {
+                        runCatching {
+                            if (positionMs >= durationMs && durationMs > 0L) {
+                                player?.seekTo(0)
+                                positionMs = 0L
+                            }
+                            player?.start()
+                            playing = true
+                        }.onFailure {
+                            Toast.makeText(context, "Не удалось продолжить аудио", Toast.LENGTH_SHORT).show()
+                        }
+                    } else if (!loading) {
+                        loading = true
+                        try {
+                            val next = MediaPlayer()
+                            player = next
+                            next.setOnPreparedListener { mp ->
+                                durationMs = mp.duration.toLong().coerceAtLeast(0L)
+                                positionMs = 0L
+                                prepared = true
+                                loading = false
+                                mp.start()
+                                playing = true
+                            }
+                            next.setOnCompletionListener { mp ->
+                                playing = false
+                                positionMs = 0L
+                                runCatching { mp.seekTo(0) }
+                            }
+                            next.setOnErrorListener { mp, _, _ ->
+                                loading = false
+                                prepared = false
+                                playing = false
+                                runCatching { mp.release() }
+                                player = null
+                                Toast.makeText(context, "Не удалось воспроизвести аудио", Toast.LENGTH_SHORT).show()
+                                true
+                            }
+                            next.setDataSource(context, uri)
+                            next.prepareAsync()
+                        } catch (_: Exception) {
+                            loading = false
+                            prepared = false
+                            playing = false
+                            runCatching { player?.release() }
+                            player = null
+                            Toast.makeText(context, "Не удалось открыть аудиофайл", Toast.LENGTH_SHORT).show()
+                        }
                     }
+                },
+                modifier = Modifier.size(48.dp).clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(Accent, Accent2)))
+            ) {
+                if (loading) CircularProgressIndicator(Modifier.size(21.dp), color = Bg, strokeWidth = 2.dp)
+                else Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (playing) "Пауза" else "Воспроизвести",
+                    tint = Bg,
+                    modifier = Modifier.size(27.dp)
+                )
+            }
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(
+                    title,
+                    color = MainText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                Text(
+                    subtitle,
+                    color = SecondaryText,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = 3.dp)
+                )
+            }
+            Icon(
+                Icons.Default.GraphicEq,
+                contentDescription = "Аудио",
+                tint = Accent,
+                modifier = Modifier.padding(start = 6.dp).size(22.dp)
+            )
+        }
+        Slider(
+            value = if (durationMs > 0L) positionMs.coerceIn(0L, durationMs).toFloat() else 0f,
+            onValueChange = { positionMs = it.toLong() },
+            onValueChangeFinished = {
+                if (prepared && durationMs > 0L) {
+                    val target = positionMs.coerceIn(0L, durationMs).toInt()
+                    runCatching { player?.seekTo(target) }
+                    if (playing) runCatching { player?.start() }
                 }
             },
-            modifier = Modifier.size(46.dp).clip(CircleShape)
-                .background(Brush.linearGradient(listOf(Accent, Accent2)))
-        ) {
-            if (loading) CircularProgressIndicator(Modifier.size(21.dp), color = Bg, strokeWidth = 2.dp)
-            else Icon(if (playing) Icons.Default.Stop else Icons.Default.PlayArrow,
-                if (playing) "Остановить голосовое" else "Прослушать голосовое", tint = Bg, modifier = Modifier.size(26.dp))
+            valueRange = 0f..(durationMs.coerceAtLeast(1L).toFloat()),
+            enabled = prepared && durationMs > 0L,
+            modifier = Modifier.fillMaxWidth().height(25.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Accent,
+                activeTrackColor = Accent,
+                inactiveTrackColor = SecondaryText.copy(alpha = 0.28f)
+            )
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                if (loading) "Загрузка…" else formatTime(positionMs),
+                color = SecondaryText,
+                fontSize = 10.sp,
+                fontFeatureSettings = "tnum"
+            )
+            Text(
+                if (durationMs > 0L) formatTime(durationMs) else "--:--",
+                color = SecondaryText,
+                fontSize = 10.sp,
+                fontFeatureSettings = "tnum"
+            )
         }
-        Column(Modifier.weight(1f).padding(start = 11.dp)) {
-            Text("ГОЛОСОВОЕ СООБЩЕНИЕ", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp, maxLines = 1)
-            Text(caption?.takeIf { it.isNotBlank() } ?: "Защищённое аудио", color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2, modifier = Modifier.padding(top = 3.dp))
-            Text(if (playing) "Воспроизводится" else if (loading) "Загрузка аудио…" else "Нажмите для прослушивания",
-                color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-        }
-        Icon(Icons.Default.Mic, null, tint = Accent.copy(alpha = 0.8f), modifier = Modifier.padding(start = 5.dp).size(18.dp))
     }
 }
 
