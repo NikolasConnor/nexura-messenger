@@ -7,6 +7,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,7 @@ class CallSignalingClient(
     @Volatile private var errorDelivered = false
     private var reconnectAttempt = 0
     private var reconnectJob: Job? = null
+    private val pendingBroadcastAcks = ConcurrentHashMap<String, (Boolean, String?) -> Unit>()
 
     init {
         connectSocket()
@@ -100,23 +102,42 @@ class CallSignalingClient(
                     when (message.optString("event")) {
                         "phx_reply" -> {
                             val payload = message.optJSONObject("payload")
-                            if (payload?.optString("status") == "ok") {
-                                val topic = message.optString("topic")
-                                val allJoined = synchronized(lock) {
-                                    joined.add(topic)
-                                    joined.contains(ownTopic) && joined.contains(peerTopic)
+                            val ref = message.optString("ref")
+                            val status = payload?.optString("status")
+                            // Broadcast ACKs use UUID refs. Do not mistake them for join replies.
+                            val pendingAck = pendingBroadcastAcks.remove(ref)
+                            if (pendingAck != null) {
+                                val accepted = status == "ok"
+                                val detail = payload?.optJSONObject("response")
+                                    ?.optString("error")
+                                    ?.takeIf { !it.isNullOrBlank() }
+                                pendingAck(accepted, detail)
+                                if (!accepted) {
+                                    reportError("Realtime отклонил сигнал звонка" + (detail?.let { ": $it" } ?: ""))
                                 }
-                                if (allJoined && !readyDelivered) {
-                                    readyDelivered = true
-                                    reconnectAttempt = 0
-                                    reconnectJob?.cancel()
-                                    reconnectJob = null
-                                    errorDelivered = false
-                                    onReady()
+                            } else if (ref == "1" || ref == "2") {
+                                if (status == "ok") {
+                                    val topic = message.optString("topic")
+                                    val allJoined = synchronized(lock) {
+                                        joined.add(topic)
+                                        joined.contains(ownTopic) && joined.contains(peerTopic)
+                                    }
+                                    if (allJoined && !readyDelivered) {
+                                        readyDelivered = true
+                                        reconnectAttempt = 0
+                                        reconnectJob?.cancel()
+                                        reconnectJob = null
+                                        errorDelivered = false
+                                        onReady()
+                                    }
+                                } else if (status == "error") {
+                                    val reason = payload?.optJSONObject("response")?.optString("reason")
+                                        ?: payload?.optJSONObject("response")?.toString()
+                                        ?: "Realtime отклонил подключение"
+                                    reportError(reason)
+                                    failPendingBroadcasts("Канал сигнализации не подключился")
+                                    scheduleReconnect()
                                 }
-                            } else if (payload?.optString("status") == "error") {
-                                reportError(payload.optJSONObject("response")?.toString() ?: "Realtime отклонил подключение")
-                                scheduleReconnect()
                             }
                         }
                         "broadcast" -> {
@@ -141,6 +162,7 @@ class CallSignalingClient(
                 socket = null
                 readyDelivered = false
                 synchronized(lock) { joined.clear() }
+                failPendingBroadcasts("Соединение сигнализации прервано")
                 reportError(
                     if (response != null) "Связь с сервером звонков прервана (HTTP ${response.code}). Переподключаемся…"
                     else "Связь с сервером звонков временно прервана. Переподключаемся…"
@@ -196,23 +218,46 @@ class CallSignalingClient(
             .put("join_ref", ref).toString())
     }
 
-    fun sendSignal(signal: JSONObject): Boolean {
+    fun sendSignal(
+        signal: JSONObject,
+        onAcknowledged: ((Boolean, String?) -> Unit)? = null
+    ): Boolean {
         if (closed || !readyDelivered || !synchronized(lock) { joined.contains(peerTopic) }) return false
+        val ref = UUID.randomUUID().toString()
+        if (onAcknowledged != null) {
+            pendingBroadcastAcks[ref] = onAcknowledged
+            scope.launch {
+                delay(5_000)
+                pendingBroadcastAcks.remove(ref)?.invoke(
+                    false,
+                    "Сервер сигнализации не подтвердил доставку за 5 секунд"
+                )
+            }
+        }
         val payload = JSONObject()
             .put("event", "call_signal")
             .put("type", "broadcast")
             .put("payload", signal)
-        return socket?.send(JSONObject()
+        val sent = socket?.send(JSONObject()
             .put("topic", peerTopic)
             .put("event", "broadcast")
             .put("payload", payload)
-            .put("ref", UUID.randomUUID().toString())
+            .put("ref", ref)
             .put("join_ref", "2").toString()) == true
+        if (!sent) pendingBroadcastAcks.remove(ref)
+        return sent
+    }
+
+    private fun failPendingBroadcasts(reason: String) {
+        val callbacks = pendingBroadcastAcks.values.toList()
+        pendingBroadcastAcks.clear()
+        callbacks.forEach { callback -> runCatching { callback(false, reason) } }
     }
 
     fun close() {
         closed = true
         reconnectJob?.cancel()
+        failPendingBroadcasts("Сигнализация звонка закрыта")
         scope.cancel()
         socket?.close(1000, "Call finished")
         socket = null
