@@ -113,7 +113,10 @@ class CallSignalingClient(
                                     ?.takeIf { !it.isNullOrBlank() }
                                 pendingAck(accepted, detail)
                                 if (!accepted) {
+                                    readyDelivered = false
+                                    synchronized(lock) { joined.clear() }
                                     reportError("Realtime отклонил сигнал звонка" + (detail?.let { ": $it" } ?: ""))
+                                    scheduleReconnect()
                                 }
                             } else if (ref == "1" || ref == "2") {
                                 if (status == "ok") {
@@ -229,10 +232,14 @@ class CallSignalingClient(
             pendingBroadcastAcks[ref] = onAcknowledged
             scope.launch {
                 delay(5_000)
-                pendingBroadcastAcks.remove(ref)?.invoke(
-                    false,
-                    "Сервер сигнализации не подтвердил доставку за 5 секунд"
-                )
+                val callback = pendingBroadcastAcks.remove(ref)
+                if (callback != null) {
+                    readyDelivered = false
+                    synchronized(lock) { joined.clear() }
+                    callback(false, "Сервер сигнализации не подтвердил доставку за 5 секунд")
+                    reportError("Сервер сигнализации не подтвердил доставку за 5 секунд")
+                    scheduleReconnect()
+                }
             }
         }
         val payload = JSONObject()
