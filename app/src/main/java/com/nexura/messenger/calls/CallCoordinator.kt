@@ -137,8 +137,15 @@ class CallCoordinator(
             .put("to", peerUserId)
             .put("video", video)
             .put("sent_at", System.currentTimeMillis())
-        if (!send(invite)) {
-            failCall("Не удалось вызвать", "Сигнал вызова не отправлен. Проверьте интернет.")
+        if (!send(invite) { acknowledged, detail ->
+                if (!acknowledged && callId == expectedId && !closed) {
+                    failCall(
+                        "Сервер не принял сигнал вызова",
+                        detail ?: "Проверьте подключение к серверу сигнализации."
+                    )
+                }
+            }) {
+            failCall("Не удалось вызвать", "Канал сигнализации ещё не готов. Проверьте интернет и повторите попытку.")
             return
         }
         publish(CallUiState(
@@ -310,12 +317,21 @@ class CallCoordinator(
             publish((lastState ?: CallUiState()).copy(localVideoTrack = localTrack))
         }
         if (!callDirectionOutgoing && !answerSent) {
-            if (!send(JSONObject()
-                    .put("type", "answer")
-                    .put("call_id", expectedId)
-                    .put("from", ownUserId)
-                    .put("to", peerUserId))) {
-                throw IOException("Не удалось подтвердить вызов собеседнику")
+            if (!send(
+                    JSONObject()
+                        .put("type", "answer")
+                        .put("call_id", expectedId)
+                        .put("from", ownUserId)
+                        .put("to", peerUserId)
+                ) { acknowledged, detail ->
+                    if (!acknowledged && callId == expectedId && !closed) {
+                        failCall(
+                            "Ответ не доставлен собеседнику",
+                            detail ?: "Сервер сигнализации не подтвердил ответ."
+                        )
+                    }
+                }) {
+                throw IOException("Не удалось отправить подтверждение вызова")
             }
             answerSent = true
         }
@@ -445,7 +461,10 @@ class CallCoordinator(
         runCatching { ContextCompat.startForegroundService(context, intent) }
     }
 
-    private fun send(signal: JSONObject): Boolean = signaling?.sendSignal(signal) == true
+    private fun send(
+        signal: JSONObject,
+        onAcknowledged: ((Boolean, String?) -> Unit)? = null
+    ): Boolean = signaling?.sendSignal(signal, onAcknowledged) == true
 
     private fun endSignal(id: String) = JSONObject()
         .put("type", "end").put("call_id", id).put("from", ownUserId).put("to", peerUserId)
