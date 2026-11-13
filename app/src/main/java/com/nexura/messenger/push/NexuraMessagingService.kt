@@ -30,7 +30,11 @@ class NexuraMessagingService : FirebaseMessagingService() {
             it.matches(Regex("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
         }?.let { raw -> runCatching { UUID.fromString(raw).toString() }.getOrNull() }
         val callId = payload["call_id"]?.takeIf { it.length <= 64 }
-        val callExpiresAt = System.currentTimeMillis() + CALL_RING_TIMEOUT_MS
+        val now = System.currentTimeMillis()
+        val sentAt = payload["sent_at"]?.toLongOrNull()?.takeIf { it in 1L..now } ?: now
+        val callExpiresAt = sentAt + CALL_RING_TIMEOUT_MS
+        // A delayed FCM message must never resurrect an already expired call.
+        if (incomingCall && now >= callExpiresAt) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannels(manager)
 
