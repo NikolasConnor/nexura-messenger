@@ -174,7 +174,23 @@ class CallCoordinator(
             }
         }
         scope.launch {
-            runCatching { api.notifyIncomingCall(chatId, peerUserId, expectedId, false) }
+            try {
+                val delivery = api.notifyIncomingCall(chatId, peerUserId, expectedId, false)
+                if (callId == expectedId && !closed && delivery.acceptedByFcm == 0) {
+                    val detail = if (delivery.noDeviceTokens) {
+                        "У собеседника нет зарегистрированного устройства для Push. Если он онлайн, вызов всё ещё может прийти через сервер сигнализации."
+                    } else {
+                        "Push не принят службой уведомлений (" + delivery.failed + " ошибок). Вызов ещё может прийти через сервер сигнализации."
+                    }
+                    publish((lastState ?: CallUiState()).copy(error = detail))
+                }
+            } catch (error: Exception) {
+                if (callId == expectedId && !closed) {
+                    publish((lastState ?: CallUiState()).copy(
+                        error = "Не удалось отправить Push-уведомление: " + (error.message ?: "ошибка сети") + ". Онлайн-вызов через сигнализацию ещё может сработать."
+                    ))
+                }
+            }
         }
     }
 
@@ -380,6 +396,9 @@ class CallCoordinator(
                     incoming = true,
                     video = false
                 ))
+                // Tell the caller that this device actually received and displayed the offer.
+                send(JSONObject().put("type", "ringing").put("call_id", id)
+                    .put("from", ownUserId).put("to", peerUserId))
                 // Do not leave an unanswered incoming call dialog ringing indefinitely.
                 ringTimeoutJob?.cancel()
                 ringTimeoutJob = scope.launch {
@@ -405,6 +424,9 @@ class CallCoordinator(
                         }
                     }
                 }
+            }
+            "ringing" -> if (id == callId && callDirectionOutgoing && !accepted) {
+                publish((lastState ?: CallUiState()).copy(status = "Собеседник получил вызов…", error = null))
             }
             "end", "decline", "busy" -> if (id == callId || id == pendingCallId) {
                 val message = when (signal.optString("type")) {
