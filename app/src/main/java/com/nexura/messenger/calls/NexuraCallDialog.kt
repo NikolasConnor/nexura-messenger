@@ -64,8 +64,15 @@ fun NexuraCallDialog(
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) continueAudioCall()
-        else ui = ui.copy(error = "Без доступа к микрофону аудиозвонок невозможен")
+        if (!granted) {
+            ui = ui.copy(error = "Без доступа к микрофону аудиозвонок невозможен")
+        } else {
+            ui = ui.copy(error = null)
+            when (pendingAction) {
+                "accept" -> coordinator?.accept()
+                else -> coordinator?.start(false)
+            }
+        }
     }
 
     fun requestAudio(action: String) {
@@ -76,15 +83,11 @@ fun NexuraCallDialog(
         if (microphoneMissing) {
             microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         } else {
-            continueAudioCall()
-        }
-    }
-
-    fun continueAudioCall() {
-        ui = ui.copy(error = null)
-        when (pendingAction) {
-            "accept" -> coordinator?.accept()
-            else -> coordinator?.start(false)
+            ui = ui.copy(error = null)
+            when (pendingAction) {
+                "accept" -> coordinator?.accept()
+                else -> coordinator?.start(false)
+            }
         }
     }
 
