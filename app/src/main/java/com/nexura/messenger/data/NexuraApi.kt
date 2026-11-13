@@ -1246,17 +1246,29 @@ class NexuraApi(private val store: SessionStore) {
     }
 
 
-    suspend fun notifyIncomingCall(conversationId: String, recipientUserId: String, callId: String, video: Boolean) {
-        call(
+    data class CallPushResult(
+        val targeted: Int,
+        val acceptedByFcm: Int,
+        val failed: Int,
+        val noDeviceTokens: Boolean
+    )
+
+    suspend fun notifyIncomingCall(conversationId: String, recipientUserId: String, callId: String, video: Boolean): CallPushResult {
+        val response = JSONObject(call(
             "/functions/v1/send-call-push",
             "POST",
             JSONObject()
                 .put("conversation_id", normalizeUuid(conversationId))
                 .put("recipient_user_id", normalizeUuid(recipientUserId))
                 .put("call_id", callId)
-                .put("video", video)
+                .put("video", false)
+                .put("sent_at", System.currentTimeMillis())
                 .toString()
-        )
+        ))
+        val targeted = response.optInt("targeted", response.optInt("sent", 0))
+        val accepted = response.optInt("accepted_by_fcm", response.optInt("sent", 0))
+        val failed = response.optInt("failed", (targeted - accepted).coerceAtLeast(0))
+        return CallPushResult(targeted, accepted, failed, response.optBoolean("no_device_tokens", targeted == 0))
     }
 
     suspend fun registerPushToken(token: String) {
