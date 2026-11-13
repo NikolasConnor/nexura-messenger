@@ -157,7 +157,10 @@ class NexuraApi(private val store: SessionStore) {
             JSONObject().put("phone", phone.trim()).put("token", code.trim()).put("type", "sms").toString(),
             auth = false))
         saveSession(result)
-        if (store.accessToken.isNullOrBlank() || store.userId.isNullOrBlank()) {
+        val complete = withContext(Dispatchers.IO) {
+            !store.accessToken.isNullOrBlank() && !store.userId.isNullOrBlank()
+        }
+        if (!complete) {
             throw IOException("Код принят, но Supabase не вернул полноценную сессию. Попробуйте войти ещё раз.")
         }
     }
@@ -166,8 +169,13 @@ class NexuraApi(private val store: SessionStore) {
         val result = JSONObject(call("/auth/v1/token?grant_type=password", "POST",
             JSONObject().put("email", email).put("password", password).toString(), auth = false))
         saveSession(result)
-        if (store.accessToken.isNullOrBlank() || store.refreshToken.isNullOrBlank() || store.userId.isNullOrBlank()) {
-            store.clear()
+        val complete = withContext(Dispatchers.IO) {
+            !store.accessToken.isNullOrBlank() &&
+                !store.refreshToken.isNullOrBlank() &&
+                !store.userId.isNullOrBlank()
+        }
+        if (!complete) {
+            withContext(Dispatchers.IO) { store.clear() }
             throw IOException("Supabase подтвердил вход, но не вернул полную сессию. Повторите вход.")
         }
     }
@@ -179,7 +187,9 @@ class NexuraApi(private val store: SessionStore) {
         if (result.has("access_token")) saveSession(result)
         else throw IOException("Аккаунт создан. Подтвердите email по ссылке из письма, затем вернитесь в Nexura.")
     }
-    private fun saveSession(o: JSONObject) {
+    // EncryptedSharedPreferences performs encryption/decryption synchronously.
+    // Never write session tokens on the Android main thread after a network response.
+    private suspend fun saveSession(o: JSONObject) = withContext(Dispatchers.IO) {
         store.accessToken = o.optString("access_token").takeIf { it.isNotBlank() }
         store.refreshToken = o.optString("refresh_token").takeIf { it.isNotBlank() }
         store.userId = o.optJSONObject("user")?.optString("id")
