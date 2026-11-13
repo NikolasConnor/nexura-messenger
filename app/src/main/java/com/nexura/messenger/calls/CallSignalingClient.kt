@@ -175,6 +175,7 @@ class CallSignalingClient(
                 socket = null
                 readyDelivered = false
                 synchronized(lock) { joined.clear() }
+                failPendingBroadcasts("Связь с сервером звонков закрыта")
                 reportError("Связь с сервером звонков прервана. Переподключаемся…")
                 scheduleReconnect()
             }
