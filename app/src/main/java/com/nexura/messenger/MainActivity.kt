@@ -3008,7 +3008,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                 }
-            }
 
     if (e2eeRecoveryRequired) {
         AlertDialog(
