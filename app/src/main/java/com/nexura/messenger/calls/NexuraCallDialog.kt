@@ -113,7 +113,7 @@ fun NexuraCallDialog(
         if (!granted) {
             permissionStep = ""
             ui = ui.copy(error = "Без доступа к микрофону звонок невозможен")
-        } else if (pendingAction == "video" &&
+        } else if ((pendingAction == "video" || (pendingAction == "accept" && ui.video)) &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
         ) {
             permissionStep = Manifest.permission.CAMERA
