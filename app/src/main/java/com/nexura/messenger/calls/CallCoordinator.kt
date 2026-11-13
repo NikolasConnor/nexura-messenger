@@ -138,6 +138,7 @@ class CallCoordinator(
         answerSent = false
         callId = UUID.randomUUID().toString()
         val expectedId = callId ?: return
+        val callStartedAtMs = System.currentTimeMillis()
         startKeepAlive(false)
         val invite = JSONObject()
             .put("type", "offer")
@@ -145,7 +146,7 @@ class CallCoordinator(
             .put("from", ownUserId)
             .put("to", peerUserId)
             .put("video", false)
-            .put("sent_at", System.currentTimeMillis())
+            .put("sent_at", callStartedAtMs)
         if (!send(invite) { acknowledged, detail ->
                 if (!acknowledged && callId == expectedId && !closed) {
                     failCall(
@@ -175,7 +176,7 @@ class CallCoordinator(
         }
         scope.launch {
             try {
-                val delivery = api.notifyIncomingCall(chatId, peerUserId, expectedId, false)
+                val delivery = api.notifyIncomingCall(chatId, peerUserId, expectedId, false, callStartedAtMs)
                 if (callId == expectedId && !closed && delivery.acceptedByFcm == 0) {
                     val detail = if (delivery.noDeviceTokens) {
                         "У собеседника нет зарегистрированного устройства для Push. Если он онлайн, вызов всё ещё может прийти через сервер сигнализации."
