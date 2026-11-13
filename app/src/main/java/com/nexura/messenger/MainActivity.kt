@@ -28,6 +28,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -2536,7 +2537,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 topStart = 20.dp, topEnd = 20.dp,
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
-                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35)).padding(horizontal = 15.dp, vertical = 12.dp)
+                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                                .combinedClickable(
+                                                    onClick = { },
+                                                    onLongClick = { openMessageMenu = msg.id }
+                                                )
+                                                .padding(horizontal = 15.dp, vertical = 12.dp)
                                         ) {
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
@@ -2549,6 +2555,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     Modifier.fillMaxWidth().padding(bottom = 8.dp)
                                                         .clip(RoundedCornerShape(9.dp))
                                                         .background(Surface1.copy(alpha = 0.88f))
+                                                        .clickable { if (parent != null) scrollToMessageId = parent.id }
                                                         .padding(horizontal = 9.dp, vertical = 7.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
