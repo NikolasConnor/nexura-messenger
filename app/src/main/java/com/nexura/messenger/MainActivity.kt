@@ -958,6 +958,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
             }
         }
+    }
 
     // A successful Realtime re-subscription is also a catch-up checkpoint.
     // Events may have been missed while the app was stopped or the network was unavailable.
