@@ -244,6 +244,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var ownE2eeDevices by remember { mutableStateOf(emptyList<E2eeRemoteDevice>()) }
     var deviceToRevoke by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var viewedPresence by remember { mutableStateOf<UserPresence?>(null) }
+    var chatPresence by remember { mutableStateOf<UserPresence?>(null) }
     var confirmBlockProfile by remember { mutableStateOf<UserProfile?>(null) }
     var savingPrivacy by remember { mutableStateOf(false) }
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
@@ -289,6 +290,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         } ?: run {
             chatWallpaperColor = Color(0xFF100C1D)
             chatBubbleColor = Color(0xFF6945C7)
+        }
+    }
+
+    // Refresh the peer's privacy-aware presence while a direct chat is open.
+    // The server returns only the fields permitted by that user's privacy settings.
+    LaunchedEffect(signedIn, selected?.id, selected?.peerUserId) {
+        chatPresence = null
+        val peerId = selected?.takeIf { it.kind == "direct" }?.peerUserId
+        if (signedIn && !peerId.isNullOrBlank()) {
+            while (true) {
+                runCatching { api.userPresence(peerId) }
+                    .onSuccess { presence ->
+                        if (selected?.peerUserId == peerId) chatPresence = presence
+                    }
+                delay(30_000L)
+            }
         }
     }
 
@@ -2343,9 +2360,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }) {
                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
+                                val presence = chatPresence?.takeIf { it.isVisible }
                                 Text(
-                                    if (chat.kind == "group") "Групповой чат" else "Личная переписка",
-                                    color = SecondaryText,
+                                    when {
+                                        chat.kind == "group" -> "Групповой чат"
+                                        presence?.isOnline == true -> "● В сети"
+                                        presence?.lastSeenAt != null -> "Был(а) в ${messageTimeLabel(presence.lastSeenAt)}"
+                                        else -> "Личная переписка"
+                                    },
+                                    color = if (presence?.isOnline == true) Success else SecondaryText,
                                     fontSize = 12.sp,
                                     maxLines = 1
                                 )
