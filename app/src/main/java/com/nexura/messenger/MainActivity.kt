@@ -913,6 +913,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             if (selected?.id == changedChatId) {
                                 messages = merged
+                                // The open conversation is already visible; its read marker is
+                                // advanced by the existing markChatRead path, so don't add a badge.
                                 val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                                 if (newest != null) {
                                     val timestamp = lastSyncedMessageTimestamp
@@ -921,6 +923,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         (newest.createdAt == timestamp && newest.id > id.orEmpty())) {
                                         lastSyncedMessageTimestamp = newest.createdAt
                                         lastSyncedMessageId = newest.id
+                                    }
+                                }
+                            } else {
+                                // Realtime is only a sync hint. Count newly fetched, successfully
+                                // decrypted incoming messages once; local cache cursor prevents
+                                // duplicate notifications from inflating the unread badge.
+                                val incomingCount = latest.count {
+                                    it.senderId != store.userId && !it.content.startsWith("🔒") &&
+                                        !it.content.startsWith("⚠")
+                                }
+                                if (incomingCount > 0) {
+                                    chats = chats.map { chat ->
+                                        if (chat.id == changedChatId) {
+                                            chat.copy(unreadCount = chat.unreadCount + incomingCount)
+                                        } else chat
                                     }
                                 }
                             }
