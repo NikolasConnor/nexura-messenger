@@ -31,6 +31,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null)
+data class MessageReaction(val emoji: String, val count: Int, val selectedByMe: Boolean)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
@@ -1543,32 +1544,46 @@ class NexuraApi(private val store: SessionStore) {
         deleteMessage(oldMessageId)
     }
 
-    suspend fun messageReactions(chatId: String): Map<String, List<Pair<String, Int>>> {
+    suspend fun messageReactions(chatId: String): Map<String, List<MessageReaction>> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
         val rows = JSONArray(call(
             "/rest/v1/message_reactions?select=message_id,user_id,emoji&conversation_id=eq.${normalizeUuid(chatId)}"
         ))
-        val grouped = linkedMapOf<String, MutableMap<String, Int>>()
+        val grouped = linkedMapOf<String, MutableMap<String, Pair<Int, Boolean>>>()
         for (i in 0 until rows.length()) {
             val row = rows.getJSONObject(i)
             val messageId = row.optString("message_id")
             val emoji = row.optString("emoji")
+            val mine = row.optString("user_id") == uid
             val counts = grouped.getOrPut(messageId) { linkedMapOf() }
-            counts[emoji] = (counts[emoji] ?: 0) + 1
+            val previous = counts[emoji]
+            counts[emoji] = ((previous?.first ?: 0) + 1) to (mine || previous?.second == true)
         }
-        return grouped.mapValues { (_, counts) -> counts.map { it.key to it.value } }
+        return grouped.mapValues { (_, counts) ->
+            counts.map { (emoji, summary) -> MessageReaction(emoji, summary.first, summary.second) }
+                .sortedWith(compareByDescending<MessageReaction> { it.selectedByMe }.thenByDescending { it.count })
+        }
     }
 
+    /**
+     * One active reaction per user and message, matching the interaction model
+     * people expect: tapping the selected emoji removes it; tapping another
+     * replaces the previous one.
+     */
     suspend fun toggleMessageReaction(chatId: String, messageId: String, emoji: String) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val encodedEmoji = java.net.URLEncoder.encode(emoji, "UTF-8")
-        val filter = "/rest/v1/message_reactions?message_id=eq.${normalizeUuid(messageId)}&user_id=eq.$uid&emoji=eq.$encodedEmoji"
-        val existing = JSONArray(call(filter + "&select=message_id&limit=1"))
-        if (existing.length() > 0) {
-            call(filter, "DELETE", prefer = "return=minimal")
-        } else {
+        val message = normalizeUuid(messageId)
+        val conversation = normalizeUuid(chatId)
+        val filter = "/rest/v1/message_reactions?message_id=eq.$message&user_id=eq.$uid"
+        val existing = JSONArray(call(filter + "&select=emoji&limit=10"))
+        val alreadySelected = (0 until existing.length()).any { existing.getJSONObject(it).optString("emoji") == emoji }
+        // Remove the user's previous choice first. If the same emoji was active,
+        // this is a toggle-off; otherwise the new choice is inserted below.
+        if (existing.length() > 0) call(filter, "DELETE", prefer = "return=minimal")
+        if (!alreadySelected) {
             call("/rest/v1/message_reactions", "POST",
-                JSONObject().put("message_id", normalizeUuid(messageId))
-                    .put("conversation_id", normalizeUuid(chatId)).put("user_id", uid).put("emoji", emoji).toString(),
+                JSONObject().put("message_id", message)
+                    .put("conversation_id", conversation).put("user_id", uid).put("emoji", emoji).toString(),
                 prefer = "return=minimal")
         }
     }
