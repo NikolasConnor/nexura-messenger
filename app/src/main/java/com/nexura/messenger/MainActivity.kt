@@ -3065,6 +3065,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 }
 
+}
 
 @Composable
 private fun AudioMessagePlayer(
