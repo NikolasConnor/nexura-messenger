@@ -167,7 +167,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chats by remember { mutableStateOf(emptyList<ChatItem>()) }
     var selected by remember { mutableStateOf<ChatItem?>(null) }
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
-    var messageReactions by remember { mutableStateOf(emptyMap<String, List<Pair<String, Int>>>()) }
+    var messageReactions by remember { mutableStateOf(emptyMap<String, List<MessageReaction>>()) }
     var pinnedMessageId by remember { mutableStateOf<String?>(null) }
     var peerReadReceiptAt by remember { mutableStateOf<String?>(null) }
     var canManagePins by remember { mutableStateOf(false) }
@@ -595,7 +595,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     result
                 }
                 @Suppress("UNCHECKED_CAST")
-                val reactions = metadata[0] as Map<String, List<Pair<String, Int>>>
+                val reactions = metadata[0] as Map<String, List<MessageReaction>>
                 val pinned = metadata[1] as String?
                 val manage = metadata[2] as Boolean
                 val receipt = metadata[3] as String?
@@ -2667,19 +2667,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             letterSpacing = 1.sp,
                                                             modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 3.dp)
                                                         )
-                                                        listOf("👍", "❤️", "😂", "😮", "🔥", "👏").forEach { emoji ->
-                                                            DropdownMenuItem(
-                                                                text = { Text("$emoji   Поставить реакцию") },
-                                                                onClick = {
-                                                                    openMessageMenu = null
-                                                                    scope.launch {
-                                                                        try {
-                                                                            api.toggleMessageReaction(chat.id, msg.id, emoji)
-                                                                            messageReactions = api.messageReactions(chat.id)
-                                                                        } catch (e: Exception) { error = e.message ?: "Не удалось поставить реакцию" }
-                                                                    }
-                                                                }
-                                                            )
+                                                        Row(
+                                                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+                                                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            listOf("👍", "❤️", "😂", "😮", "🔥", "👏", "🥰", "🎉", "🤔", "👎", "😭", "💯", "🙏", "⚡").forEach { emoji ->
+                                                                Box(
+                                                                    Modifier.size(34.dp).clip(CircleShape)
+                                                                        .background(Surface2)
+                                                                        .clickable {
+                                                                            openMessageMenu = null
+                                                                            scope.launch {
+                                                                                try {
+                                                                                    api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                                    messageReactions = api.messageReactions(chat.id)
+                                                                                } catch (e: Exception) { error = e.message ?: "Не удалось поставить реакцию" }
+                                                                            }
+                                                                        },
+                                                                    contentAlignment = Alignment.Center
+                                                                ) { Text(emoji, fontSize = 19.sp) }
+                                                            }
                                                         }
                                                         if (canManagePins) {
                                                             HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
@@ -2740,23 +2748,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     horizontalArrangement = Arrangement.Start,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    reactionsForMessage.forEach { (emoji, count) ->
+                                                    reactionsForMessage.forEach { reaction ->
                                                         Row(
-                                                            Modifier.padding(end = 6.dp).clip(RoundedCornerShape(16.dp))
-                                                                .background(Accent.copy(alpha = 0.13f))
-                                                                .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+                                                            Modifier.padding(end = 6.dp).clip(RoundedCornerShape(18.dp))
+                                                                .background(if (reaction.selectedByMe) Accent.copy(alpha = 0.30f) else Surface2)
+                                                                .border(
+                                                                    1.dp,
+                                                                    if (reaction.selectedByMe) Accent else SecondaryText.copy(alpha = 0.20f),
+                                                                    RoundedCornerShape(18.dp)
+                                                                )
                                                                 .clickable {
                                                                     scope.launch {
                                                                         try {
-                                                                            api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                            api.toggleMessageReaction(chat.id, msg.id, reaction.emoji)
                                                                             messageReactions = api.messageReactions(chat.id)
                                                                         } catch (e: Exception) { error = e.message ?: "Не удалось изменить реакцию" }
                                                                     }
                                                                 }.padding(horizontal = 10.dp, vertical = 6.dp),
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                            Text(emoji, fontSize = 13.sp)
-                                                            Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                            Text(reaction.emoji, fontSize = 14.sp)
+                                                            Text(" ${reaction.count}", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                                         }
                                                     }
                                                 }
