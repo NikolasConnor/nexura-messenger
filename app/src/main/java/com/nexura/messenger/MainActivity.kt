@@ -1049,8 +1049,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         } else {
                                             if (register) api.signUp(email.trim(), password, displayName.trim())
                                             else api.signIn(email.trim(), password)
-                                            // Both methods return only after a valid session is stored,
-                                            // or throw an error that is shown below.
+                                            // Successful auth methods have already validated and persisted
+                                            // the session on Dispatchers.IO; do not decrypt preferences on UI.
                                             signedIn = true
                                         }
                                     } catch (e: Exception) { error = e.message ?: "Не удалось выполнить вход" }
