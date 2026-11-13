@@ -1253,7 +1253,7 @@ class NexuraApi(private val store: SessionStore) {
         val noDeviceTokens: Boolean
     )
 
-    suspend fun notifyIncomingCall(conversationId: String, recipientUserId: String, callId: String, video: Boolean): CallPushResult {
+    suspend fun notifyIncomingCall(conversationId: String, recipientUserId: String, callId: String, video: Boolean, sentAt: Long): CallPushResult {
         val response = JSONObject(call(
             "/functions/v1/send-call-push",
             "POST",
@@ -1262,7 +1262,7 @@ class NexuraApi(private val store: SessionStore) {
                 .put("recipient_user_id", normalizeUuid(recipientUserId))
                 .put("call_id", callId)
                 .put("video", false)
-                .put("sent_at", System.currentTimeMillis())
+                .put("sent_at", sentAt)
                 .toString()
         ))
         val targeted = response.optInt("targeted", response.optInt("sent", 0))
