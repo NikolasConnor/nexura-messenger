@@ -2746,7 +2746,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             horizontalArrangement = Arrangement.spacedBy(5.dp),
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                            listOf("👍", "❤️", "😂", "😮", "🔥", "👏", "🥰", "🎉", "🤔", "👎", "😭", "💯", "🙏", "⚡").forEach { emoji ->
+                                                            listOf("👍", "❤️", "😂", "😮", "😢", "🔥", "👏", "🙏").forEach { emoji ->
                                                                 Box(
                                                                     Modifier.size(34.dp).clip(CircleShape)
                                                                         .background(Surface2)
