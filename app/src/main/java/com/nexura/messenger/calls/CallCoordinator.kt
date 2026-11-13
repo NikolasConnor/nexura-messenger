@@ -118,7 +118,7 @@ class CallCoordinator(
             .put("call_id", id)
             .put("from", callerId)
             .put("to", ownUserId)
-            .put("video", video))
+            .put("video", false))
     }
 
     fun start(video: Boolean) {
@@ -126,8 +126,9 @@ class CallCoordinator(
             publish((lastState ?: CallUiState()).copy(error = "Сервер звонков ещё подключается"))
             return
         }
-        videoMode = video
-        callVideoForHistory = video
+        // Nexura currently supports audio calls only.
+        videoMode = false
+        callVideoForHistory = false
         callDirectionOutgoing = true
         callHistoryWritten = false
         connectedAtMs = null
@@ -137,13 +138,13 @@ class CallCoordinator(
         answerSent = false
         callId = UUID.randomUUID().toString()
         val expectedId = callId ?: return
-        startKeepAlive(video)
+        startKeepAlive(false)
         val invite = JSONObject()
             .put("type", "offer")
             .put("call_id", expectedId)
             .put("from", ownUserId)
             .put("to", peerUserId)
-            .put("video", video)
+            .put("video", false)
             .put("sent_at", System.currentTimeMillis())
         if (!send(invite) { acknowledged, detail ->
                 if (!acknowledged && callId == expectedId && !closed) {
@@ -160,8 +161,8 @@ class CallCoordinator(
             status = "Вызов…",
             active = true,
             outgoing = true,
-            video = video,
-            speaker = video
+            video = false,
+            speaker = false
         ))
         ringTimeoutJob?.cancel()
         ringTimeoutJob = scope.launch {
@@ -173,7 +174,7 @@ class CallCoordinator(
             }
         }
         scope.launch {
-            runCatching { api.notifyIncomingCall(chatId, peerUserId, expectedId, video) }
+            runCatching { api.notifyIncomingCall(chatId, peerUserId, expectedId, false) }
         }
     }
 
@@ -182,8 +183,8 @@ class CallCoordinator(
         if (closed || room != null) return
         ringTimeoutJob?.cancel()
         ringTimeoutJob = null
-        videoMode = pendingVideo
-        callVideoForHistory = pendingVideo
+        videoMode = false
+        callVideoForHistory = false
         callDirectionOutgoing = false
         callHistoryWritten = false
         connectedAtMs = null
@@ -195,13 +196,13 @@ class CallCoordinator(
         pendingCallId = null
         pendingOfferReceivedAtMs = null
         pendingVideo = false
-        startKeepAlive(videoMode)
+        startKeepAlive(false)
         publish(CallUiState(
             status = "Соединяем…",
             active = true,
             outgoing = false,
-            video = videoMode,
-            speaker = videoMode
+            video = false,
+            speaker = false
         ))
         armConnectionTimeout(expectedId)
         scope.launch {
@@ -372,11 +373,12 @@ class CallCoordinator(
                 }
                 pendingCallId = id
                 pendingOfferReceivedAtMs = receivedAt
-                pendingVideo = signal.optBoolean("video")
+                // Legacy incoming video offers are accepted as audio-only calls.
+                pendingVideo = false
                 publish(CallUiState(
-                    status = if (pendingVideo) "Входящий видеозвонок" else "Входящий звонок",
+                    status = "Входящий аудиозвонок",
                     incoming = true,
-                    video = pendingVideo
+                    video = false
                 ))
                 // Do not leave an unanswered incoming call dialog ringing indefinitely.
                 ringTimeoutJob?.cancel()
@@ -465,7 +467,7 @@ class CallCoordinator(
 
     private fun startKeepAlive(video: Boolean) {
         val intent = Intent(context, CallKeepAliveService::class.java)
-            .putExtra(CallKeepAliveService.EXTRA_VIDEO, video)
+            
         runCatching { ContextCompat.startForegroundService(context, intent) }
     }
 
