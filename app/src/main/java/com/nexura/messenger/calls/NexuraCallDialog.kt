@@ -36,6 +36,7 @@ import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import com.nexura.messenger.data.ChatItem
 import com.nexura.messenger.data.NexuraApi
+import com.nexura.messenger.push.NexuraMessagingService
 import kotlinx.coroutines.delay
 
 @Composable
