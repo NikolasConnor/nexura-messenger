@@ -70,6 +70,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
@@ -3228,8 +3229,7 @@ private fun AudioMessagePlayer(
             Text(
                 if (loading) "Загрузка…" else formatTime(positionMs),
                 color = SecondaryText,
-                fontSize = 10.sp,
-                fontFeatureSettings = "tnum"
+                fontSize = 10.sp
             )
             Text(
                 if (durationMs > 0L) formatTime(durationMs) else "--:--",
