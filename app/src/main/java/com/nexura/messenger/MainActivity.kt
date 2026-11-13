@@ -87,7 +87,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexura.messenger.data.*
-import com.nexura.messenger.calls.NexuraCallDialog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -256,11 +255,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
-    var showCallDialog by remember { mutableStateOf(false) }
-    var pendingCallAction by remember { mutableStateOf(authCallback?.getQueryParameter("action") ?: "show") }
-    var pendingIncomingCallId by remember { mutableStateOf(authCallback?.getQueryParameter("call_id")) }
-    var pendingIncomingCallerId by remember { mutableStateOf(authCallback?.getQueryParameter("caller_id")) }
-    var pendingIncomingVideo by remember { mutableStateOf(authCallback?.getQueryParameter("video") == "true") }
     LaunchedEffect(selected?.id, messages) {
         val chatId = selected?.id ?: return@LaunchedEffect
         messages.lastOrNull()?.let { latest ->
@@ -661,24 +655,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             val targetChat = chats.firstOrNull { it.id.equals(targetChatId, ignoreCase = true) }
             if (targetChat != null && selected?.id != targetChat.id) {
                 openChat(targetChat)
-            }
-            if (targetChat != null && authCallback?.getQueryParameter("call") == "1") {
-                // Notification/deep-link call intents are valid only during the ring window.
-                // This prevents an old lock-screen notification from resurrecting a finished call.
-                val expiresAt = authCallback.getQueryParameter("expires_at")?.toLongOrNull()
-                if (expiresAt != null && expiresAt > System.currentTimeMillis()) {
-                    pendingCallAction = authCallback.getQueryParameter("action") ?: "show"
-                    pendingIncomingCallId = authCallback.getQueryParameter("call_id")
-                    pendingIncomingCallerId = authCallback.getQueryParameter("caller_id")
-                    pendingIncomingVideo = authCallback.getQueryParameter("video") == "true"
-                    showCallDialog = true
-                } else {
-                    showCallDialog = false
-                    pendingIncomingCallId = null
-                    pendingIncomingCallerId = null
-                    pendingIncomingVideo = false
-                    pendingCallAction = "show"
-                }
             }
         }
     }
@@ -1900,42 +1876,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
-                    if (chat.kind == "direct" && !store.userId.isNullOrBlank() && !store.accessToken.isNullOrBlank()) {
-                        NexuraCallDialog(
-                            api = api,
-                            chat = chat,
-                            ownUserId = store.userId!!,
-                            accessToken = store.accessToken!!,
-                            visible = showCallDialog,
-                            autoAction = pendingCallAction,
-                            incomingCallId = pendingIncomingCallId,
-                            incomingCallerId = pendingIncomingCallerId,
-                            incomingVideo = pendingIncomingVideo,
-                            onCallFinished = { duration, outgoing, video, result ->
-                                if (outgoing) scope.launch {
-                                    try {
-                                        val client = e2eeClient ?: throw IllegalStateException("Не удалось сохранить историю звонка: E2EE не готово")
-                                        val record = org.json.JSONObject()
-                                            .put("kind", "audio")
-                                            .put("duration_seconds", duration)
-                                            .put("direction", if (outgoing) "outgoing" else "incoming")
-                                            .put("result", result)
-                                            .toString()
-                                        api.sendEncryptedDirectMessage(
-                                            chat.id, client, UUID.randomUUID().toString(), record,
-                                            messageType = "call"
-                                        )
-                                        if (selected?.id == chat.id) {
-                                            messages = api.messages(chat.id, client)
-                                        }
-                                    } catch (e: Exception) {
-                                        error = e.message ?: "Не удалось сохранить запись о звонке"
-                                    }
-                                }
-                            },
-                            onDismiss = { showCallDialog = false; pendingCallAction = "show"; pendingIncomingCallId = null; pendingIncomingCallerId = null; pendingIncomingVideo = false }
-                        )
-                    }
                     if (chatThemeOpen) {
                         val wallpaperOptions = listOf("Фиолетовая ночь" to Color(0xFF100C1D), "Графит" to Color(0xFF171D27), "Сланец" to Color(0xFF1B2634), "Синий вечер" to Color(0xFF101D32), "Лес" to Color(0xFF14251F), "Бордовый" to Color(0xFF2A1922))
                         val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
@@ -2332,14 +2272,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     fontSize = 12.sp,
                                     maxLines = 1
                                 )
-                            }
-                            if (chat.kind == "direct") {
-                                IconButton(onClick = {
-                                    pendingCallAction = "start_audio"
-                                    showCallDialog = true
-                                }) {
-                                    Icon(Icons.Default.Call, "Голосовой звонок", tint = Accent)
-                                }
                             }
                             IconButton(onClick = { chatThemeOpen = true }) {
                                 Icon(Icons.Default.Palette, "Оформление чата", tint = if (chatThemeOpen) Accent else SecondaryText)
