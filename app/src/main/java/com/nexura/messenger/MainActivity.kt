@@ -33,7 +33,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateColorAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
@@ -3009,7 +3009,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                 }
             }
-        }
 
     if (e2eeRecoveryRequired) {
         AlertDialog(
@@ -3234,8 +3233,7 @@ private fun AudioMessagePlayer(
             Text(
                 if (durationMs > 0L) formatTime(durationMs) else "--:--",
                 color = SecondaryText,
-                fontSize = 10.sp,
-                fontFeatureSettings = "tnum"
+                fontSize = 10.sp
             )
         }
     }
