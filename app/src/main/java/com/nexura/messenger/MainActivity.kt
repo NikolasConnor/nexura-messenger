@@ -226,6 +226,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val messageDelivery = remember { mutableStateMapOf<String, String>() }
     val failedMessageRetries = remember { mutableStateMapOf<String, Triple<ChatItem, String, String?>>() }
     val messageSendMutex = remember { Mutex() }
+    // Serialize Realtime event sync with reconnect catch-up to avoid duplicate unread increments.
+    val conversationSyncMutex = remember { Mutex() }
     var sendingImage by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
@@ -892,6 +894,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 realtimeConnected = event.connected
                 val changedChatId = event.changedConversationId
                 if (event.connected && event.messageChanged && changedChatId != null && e2eeClient != null) {
+                    conversationSyncMutex.withLock {
                     runCatching {
                         val cached = withContext(Dispatchers.IO) {
                             localCache.readMessages(store.userId.orEmpty(), changedChatId)
@@ -945,6 +948,64 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         if (chat.id == changedChatId) {
                                             chat.copy(unreadCount = chat.unreadCount + incomingCount)
                                         } else chat
+                                    }
+                                }
+                            }
+
+                    }
+                }
+            }
+        }
+    }
+
+    // A successful Realtime re-subscription is also a catch-up checkpoint.
+    // Events may have been missed while the app was stopped or the network was unavailable.
+    // Fetch from each chat's encrypted local-cache cursor; only decrypted messages update UI.
+    LaunchedEffect(signedIn, realtimeConnected, chats.map { it.id }.take(50)) {
+        val client = e2eeClient
+        if (signedIn && realtimeConnected && client != null) {
+            val userId = store.userId.orEmpty()
+            chats.map { it.id }.take(50).forEach { chatId ->
+                conversationSyncMutex.withLock {
+                    runCatching {
+                        val cached = withContext(Dispatchers.IO) {
+                            localCache.readMessages(userId, chatId)
+                        }
+                        val newestCached = cached.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                        val latest = if (newestCached == null) {
+                            api.messages(chatId, client, pageSize = 20)
+                        } else {
+                            api.messages(chatId, client, newestCached.createdAt, afterMessageId = newestCached.id)
+                        }
+                        if (latest.isNotEmpty()) {
+                            val merged = (cached + latest).distinctBy { it.id }
+                                .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            withContext(Dispatchers.IO) { localCache.saveMessages(userId, chatId, merged) }
+                            val newest = latest.maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                            if (newest != null && !newest.content.startsWith("🔒") && !newest.content.startsWith("⚠")) {
+                                chatPreviews[chatId] = chatMessagePreview(newest, userId)
+                            }
+                            if (selected?.id == chatId) {
+                                messages = (messages + latest).distinctBy { it.id }
+                                    .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                if (newest != null) {
+                                    val timestamp = lastSyncedMessageTimestamp
+                                    val id = lastSyncedMessageId
+                                    if (timestamp == null || newest.createdAt > timestamp ||
+                                        (timestamp == id && newest.id > id.orEmpty())) {
+                                        lastSyncedMessageTimestamp = newest.createdAt
+                                        lastSyncedMessageId = newest.id
+                                    }
+                                }
+                            } else {
+                                val incomingCount = latest.count {
+                                    it.senderId != userId && !it.content.startsWith("🔒") &&
+                                        !it.content.startsWith("⚠")
+                                }
+                                if (incomingCount > 0) {
+                                    chats = chats.map { chat ->
+                                        if (chat.id == chatId) chat.copy(unreadCount = chat.unreadCount + incomingCount)
+                                        else chat
                                     }
                                 }
                             }
