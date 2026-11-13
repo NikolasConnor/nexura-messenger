@@ -85,5 +85,9 @@ class NexuraMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val MESSAGE_CHANNEL_ID = "nexura_messages"
+
+        // Legacy call UI may still reference this helper; incoming-call notifications are disabled.
+        @Suppress("UNUSED_PARAMETER")
+        fun cancelIncomingCall(context: Context, conversationId: String) = Unit
     }
 }
