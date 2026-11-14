@@ -1,0 +1,116 @@
+name: Publish Nexura APK to GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Тег существующего релиза"
+        required: true
+        default: "v0.2.0"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nexura-release-apk
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - name: Check release signing secrets
+        env:
+          NEXURA_KEYSTORE_BASE64: ${{ secrets.NEXURA_KEYSTORE_BASE64 }}
+          NEXURA_KEYSTORE_PASSWORD: ${{ secrets.NEXURA_KEYSTORE_PASSWORD }}
+          NEXURA_KEY_ALIAS: ${{ secrets.NEXURA_KEY_ALIAS }}
+          NEXURA_KEY_PASSWORD: ${{ secrets.NEXURA_KEY_PASSWORD }}
+        run: |
+          test -n "$NEXURA_KEYSTORE_BASE64"
+          test -n "$NEXURA_KEYSTORE_PASSWORD"
+          test -n "$NEXURA_KEY_ALIAS"
+          test -n "$NEXURA_KEY_PASSWORD"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: latest
+          accept-android-sdk-licenses: true
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018"
+
+      - name: Set up Rust Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Run native E2EE tests
+        run: cargo test --manifest-path crypto-jni/Cargo.toml
+
+      - name: Configure Android NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Build native E2EE libraries
+        working-directory: crypto-jni
+        run: |
+          cargo install cargo-ndk --version 3.5.4 --locked
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build unsigned release APK
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Sign and verify release APK
+        env:
+          NEXURA_KEYSTORE_BASE64: ${{ secrets.NEXURA_KEYSTORE_BASE64 }}
+          NEXURA_KEYSTORE_PASSWORD: ${{ secrets.NEXURA_KEYSTORE_PASSWORD }}
+          NEXURA_KEY_ALIAS: ${{ secrets.NEXURA_KEY_ALIAS }}
+          NEXURA_KEY_PASSWORD: ${{ secrets.NEXURA_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/nexura-release.jks"
+          printf '%s' "$NEXURA_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$UNSIGNED"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED" "$RUNNER_TEMP/Nexura-aligned.apk"
+          mkdir -p "$RUNNER_TEMP/nexura-release"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$NEXURA_KEY_ALIAS" \
+            --ks-pass env:NEXURA_KEYSTORE_PASSWORD \
+            --key-pass env:NEXURA_KEY_PASSWORD \
+            --out "$RUNNER_TEMP/nexura-release/Nexura.apk" \
+            "$RUNNER_TEMP/Nexura-aligned.apk"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/nexura-release/Nexura.apk"
+          cd "$RUNNER_TEMP/nexura-release"
+          sha256sum Nexura.apk | awk '{print $1 "  Nexura.apk"}' > SHA256SUMS.txt
+          RELEASE_TAG="${{ inputs.release_tag }}"
+          printf 'Nexura version %s\\nPublished from tag %s\\n' "${RELEASE_TAG#v}" "$RELEASE_TAG" > RELEASE.txt
+
+      - name: Upload signed APK to existing GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" \
+            "$RUNNER_TEMP/nexura-release/Nexura.apk" \
+            "$RUNNER_TEMP/nexura-release/SHA256SUMS.txt" \
+            "$RUNNER_TEMP/nexura-release/RELEASE.txt" \
+            --clobber
