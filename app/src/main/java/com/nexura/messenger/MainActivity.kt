@@ -3714,9 +3714,27 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         animationSpec = spring(stiffness = 420f),
         label = "reaction-chip-color"
     )
+    val emojiRotation by animateFloatAsState(
+        targetValue = if (pulse) when (emoji) {
+            "❤️" -> 24f
+            "👍" -> -18f
+            "😂" -> 16f
+            "😮" -> 22f
+            "😢" -> -16f
+            "🔥" -> 14f
+            else -> 12f
+        } else 0f,
+        animationSpec = spring(dampingRatio = 0.30f, stiffness = 420f),
+        label = "reaction-emoji-rotation"
+    )
+    val emojiLift by animateFloatAsState(
+        targetValue = if (pulse) -5f else 0f,
+        animationSpec = spring(dampingRatio = 0.28f, stiffness = 460f),
+        label = "reaction-emoji-lift"
+    )
     LaunchedEffect(pulse) {
         if (pulse) {
-            delay(180)
+            delay(220)
             pulse = false
         }
     }
@@ -3724,12 +3742,21 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         Modifier.padding(end = 6.dp).graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(18.dp)).background(chipColor)
             .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.20f), RoundedCornerShape(18.dp))
-            .clickable { pulse = true; onClick() }
+            .clickable { if (!pulse) { pulse = true; onClick() } }
             .animateContentSize(spring(dampingRatio = 0.78f, stiffness = 520f))
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(emoji, fontSize = 14.sp)
+        Text(
+            emoji,
+            fontSize = 14.sp,
+            modifier = Modifier.graphicsLayer {
+                rotationZ = emojiRotation
+                translationY = emojiLift * density
+                scaleX = if (pulse) 1.16f else 1f
+                scaleY = if (pulse) 1.16f else 1f
+            }
+        )
         Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
