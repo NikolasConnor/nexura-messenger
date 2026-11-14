@@ -529,6 +529,8 @@ function App() {
   async function signOut() { await supabase.auth.signOut(); }
   function openChat(chat) { setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
+  const activeMenuMessage = messages.find(message => message.id === messageMenu) || null;
+  const activeMenuMine = activeMenuMessage?.sender_id === session?.user?.id;
 
   useEffect(() => {
     const field = composerInputRef.current;
@@ -609,13 +611,7 @@ function App() {
                       <button className="message-more" onClick={event=>toggleMessageMenu(event,m.id)} title="Действия с сообщением" aria-label="Действия с сообщением"><MoreHorizontal size={16}/></button>
                     </div>
                     {reactionPickerFor===m.id && <div className="reaction-picker">{popular.map(emoji=><button key={emoji} onClick={()=>reactToMessage(m,emoji)}>{emoji}</button>)}</div>}
-                    {messageMenu===m.id && createPortal(<div className="message-context-menu message-context-menu-floating" style={{top:messageMenuPosition.top,left:messageMenuPosition.left}} role="menu" onMouseDown={event=>event.stopPropagation()}>
-                      <button role="menuitem" onClick={()=>{setReplyTarget(m);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
-                      <button role="menuitem" onClick={()=>copyMessage(m)}><Copy size={15}/>Копировать</button>
-                      {!m.encrypted && <button role="menuitem" onClick={()=>{setForwardMessage(m);setMessageMenu(null);}}><Forward size={15}/>Переслать</button>}
-                      {mine && selected.kind==='direct' && !m.encrypted && <button role="menuitem" onClick={()=>startEditing(m)}><Pencil size={15}/>Изменить</button>}
-                      {mine && <button role="menuitem" className="danger-action" onClick={()=>removeOwnMessage(m)} disabled={pendingAction}><Trash2 size={15}/>Удалить</button>}
-                    </div>, document.body)}
+
                   </div>
                 </div>
               </div>
@@ -634,6 +630,13 @@ function App() {
         </>
       }
     </main>
+    {activeMenuMessage && createPortal(<div className="message-context-menu message-context-menu-floating" style={{top:messageMenuPosition.top,left:messageMenuPosition.left}} role="menu" aria-label="Действия с сообщением" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
+      <button role="menuitem" onClick={()=>{setReplyTarget(activeMenuMessage);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
+      <button role="menuitem" onClick={()=>{copyMessage(activeMenuMessage);setMessageMenu(null);}}><Copy size={15}/>Копировать</button>
+      {!activeMenuMessage.encrypted && <button role="menuitem" onClick={()=>{setForwardMessage(activeMenuMessage);setMessageMenu(null);}}><Forward size={15}/>Переслать</button>}
+      {activeMenuMine && selected?.kind==='direct' && !activeMenuMessage.encrypted && <button role="menuitem" onClick={()=>{startEditing(activeMenuMessage);setMessageMenu(null);}}><Pencil size={15}/>Изменить</button>}
+      {activeMenuMine && <button role="menuitem" className="danger-action" onClick={()=>{setMessageMenu(null);removeOwnMessage(activeMenuMessage);}} disabled={pendingAction}><Trash2 size={15}/>Удалить</button>}
+    </div>, document.body)}
     {forwardMessage && <div className="modal-backdrop" onClick={()=>!forwardingBusy&&setForwardMessage(null)}>
       <section className="group-modal forward-modal" onClick={event=>event.stopPropagation()}>
         <div className="modal-head"><div><div className="eyebrow">ПЕРЕСЫЛКА</div><h3>Выбери чат</h3></div><button className="icon-button" onClick={()=>setForwardMessage(null)} disabled={forwardingBusy} aria-label="Закрыть">×</button></div>
