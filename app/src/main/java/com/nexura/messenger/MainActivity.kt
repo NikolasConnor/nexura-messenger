@@ -90,6 +90,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.paint
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -99,6 +100,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import coil.compose.rememberAsyncImagePainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -230,6 +232,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showTerminateOthersDialog by remember { mutableStateOf(false) }
     val messageDelivery = remember { mutableStateMapOf<String, String>() }
     val failedMessageRetries = remember { mutableStateMapOf<String, Triple<ChatItem, String, String?>>() }
+    val failedMediaRetries = remember { mutableStateMapOf<String, Triple<ChatItem, Uri, Pair<String, String?>>>() }
     val messageSendMutex = remember { Mutex() }
     // Serialize Realtime event sync with reconnect catch-up to avoid duplicate unread increments.
     val conversationSyncMutex = remember { Mutex() }
@@ -241,7 +244,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
     var chatThemeOpen by remember { mutableStateOf(false) }
+    var showChatOptionsMenu by remember { mutableStateOf(false) }
+    var showChatModeDialog by remember { mutableStateOf(false) }
+    var changingChatMode by remember { mutableStateOf(false) }
     var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
+    var chatWallpaperId by remember { mutableStateOf("midnight") }
+    var chatWallpaperImage by remember { mutableStateOf<String?>(null) }
     var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -309,9 +317,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         selected?.id?.let { chatId ->
             val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
             chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
+            chatWallpaperId = prefs.getString("wallpaper_pattern_$chatId", "midnight") ?: "midnight"
+            chatWallpaperImage = prefs.getString("wallpaper_image_$chatId", null)
             chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
         } ?: run {
             chatWallpaperColor = Color(0xFF100C1D)
+            chatWallpaperId = "midnight"
+            chatWallpaperImage = null
             chatBubbleColor = Color(0xFF6945C7)
         }
     }
@@ -412,36 +424,71 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     fun sendPendingMedia(chat: ChatItem, uri: Uri, caption: String, replyToId: String?) {
         if (sendingImage) return
         sendingImage = true
-        val submittedCaption = caption
-        val submittedReply = replyTarget
+        val messageId = UUID.randomUUID().toString()
+        val createdAt = java.time.Instant.now().toString()
+        val mimeType = context.contentResolver.getType(uri)
+            ?: if (uri.scheme == "file" && uri.path?.endsWith(".m4a", true) == true) "audio/mp4" else "application/octet-stream"
+        val mediaKind = when {
+            mimeType.startsWith("image/") -> "image"
+            mimeType.startsWith("video/") -> "video"
+            mimeType.startsWith("audio/") -> "audio"
+            else -> "file"
+        }
+        val displayName = runCatching {
+            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/') ?: when(mediaKind) {
+            "audio" -> "Голосовое сообщение"
+            "image" -> "Фото"
+            "video" -> "Видео"
+            else -> "Файл"
+        }
+        val optimistic = MessageItem(
+            messageId, store.userId.orEmpty(), uri.toString(), createdAt,
+            "media", replyToId, encrypted = true, securityWarning = false,
+            mediaKind = mediaKind, mediaCaption = caption, mediaFileName = displayName, mediaMimeType = mimeType
+        )
+        messages = (messages + optimistic).distinctBy { it.id }.sortedBy { it.createdAt }
+        val optimisticSnapshot = messages.toList()
+        scope.launch(Dispatchers.IO) { runCatching { localCache.saveMessages(store.userId.orEmpty(), chat.id, optimisticSnapshot) } }
+        messageDelivery[messageId] = "sending"
+        failedMediaRetries.remove(messageId)
         draft = ""
         chatDrafts[chat.id] = ""
         replyTarget = null
+        pendingMediaUri = null
         scope.launch {
             error = ""
             var encrypted: EncryptedMediaFile? = null
+            var uploaded = false
             try {
                 val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
                 encrypted = withContext(Dispatchers.IO) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
                 if (chat.kind == "direct") {
-                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId)
+                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
                 } else {
-                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId)
+                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
                 }
-                pendingMediaUri = null
-                draft = ""
-                replyTarget = null
-                notice = "Медиа отправлено с E2EE-шифрованием"
+                uploaded = true
+                messageDelivery[messageId] = "sent"
+                failedMediaRetries.remove(messageId)
+                if (selected?.id == chat.id) {
+                    runCatching {
+                        messages = api.messages(chat.id, e2eeClient)
+                        withContext(Dispatchers.IO) { localCache.saveMessages(store.userId.orEmpty(), chat.id, messages) }
+                    }
+                }
+                notice = "Медиа отправлено"
             } catch (e: Exception) {
                 encrypted?.file?.delete()
-                if (draft.isBlank()) draft = submittedCaption
-                chatDrafts[chat.id] = draft
-                if (replyTarget == null) replyTarget = submittedReply
+                messageDelivery[messageId] = "failed"
+                failedMediaRetries[messageId] = Triple(chat, uri, caption to replyToId)
                 error = e.message ?: "Не удалось отправить медиа"
             } finally {
-                if (uri.scheme == "file") uri.path?.let(::File)?.delete()
+                if (uploaded && uri.scheme == "file") uri.path?.let(::File)?.delete()
                 sendingImage = false
             }
         }
@@ -478,6 +525,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         profilePhotoUri = uri
+    }
+    val chatWallpaperPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            chatWallpaperImage = uri.toString()
+            chatWallpaperId = "custom"
+            selected?.id?.let { id ->
+                context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
+                    .edit().putString("wallpaper_image_$id", uri.toString()).putString("wallpaper_pattern_$id", "custom").apply()
+            }
+        }
     }
 
     val visibleChats = chats
@@ -520,14 +578,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         chat: ChatItem, messageId: String, text: String, replyToId: String?, createdAt: String? = null
     ) {
         if (messageDelivery[messageId] == "sending" || messageDelivery[messageId] == "sent") return
+        // A legacy cached chat has no authoritative mode until its metadata request finishes.
+        // Never route a secret outbox item through the cloud sender by guessing.
+        if (chat.chatMode != "cloud" && chat.chatMode != "secret") {
+            messageDelivery[messageId] = "pending"
+            failedMessageRetries.remove(messageId)
+            return
+        }
         messageDelivery[messageId] = "sending"
         failedMessageRetries.remove(messageId)
         scope.launch {
             try {
-                val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
-                // Durably queue the plaintext under the Android Keystore key before any ratchet advance or network I/O.
-                withContext(Dispatchers.IO) {
-                    client.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
+                val secureClient = if (chat.chatMode == "secret") {
+                    e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
+                } else null
+                // Secret chats keep the durable local E2EE outbox. Cloud chats use
+                // the server-managed AES-GCM archive and do not advance an Olm ratchet.
+                if (chat.chatMode == "secret") {
+                    withContext(Dispatchers.IO) {
+                        secureClient!!.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
+                    }
                 }
                 var delivered = false
                 var lastFailure: Exception? = null
@@ -536,10 +606,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         messageSendMutex.withLock {
                             // Olm/JNI encryption is CPU work; never run it on Compose's main thread.
                             withContext(Dispatchers.Default) {
-                                if (chat.kind == "direct") {
-                                    api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
+                                if (chat.chatMode == "cloud") {
+                                    api.sendCloudMessage(chat.id, messageId, text, replyToId)
+                                } else if (chat.kind == "direct") {
+                                    api.sendEncryptedDirectMessage(chat.id, secureClient!!, messageId, text, replyToId)
                                 } else {
-                                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+                                    api.sendEncryptedGroupMessage(chat.id, secureClient!!, messageId, text, replyToId = replyToId)
                                 }
                             }
                         }
@@ -556,9 +628,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (delivered) {
                     messageDelivery[messageId] = "sent"
                     failedMessageRetries.remove(messageId)
-                    // Persist the advanced Olm ratchet and the sender's local plaintext cache
-                    // to the encrypted cloud backup as soon as the send succeeds.
-                    runCatching { api.syncE2eeBackupIfEnabled(client) }
+                    // Only secret chats advance Olm ratchets and need E2EE backup sync.
+                    if (chat.chatMode == "secret") {
+                        runCatching { api.syncE2eeBackupIfEnabled(secureClient!!) }
+                    }
                 } else {
                     throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
                 }
@@ -596,7 +669,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         chatSearchQuery = ""
         scope.launch {
             try {
-                // Render the encrypted local snapshot immediately; network sync follows.
+                // Show the encrypted local snapshot immediately, without waiting for network.
                 val cachedMessages = withContext(Dispatchers.IO) {
                     localCache.readMessages(store.userId.orEmpty(), chat.id)
                 }
@@ -608,12 +681,31 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     lastSyncedMessageTimestamp = cachedNewest?.createdAt
                     lastSyncedMessageId = cachedNewest?.id
                 }
+
+                // Older cache versions did not persist chat_mode. Resolve those entries
+                // from the server before deciding whether a send needs E2EE.
+                var activeChat = chat
+                if (activeChat.chatMode == "unknown") {
+                    val resolvedMode = withContext(Dispatchers.IO) {
+                        api.conversationChatMode(activeChat.id)
+                    }
+                    activeChat = activeChat.copy(chatMode = resolvedMode)
+                    if (selected?.id == activeChat.id) {
+                        selected = activeChat
+                        val updatedChats = chats.map { if (it.id == activeChat.id) activeChat else it }
+                        chats = updatedChats
+                        withContext(Dispatchers.IO) {
+                            localCache.saveChats(store.userId.orEmpty(), updatedChats)
+                        }
+                    }
+                }
+
                 // Start with a smaller first network page on low-memory phones.
                 val loadedMessages = withContext(Dispatchers.IO) {
-                    api.messages(chat.id, e2eeClient, pageSize = 20)
+                    api.messages(activeChat.id, e2eeClient, pageSize = 20)
                 }
                 val pendingForChat = withContext(Dispatchers.IO) {
-                    e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == chat.id }
+                    e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == activeChat.id }
                 }
                 if (selected?.id != chat.id) return@launch
 
@@ -635,7 +727,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 lastSyncedMessageId = newest?.id
 
                 pendingForChat.forEach { pending ->
-                    dispatchSecureMessage(chat, pending.messageId, pending.plaintext, pending.replyToId, pending.createdAt)
+                    dispatchSecureMessage(activeChat, pending.messageId, pending.plaintext, pending.replyToId, pending.createdAt)
                 }
 
                 // These metadata requests are independent. Run them together after
@@ -675,6 +767,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
         if (text.isBlank()) return
+        if (chat.chatMode != "cloud" && chat.chatMode != "secret") {
+            error = "Подключаем чат. Подожди пару секунд и отправь сообщение ещё раз."
+            return
+        }
         val messageId = UUID.randomUUID().toString()
         draft = ""
         chatDrafts[chat.id] = ""
@@ -744,18 +840,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     cachedPreviews.forEach { (chatId, preview) -> chatPreviews[chatId] = preview }
                 }
                 api.restoreSession()
-                api.myProfile() // Create a profile row for accounts that have not opened settings yet.
-                val initialPrivacy = api.privacySettings()
-                showOnlineStatus = initialPrivacy.showOnlineStatus
-                readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
-                // Prepare local E2EE state before chats become tappable; key publication is
-                // network work and happens after the chat list has rendered.
+                // Build the local E2EE client immediately after session restoration.
+                // This local-only step must not wait for profile/privacy/chat-list requests:
+                // a fast tap on a cached secret chat must not race device initialization.
                 val e2eeUserId = store.userId
                 val localE2eeClient = if (!e2eeUserId.isNullOrBlank()) {
                     runCatching { E2eeClient(context.applicationContext, e2eeUserId) }
                         .onFailure { e2eeStatus = "Не удалось подготовить E2EE: ${it.message ?: "ошибка устройства"}" }
                         .getOrNull()
                 } else null
+                if (localE2eeClient != null) e2eeClient = localE2eeClient
+
+                api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                val initialPrivacy = api.privacySettings()
+                showOnlineStatus = initialPrivacy.showOnlineStatus
+                readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
                 val latestChats = api.chats()
                 chats = latestChats
                 withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
@@ -765,7 +864,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     // Cloud-history messages are restored independently of the legacy Olm
                     // device backup. A new install must not be blocked by a recovery code.
                     e2eeRecoveryRequired = false
-                    e2eeClient = localE2eeClient
                     try {
                         val available = api.publishE2eeDevice(localE2eeClient)
                         e2eeStatus = if (!hadLocalDevice && previousServerDevice) {
@@ -906,7 +1004,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             realtimeClient.observeConversations(watchedIds).collect { event ->
                 realtimeConnected = event.connected
                 val changedChatId = event.changedConversationId
-                if (event.connected && event.messageChanged && changedChatId != null && e2eeClient != null) {
+                if (event.connected && event.messageChanged && changedChatId != null) {
+                    val changedChat = chats.firstOrNull { it.id == changedChatId }
+                    if (changedChat?.chatMode == "cloud" || e2eeClient != null) {
                     runCatching {
                         val cached = withContext(Dispatchers.IO) {
                             localCache.readMessages(store.userId.orEmpty(), changedChatId)
@@ -947,6 +1047,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
@@ -1324,6 +1425,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (notice.isNotBlank()) Text(notice, color = Success, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                         OutlinedButton(onClick = { showLogoutDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 28.dp).height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) { Text("Выйти из аккаунта") }
                         }
+                        AudioMiniPlayer()
                         Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                             NexuraBottomBar(
                                 selected = homeTab,
@@ -1809,6 +1911,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         }
+                        AudioMiniPlayer()
                         NexuraBottomBar(
                             selected = homeTab,
                             profileSelected = false,
@@ -1992,26 +2095,95 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
+                    if (showChatModeDialog) {
+                        AlertDialog(
+                            onDismissRequest = { if (!changingChatMode) showChatModeDialog = false },
+                            containerColor = Surface1,
+                            title = { Text("Режим переписки", color = MainText, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.ChatBubbleOutline, null, tint = Accent)
+                                        Column(Modifier.padding(start = 10.dp)) {
+                                            Text("Облачный чат", color = MainText, fontWeight = FontWeight.SemiBold)
+                                            Text("История синхронизируется через сервер и доступна на ваших устройствах. Это не сквозное E2EE.", color = SecondaryText, fontSize = 12.sp)
+                                        }
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Lock, null, tint = Success)
+                                        Column(Modifier.padding(start = 10.dp)) {
+                                            Text("Секретный чат", color = MainText, fontWeight = FontWeight.SemiBold)
+                                            Text("Новые сообщения шифруются между устройствами. Доступность истории зависит от ключей устройств.", color = SecondaryText, fontSize = 12.sp)
+                                        }
+                                    }
+                                    Text("Старые сообщения сохраняют прежний способ хранения и шифрования. Режим меняется для всех участников чата.", color = SecondaryText, fontSize = 11.sp)
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(enabled = !changingChatMode, onClick = {
+                                    val nextMode = if (chat.chatMode == "cloud") "secret" else "cloud"
+                                    changingChatMode = true
+                                    scope.launch {
+                                        try {
+                                            api.updateConversationChatMode(chat.id, nextMode)
+                                            val updated = ChatItem(chat.id, chat.title, chat.kind, chat.updated, chat.unreadCount, chat.avatar, chat.peerUserId, nextMode)
+                                            selected = updated
+                                            chats = chats.map { if (it.id == updated.id) updated else it }
+                                            showChatModeDialog = false
+                                            notice = if (nextMode == "secret") "Включён секретный режим. Новые сообщения будут E2EE." else "Включён облачный режим. Новые сообщения будут синхронизироваться через сервер."
+                                        } catch (e: Exception) {
+                                            error = e.message ?: "Не удалось изменить режим. Изменять его может создатель чата."
+                                        } finally { changingChatMode = false }
+                                    }
+                                }) {
+                                    Text(if (changingChatMode) "Сохраняем…" else "Переключить на " + if (chat.chatMode == "cloud") "секретный" else "облачный")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showChatModeDialog = false }, enabled = !changingChatMode) { Text("Закрыть") }
+                            }
+                        )
+                    }
                     if (chatThemeOpen) {
-                        val wallpaperOptions = listOf("Фиолетовая ночь" to Color(0xFF100C1D), "Графит" to Color(0xFF171D27), "Сланец" to Color(0xFF1B2634), "Синий вечер" to Color(0xFF101D32), "Лес" to Color(0xFF14251F), "Бордовый" to Color(0xFF2A1922))
+                        val wallpaperOptions = listOf(
+                            Triple("midnight", "Полночь", Color(0xFF100C1D)), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
+                            Triple("forest", "Тайга", Color(0xFF101D1A)), Triple("ocean", "Глубина", Color(0xFF0D1C27)), Triple("rain", "Дождь", Color(0xFF171C27)),
+                            Triple("mono", "Графит", Color(0xFF17191F)), Triple("bloom", "Сакура", Color(0xFF211923)), Triple("ember", "Жар", Color(0xFF241815)),
+                            Triple("geometry", "Контур", Color(0xFF171725)), Triple("pixel", "Пиксель", Color(0xFF151B25)), Triple("tide", "Прилив", Color(0xFF101F25))
+                        )
                         val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
                             containerColor = Surface1,
                             title = { Text("Оформление чата", color = MainText, fontWeight = FontWeight.Bold) },
                             text = {
-                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Text("Фон переписки", color = MainText, fontWeight = FontWeight.SemiBold)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                                        wallpaperOptions.forEach { (label, color) ->
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(54.dp).clickable {
-                                                chatWallpaperColor = color
-                                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().putInt("wallpaper_$id", color.toArgb()).apply() }
-                                            }) {
-                                                Box(Modifier.size(38.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
-                                                    if (chatWallpaperColor == color) Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(17.dp))
+                                    OutlinedButton(onClick = { chatWallpaperPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
+                                        Icon(Icons.Default.Image, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(if (chatWallpaperImage != null) "Изменить свои обои" else "Выбрать фото из галереи")
+                                    }
+                                    if (chatWallpaperImage != null) {
+                                        AsyncImage(model = chatWallpaperImage, contentDescription = "Предпросмотр обоев чата", modifier = Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                                    }
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        wallpaperOptions.chunked(3).forEach { themes ->
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                                themes.forEach { (wallpaperId, label, color) ->
+                                                    Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).border(1.dp, if (chatWallpaperId == wallpaperId) Accent else Surface2, RoundedCornerShape(10.dp)).clickable {
+                                                        chatWallpaperId = wallpaperId
+                                                        chatWallpaperImage = null
+                                                        chatWallpaperColor = color
+                                                        selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_" + store.userId.orEmpty(), Context.MODE_PRIVATE).edit().remove("wallpaper_image_" + id).putString("wallpaper_pattern_" + id, wallpaperId).putInt("wallpaper_" + id, color.toArgb()).apply() }
+                                                    }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Box(Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(7.dp)).background(color).nexuraWallpaperPattern(wallpaperId), contentAlignment = Alignment.Center) {
+                                                            if (chatWallpaperId == wallpaperId) Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(17.dp))
+                                                        }
+                                                        Text(label, color = if (chatWallpaperId == wallpaperId) MainText else SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+                                                    }
                                                 }
-                                                Text(label, color = SecondaryText, fontSize = 9.sp, maxLines = 1)
+                                                repeat(3 - themes.size) { Spacer(Modifier.weight(1f)) }
                                             }
                                         }
                                     }
@@ -2035,9 +2207,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             },
                             confirmButton = { TextButton(onClick = { chatThemeOpen = false }) { Text("Готово") } },
                             dismissButton = { TextButton(onClick = {
-                                chatWallpaperColor = Color(0xFF0D1118)
+                                chatWallpaperColor = Color(0xFF100C1D)
+                                chatWallpaperId = "midnight"
+                                chatWallpaperImage = null
                                 chatBubbleColor = Color(0xFF304B83)
-                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().remove("wallpaper_$id").remove("bubble_$id").apply() }
+                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().remove("wallpaper_$id").remove("wallpaper_pattern_$id").remove("wallpaper_image_$id").remove("bubble_$id").apply() }
                             }) { Text("Сбросить") } }
                         )
                     }
@@ -2403,71 +2577,101 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     maxLines = 1
                                 )
                             }
-                            IconButton(onClick = { chatThemeOpen = true }) {
-                                Icon(Icons.Default.Palette, "Оформление чата", tint = if (chatThemeOpen) Accent else SecondaryText)
-                            }
-                            IconButton(onClick = {
-                                scope.launch {
-                                    try {
-                                        val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
-                                        if (chat.kind == "direct") {
-                                            val peerId = api.directPeerUserId(chat.id)
-                                            val devices = api.activeE2eeDevices(peerId)
-                                            if (devices.isEmpty()) throw IllegalStateException("У собеседника пока нет активных устройств Nexura.")
-                                            trustPeerId = peerId
-                                            trustCandidate = devices.first()
-                                        } else {
-                                            val ownDeviceId = client.deviceId()
-                                            val members = api.groupMemberIds(chat.id)
-                                            val queue = members.flatMap { memberId ->
-                                                val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
-                                                if (devices.isEmpty() && memberId != store.userId) throw IllegalStateException("У участника $memberId пока нет активного E2EE-устройства")
-                                                devices.map { memberId to it }
-                                            }.filter { (memberId, device) ->
-                                                !client.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
-                                            }
-                                            if (queue.isEmpty()) {
-                                                notice = "Все активные устройства участников уже подтверждены"
-                                            } else {
-                                                groupTrustQueue = queue
-                                                trustPeerId = queue.first().first
-                                                trustCandidate = queue.first().second
+                            Box {
+                                IconButton(onClick = { showChatOptionsMenu = true }) {
+                                    Icon(Icons.Default.MoreVert, "Действия чата", tint = SecondaryText)
+                                }
+                                DropdownMenu(
+                                    expanded = showChatOptionsMenu,
+                                    onDismissRequest = { showChatOptionsMenu = false },
+                                    modifier = Modifier.background(Surface1)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(if (chat.chatMode == "secret") "Переключить на облачный чат" else "Переключить на секретный чат") },
+                                        leadingIcon = { Icon(if (chat.chatMode == "secret") Icons.Default.ChatBubbleOutline else Icons.Default.Lock, null) },
+                                        onClick = { showChatOptionsMenu = false; showChatModeDialog = true }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Оформление чата") },
+                                        leadingIcon = { Icon(Icons.Default.Palette, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            chatThemeOpen = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Поиск по переписке") },
+                                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                                        onClick = { showChatOptionsMenu = false; chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Медиа и ссылки") },
+                                        leadingIcon = { Icon(Icons.Default.Image, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            scope.launch {
+                                                try {
+                                                    val media = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                                    val recentLinks = api.messages(chat.id, e2eeClient).filter {
+                                                        it.messageType == "text" && Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).containsMatchIn(it.content)
+                                                    }
+                                                    chatGallery = (media + recentLinks).distinctBy { it.id }.sortedByDescending { it.createdAt }
+                                                } catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
                                             }
                                         }
-                                    } catch (e: Exception) {
-                                        error = e.message ?: "Не удалось получить ключи устройств"
-                                    }
-                                }
-                            }) {
-                                Icon(Icons.Default.Lock, if (chat.kind == "group") "Проверить устройства группы" else "Проверить устройство", tint = Accent)
-                            }
-                            IconButton(onClick = {
-                                scope.launch {
-                                    try {
-                                        val media = api.messages(chat.id, e2eeClient, mediaOnly = true)
-                                        val recentLinks = api.messages(chat.id, e2eeClient).filter {
-                                            it.messageType == "text" && Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).containsMatchIn(it.content)
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Проверить устройства") },
+                                        leadingIcon = { Icon(Icons.Default.Lock, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            scope.launch {
+                                                try {
+                                                    val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
+                                                    if (chat.kind == "direct") {
+                                                        val peerId = api.directPeerUserId(chat.id)
+                                                        val devices = api.activeE2eeDevices(peerId)
+                                                        if (devices.isEmpty()) throw IllegalStateException("У собеседника пока нет активных устройств Nexura.")
+                                                        trustPeerId = peerId
+                                                        trustCandidate = devices.first()
+                                                    } else {
+                                                        val ownDeviceId = client.deviceId()
+                                                        val members = api.groupMemberIds(chat.id)
+                                                        val queue = members.flatMap { memberId ->
+                                                            val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
+                                                            if (devices.isEmpty() && memberId != store.userId) throw IllegalStateException("У участника $memberId пока нет активного E2EE-устройства")
+                                                            devices.map { memberId to it }
+                                                        }.filter { (memberId, device) ->
+                                                            !client.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
+                                                        }
+                                                        if (queue.isEmpty()) {
+                                                            notice = "Все активные устройства участников уже подтверждены"
+                                                        } else {
+                                                            groupTrustQueue = queue
+                                                            trustPeerId = queue.first().first
+                                                            trustCandidate = queue.first().second
+                                                        }
+                                                    }
+                                                } catch (e: Exception) { error = e.message ?: "Не удалось получить ключи устройств" }
+                                            }
                                         }
-                                        chatGallery = (media + recentLinks).distinctBy { it.id }.sortedByDescending { it.createdAt }
-                                    } catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Обновить чат") },
+                                        leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            scope.launch {
+                                                try {
+                                                    messages = api.messages(chat.id, e2eeClient)
+                                                    messageReactions = api.messageReactions(chat.id)
+                                                    pinnedMessageId = api.pinnedMessage(chat.id)
+                                                    canManagePins = api.canManageConversation(chat.id)
+                                                } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" }
+                                            }
+                                        }
+                                    )
                                 }
-                            }) {
-                                Icon(Icons.Default.Image, "Медиа чата", tint = if (chatGallery != null) Accent else SecondaryText)
-                            }
-                            IconButton(onClick = { chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }) {
-                                Icon(Icons.Default.Search, "Поиск по переписке", tint = if (chatSearchOpen) Accent else SecondaryText)
-                            }
-                            IconButton(onClick = {
-                                scope.launch {
-                                    try {
-                                        messages = api.messages(chat.id, e2eeClient)
-                                        messageReactions = api.messageReactions(chat.id)
-                                        pinnedMessageId = api.pinnedMessage(chat.id)
-                                        canManagePins = api.canManageConversation(chat.id)
-                                    } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" }
-                                }
-                            }) {
-                                Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
                             }
                         }
                         if (chatSearchOpen) {
@@ -2592,12 +2796,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 LazyColumn(
                                     state = messageListState,
-                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor),
+                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor).then(if (chatWallpaperImage != null) Modifier.paint(rememberAsyncImagePainter(chatWallpaperImage), contentScale = ContentScale.Crop) else Modifier.nexuraWallpaperPattern(chatWallpaperId)),
                                     contentPadding = PaddingValues(bottom = 16.dp)
                                 ) {
                                     items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
                                     val mine = msg.senderId == store.userId
                                     val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
+                                    var swipeDragOffset by remember(msg.id) { mutableStateOf(0f) }
+                                    val swipeTranslation by animateFloatAsState(
+                                        targetValue = swipeDragOffset,
+                                        animationSpec = spring(dampingRatio = 0.78f, stiffness = 520f),
+                                        label = "message-swipe-reply"
+                                    )
                                     Row(
                                         Modifier.fillMaxWidth().padding(vertical = 5.dp)
                                             .pointerInput(msg.id) {
@@ -2605,29 +2815,35 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 detectHorizontalDragGestures(
                                                     onHorizontalDrag = { change, dragAmount ->
                                                         horizontalDrag += dragAmount
+                                                        swipeDragOffset = (swipeDragOffset + dragAmount).coerceIn(0f, 88.dp.toPx())
                                                         change.consume()
                                                     },
                                                     onDragEnd = {
-                                                        if (horizontalDrag > 64.dp.toPx()) {
+                                                        if (horizontalDrag >= 64.dp.toPx()) {
                                                             replyTarget = msg
                                                             reactionPickerFor = null
                                                         }
                                                         horizontalDrag = 0f
+                                                        swipeDragOffset = 0f
                                                     },
-                                                    onDragCancel = { horizontalDrag = 0f }
+                                                    onDragCancel = {
+                                                        horizontalDrag = 0f
+                                                        swipeDragOffset = 0f
+                                                    }
                                                 )
                                             },
                                         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
                                     ) {
                                         Column(
-                                            Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(
-                                                topStart = 20.dp, topEnd = 20.dp,
-                                                bottomStart = if (mine) 20.dp else 6.dp,
-                                                bottomEnd = if (mine) 6.dp else 20.dp
-                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                            Modifier.widthIn(max = 320.dp).graphicsLayer { translationX = swipeTranslation }
+                                                .clip(RoundedCornerShape(
+                                                    topStart = 20.dp, topEnd = 20.dp,
+                                                    bottomStart = if (mine) 20.dp else 6.dp,
+                                                    bottomEnd = if (mine) 6.dp else 20.dp
+                                                )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
-                                                    onClick = { reactionPickerFor = if (reactionPickerFor == msg.id) null else msg.id; openMessageMenu = null },
+                                                    onClick = { reactionPickerFor = null; openMessageMenu = null },
                                                     onLongClick = { reactionPickerFor = null; openMessageMenu = msg.id }
                                                 )
                                                 .padding(horizontal = 15.dp, vertical = 12.dp)
@@ -2728,8 +2944,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             .border(1.dp, Accent.copy(alpha = 0.20f), RoundedCornerShape(16.dp))
                                                             .clickable {
                                                                 try {
-                                                                    val local = File(mediaUri.path ?: throw IOException("Файл недоступен"))
-                                                                    val contentUri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", local)
+                                                                    val contentUri = if (mediaUri.scheme == "content") {
+                                                                        mediaUri
+                                                                    } else {
+                                                                        val local = File(mediaUri.path ?: throw IOException("Файл недоступен"))
+                                                                        androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", local)
+                                                                    }
                                                                     context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, msg.mediaMimeType ?: "*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                                                                 } catch (_: Exception) { notice = "Не удалось открыть документ. Установите приложение для этого формата." }
                                                             }.padding(12.dp),
@@ -2784,7 +3004,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             color = Danger,
                                                             fontSize = 10.sp,
                                                             modifier = Modifier.padding(start = 5.dp).clickable {
-                                                                failedMessageRetries[msg.id]?.let { retry ->
+                                                                failedMediaRetries.remove(msg.id)?.let { retry ->
+                                                                    messages = messages.filterNot { it.id == msg.id }
+                                                                    messageDelivery.remove(msg.id)
+                                                                    sendPendingMedia(retry.first, retry.second, retry.third.first, retry.third.second)
+                                                                } ?: failedMessageRetries[msg.id]?.let { retry ->
                                                                     dispatchSecureMessage(retry.first, msg.id, retry.second, retry.third)
                                                                 }
                                                             }
@@ -3178,38 +3402,48 @@ private fun AudioMessagePlayer(
     mimeType: String?
 ) {
     val context = LocalContext.current
-    var player by remember(uri) { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember(uri) { mutableStateOf(false) }
     var loading by remember(uri) { mutableStateOf(false) }
-    var prepared by remember(uri) { mutableStateOf(false) }
     var durationMs by remember(uri) { mutableLongStateOf(0L) }
     var positionMs by remember(uri) { mutableLongStateOf(0L) }
-    val activePlayer = rememberUpdatedState(player)
+    var dragging by remember(uri) { mutableStateOf(false) }
 
-    LaunchedEffect(player, playing, prepared) {
-        while (playing && prepared) {
-            val current = player ?: break
-            if (!runCatching { current.isPlaying }.getOrDefault(false)) break
-            positionMs = runCatching { current.currentPosition.toLong() }.getOrDefault(positionMs)
+    LaunchedEffect(uri) {
+        while (true) {
+            val active = AudioPlaybackService.activeUri == uri.toString()
+            loading = active && AudioPlaybackService.loading
+            playing = active && AudioPlaybackService.playing
+            if (active) {
+                durationMs = AudioPlaybackService.durationMs
+                if (!dragging) positionMs = AudioPlaybackService.positionMs
+            } else {
+                durationMs = 0L
+                positionMs = 0L
+            }
             delay(250)
         }
     }
 
-    DisposableEffect(uri) {
-        onDispose {
-            runCatching { activePlayer.value?.stop() }
-            runCatching { activePlayer.value?.release() }
+    fun sendAudioAction(action: String, position: Long? = null) {
+        val intent = Intent(context, AudioPlaybackService::class.java).setAction(action)
+        if (position != null) intent.putExtra(AudioPlaybackService.EXTRA_POSITION, position)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "Не удалось управлять аудио", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun formatTime(value: Long): String {
-        val seconds = (value.coerceAtLeast(0L) / 1000L)
+        val seconds = value.coerceAtLeast(0L) / 1000L
         return String.format(Locale.getDefault(), "%d:%02d", seconds / 60L, seconds % 60L)
     }
 
     val title = fileName?.takeIf { it.isNotBlank() && it != "voice.m4a" }
         ?: if (mimeType?.startsWith("audio/") == true) "Аудиофайл" else "Голосовое сообщение"
     val subtitle = caption?.takeIf { it.isNotBlank() } ?: mimeType?.uppercase(Locale.getDefault()) ?: "ЗАЩИЩЁННОЕ АУДИО"
+    val active = AudioPlaybackService.activeUri == uri.toString()
 
     Column(
         Modifier.widthIn(min = 245.dp, max = 300.dp)
@@ -3221,56 +3455,21 @@ private fun AudioMessagePlayer(
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = {
-                    if (playing) {
-                        runCatching { player?.pause() }
-                        playing = false
-                    } else if (prepared && player != null) {
-                        runCatching {
-                            if (positionMs >= durationMs && durationMs > 0L) {
-                                player?.seekTo(0)
-                                positionMs = 0L
+                    when {
+                        active && playing -> sendAudioAction(AudioPlaybackService.ACTION_PAUSE)
+                        active -> sendAudioAction(AudioPlaybackService.ACTION_RESUME)
+                        else -> {
+                            val intent = Intent(context, AudioPlaybackService::class.java)
+                                .setAction(AudioPlaybackService.ACTION_PLAY)
+                                .putExtra(AudioPlaybackService.EXTRA_URI, uri.toString())
+                                .putExtra(AudioPlaybackService.EXTRA_TITLE, title)
+                                .putExtra(AudioPlaybackService.EXTRA_SUBTITLE, subtitle)
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                                else context.startService(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Не удалось открыть аудиофайл", Toast.LENGTH_SHORT).show()
                             }
-                            player?.start()
-                            playing = true
-                        }.onFailure {
-                            Toast.makeText(context, "Не удалось продолжить аудио", Toast.LENGTH_SHORT).show()
-                        }
-                    } else if (!loading) {
-                        loading = true
-                        try {
-                            val next = MediaPlayer()
-                            player = next
-                            next.setOnPreparedListener { mp ->
-                                durationMs = mp.duration.toLong().coerceAtLeast(0L)
-                                positionMs = 0L
-                                prepared = true
-                                loading = false
-                                mp.start()
-                                playing = true
-                            }
-                            next.setOnCompletionListener { mp ->
-                                playing = false
-                                positionMs = 0L
-                                runCatching { mp.seekTo(0) }
-                            }
-                            next.setOnErrorListener { mp, _, _ ->
-                                loading = false
-                                prepared = false
-                                playing = false
-                                runCatching { mp.release() }
-                                player = null
-                                Toast.makeText(context, "Не удалось воспроизвести аудио", Toast.LENGTH_SHORT).show()
-                                true
-                            }
-                            next.setDataSource(context, uri)
-                            next.prepareAsync()
-                        } catch (_: Exception) {
-                            loading = false
-                            prepared = false
-                            playing = false
-                            runCatching { player?.release() }
-                            player = null
-                            Toast.makeText(context, "Не удалось открыть аудиофайл", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -3286,40 +3485,20 @@ private fun AudioMessagePlayer(
                 )
             }
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text(
-                    title,
-                    color = MainText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
-                )
-                Text(
-                    subtitle,
-                    color = SecondaryText,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    modifier = Modifier.padding(top = 3.dp)
-                )
+                Text(title, color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(subtitle, color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
             }
-            Icon(
-                Icons.Default.GraphicEq,
-                contentDescription = "Аудио",
-                tint = Accent,
-                modifier = Modifier.padding(start = 6.dp).size(22.dp)
-            )
+            Icon(Icons.Default.GraphicEq, contentDescription = "Аудио", tint = Accent, modifier = Modifier.padding(start = 6.dp).size(22.dp))
         }
         Slider(
-            value = if (durationMs > 0L) positionMs.coerceIn(0L, durationMs).toFloat() else 0f,
-            onValueChange = { positionMs = it.toLong() },
+            value = if (active && durationMs > 0L) positionMs.coerceIn(0L, durationMs).toFloat() else 0f,
+            onValueChange = { dragging = true; positionMs = it.toLong() },
             onValueChangeFinished = {
-                if (prepared && durationMs > 0L) {
-                    val target = positionMs.coerceIn(0L, durationMs).toInt()
-                    runCatching { player?.seekTo(target) }
-                    if (playing) runCatching { player?.start() }
-                }
+                if (active && durationMs > 0L) sendAudioAction(AudioPlaybackService.ACTION_SEEK, positionMs.coerceIn(0L, durationMs))
+                dragging = false
             },
             valueRange = 0f..(durationMs.coerceAtLeast(1L).toFloat()),
-            enabled = prepared && durationMs > 0L,
+            enabled = active && durationMs > 0L,
             modifier = Modifier.fillMaxWidth().height(25.dp),
             colors = SliderDefaults.colors(
                 thumbColor = Accent,
@@ -3328,15 +3507,70 @@ private fun AudioMessagePlayer(
             )
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(
-                if (loading) "Загрузка…" else formatTime(positionMs),
-                color = SecondaryText,
-                fontSize = 10.sp
-            )
-            Text(
-                if (durationMs > 0L) formatTime(durationMs) else "--:--",
-                color = SecondaryText,
-                fontSize = 10.sp
+            Text(if (loading) "Загрузка…" else formatTime(positionMs), color = SecondaryText, fontSize = 10.sp)
+            Text(if (durationMs > 0L) formatTime(durationMs) else "--:--", color = SecondaryText, fontSize = 10.sp)
+        }
+    }
+}
+
+
+@Composable
+private fun AudioMiniPlayer() {
+    val context = LocalContext.current
+    var active by remember { mutableStateOf(false) }
+    var playing by remember { mutableStateOf(false) }
+    var position by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var dragging by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            active = AudioPlaybackService.activeUri != null
+            playing = AudioPlaybackService.playing
+            duration = AudioPlaybackService.durationMs
+            if (!dragging) position = AudioPlaybackService.positionMs
+            delay(250)
+        }
+    }
+    if (!active) return
+
+    fun command(action: String, seek: Long? = null) {
+        val intent = Intent(context, AudioPlaybackService::class.java).setAction(action)
+        if (seek != null) intent.putExtra(AudioPlaybackService.EXTRA_POSITION, seek)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
+        }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        color = Surface1,
+        shape = RoundedCornerShape(17.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.22f)),
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.GraphicEq, contentDescription = "Сейчас играет", tint = Accent, modifier = Modifier.size(21.dp))
+                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                    Text(AudioPlaybackService.currentTitle, color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text("Продолжает воспроизводиться", color = SecondaryText, fontSize = 10.sp)
+                }
+                IconButton(onClick = { command(if (playing) AudioPlaybackService.ACTION_PAUSE else AudioPlaybackService.ACTION_RESUME) }) {
+                    Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = if (playing) "Пауза" else "Продолжить", tint = Accent)
+                }
+                IconButton(onClick = { command(AudioPlaybackService.ACTION_STOP) }) {
+                    Icon(Icons.Default.Close, contentDescription = "Остановить", tint = SecondaryText)
+                }
+            }
+            Slider(
+                value = if (duration > 0L) position.coerceIn(0L, duration).toFloat() else 0f,
+                onValueChange = { dragging = true; position = it.toLong() },
+                onValueChangeFinished = { command(AudioPlaybackService.ACTION_SEEK, position); dragging = false },
+                valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+                enabled = duration > 0L,
+                modifier = Modifier.fillMaxWidth().height(20.dp),
+                colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = SecondaryText.copy(alpha = 0.25f))
             )
         }
     }
@@ -3536,9 +3770,27 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         animationSpec = spring(stiffness = 420f),
         label = "reaction-chip-color"
     )
+    val emojiRotation by animateFloatAsState(
+        targetValue = if (pulse) when (emoji) {
+            "❤️" -> 24f
+            "👍" -> -18f
+            "😂" -> 16f
+            "😮" -> 22f
+            "😢" -> -16f
+            "🔥" -> 14f
+            else -> 12f
+        } else 0f,
+        animationSpec = spring(dampingRatio = 0.30f, stiffness = 420f),
+        label = "reaction-emoji-rotation"
+    )
+    val emojiLift by animateFloatAsState(
+        targetValue = if (pulse) -5f else 0f,
+        animationSpec = spring(dampingRatio = 0.28f, stiffness = 460f),
+        label = "reaction-emoji-lift"
+    )
     LaunchedEffect(pulse) {
         if (pulse) {
-            delay(180)
+            delay(220)
             pulse = false
         }
     }
@@ -3546,12 +3798,21 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         Modifier.padding(end = 6.dp).graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(18.dp)).background(chipColor)
             .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.20f), RoundedCornerShape(18.dp))
-            .clickable { pulse = true; onClick() }
+            .clickable { if (!pulse) { pulse = true; onClick() } }
             .animateContentSize(spring(dampingRatio = 0.78f, stiffness = 520f))
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(emoji, fontSize = 14.sp)
+        Text(
+            emoji,
+            fontSize = 14.sp,
+            modifier = Modifier.graphicsLayer {
+                rotationZ = emojiRotation
+                translationY = emojiLift * density
+                scaleX = if (pulse) 1.16f else 1f
+                scaleY = if (pulse) 1.16f else 1f
+            }
+        )
         Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }

@@ -106,7 +106,8 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
                 .put("updated", chat.updated)
                 .put("unread", chat.unreadCount)
                 .put("avatar", chat.avatar)
-                .put("peer", chat.peerUserId))
+                .put("peer", chat.peerUserId)
+                .put("chatMode", chat.chatMode))
         }
         runCatching { put(userId, "chats", array.toString()) }
     }
@@ -126,7 +127,9 @@ class LocalCacheStore(context: Context) : SQLiteOpenHelper(
                 updated = item.optString("updated").takeIf { it.isNotBlank() && it != "null" },
                 unreadCount = item.optInt("unread"),
                 avatar = item.optString("avatar", "🙂"),
-                peerUserId = item.optString("peer").takeIf { it.isNotBlank() && it != "null" }
+                peerUserId = item.optString("peer").takeIf { it.isNotBlank() && it != "null" },
+                // Old cache entries have no mode. Resolve them from the server instead of guessing.
+                chatMode = item.optString("chatMode").takeIf { it == "cloud" || it == "secret" } ?: "unknown"
             )
         }
         }.getOrDefault(emptyList())
