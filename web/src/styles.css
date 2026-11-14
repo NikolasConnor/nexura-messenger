@@ -436,3 +436,41 @@ body{overscroll-behavior:none}
  .message-reactions .reaction-chip,.message-reactions .reaction-add,.message-reactions .message-more,.reaction-picker button{transition:none}
  .reaction-picker,.message-context-menu{animation:none}
 }
+
+
+/* Conversation polish: grouped bubbles, reply quotes and forward sheet */
+.message-row{align-items:flex-end;gap:8px;margin-top:2px;transition:opacity .16s ease,transform .16s ease}
+.message-row.grouped-prev{margin-top:-5px}
+.message-row.grouped-prev .message-avatar{visibility:hidden}
+.message-row.grouped-prev:not(.mine) .message-bubble{border-top-left-radius:6px}
+.message-row.grouped-next:not(.mine) .message-bubble{border-bottom-left-radius:6px}
+.message-row.mine.grouped-prev .message-bubble{border-top-right-radius:6px}
+.message-row.mine.grouped-next .message-bubble{border-bottom-right-radius:6px}
+.message-shell{min-width:0}
+.message-bubble{overflow-wrap:anywhere}
+.message-content{user-select:text}
+.reply-reference{display:grid;width:100%;gap:2px;text-align:left;border:0;border-left:3px solid #b99bfa;border-radius:4px 8px 8px 4px;padding:6px 9px;margin:0 0 7px;background:#17132166;color:#e9dcff;cursor:pointer;transition:background .15s}
+.reply-reference:hover{background:#171321a8}
+.reply-reference span{font-size:10px;font-weight:700;color:#c7aaff}
+.reply-reference b{font-size:11px;font-weight:450;color:#d2c8df;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.mine .reply-reference{border-left-color:#d0b5ff;background:#21172e55}
+.message-context-menu{max-height:min(70vh,360px);overflow-y:auto;overscroll-behavior:contain}
+.message-context-menu button:disabled{opacity:.45;cursor:wait}
+.forward-modal{max-width:430px}
+.forward-preview{margin:12px 0;padding:11px 13px;border-radius:10px;background:#171321;border-left:3px solid #a78bfa;color:#dcd3e8;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.forward-chat-list{display:flex;flex-direction:column;gap:3px;max-height:min(48vh,360px);overflow-y:auto}
+.forward-chat-list .chat-item{width:100%;text-align:left}
+.forward-chat-list .chat-item>svg{margin-left:auto;color:#bca5e2}
+.composer textarea{max-height:144px;min-height:24px;overflow-y:auto;resize:none;line-height:1.45}
+@media(max-width:800px){
+ .message-row.grouped-prev{margin-top:-6px}
+ .message-shell{max-width:calc(100% - 34px)}
+ .message-row.mine .message-shell{max-width:90%}
+ .message-reactions{gap:3px}
+ .message-context-menu{min-width:178px}
+ .forward-modal{width:min(94vw,430px)}
+}
+@media(prefers-reduced-motion:reduce){
+ .message-row{transition:none}
+ .reply-reference{transition:none}
+}
