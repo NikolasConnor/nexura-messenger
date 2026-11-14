@@ -294,6 +294,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    // Keep the encrypted cloud copy current after messages are decrypted or history pages are loaded.
+    // The backup is uploaded only after the user has explicitly enabled it with a recovery code.
+    LaunchedEffect(e2eeClient, messages) {
+        val client = e2eeClient ?: return@LaunchedEffect
+        if (!client.hasRecoveryKey()) return@LaunchedEffect
+        delay(1_500L)
+        runCatching { api.syncE2eeBackupIfEnabled(client) }
+    }
+
     LaunchedEffect(selected?.id, store.userId) {
         context.getSharedPreferences("nexura_runtime", android.content.Context.MODE_PRIVATE)
             .edit().putString("active_chat_id", selected?.id).apply()
@@ -547,6 +556,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (delivered) {
                     messageDelivery[messageId] = "sent"
                     failedMessageRetries.remove(messageId)
+                    // Persist the advanced Olm ratchet and the sender's local plaintext cache
+                    // to the encrypted cloud backup as soon as the send succeeds.
+                    runCatching { api.syncE2eeBackupIfEnabled(client) }
                 } else {
                     throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
                 }
