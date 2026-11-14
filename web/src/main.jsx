@@ -63,6 +63,46 @@ function isEncrypted(content = '') {
   return value.startsWith('{') && (value.includes('"ciphertext"') || value.includes('"protocol"') || value.includes('"nexura"') || value.includes('"kind"'));
 }
 
+// Android stores the Olm envelope in messages.content and, when available,
+// a separately AES-GCM-encrypted cloud-history copy in messages.cloud_content.
+// Legacy messages may instead have a per-user archive in message_cloud_archives.
+async function decryptCloudHistoryRows(client, conversationId, rows) {
+  const items = [];
+  const missingSharedIds = [];
+  for (const row of rows || []) {
+    const cloudContent = typeof row.cloud_content === 'string' ? row.cloud_content : '';
+    if (cloudContent && cloudContent !== 'null') {
+      items.push({ id: row.id, cloud_content: cloudContent, scope: 'shared' });
+    } else if (row.id) {
+      missingSharedIds.push(row.id);
+    }
+  }
+  if (missingSharedIds.length) {
+    const { data, error } = await client.from('message_cloud_archives')
+      .select('message_id,cloud_content')
+      .eq('conversation_id', conversationId)
+      .in('message_id', missingSharedIds);
+    if (!error) {
+      for (const archive of data || []) {
+        items.push({ id: archive.message_id, cloud_content: archive.cloud_content, scope: 'user' });
+      }
+    }
+  }
+  if (!items.length) return {};
+  const plaintextById = {};
+  // The Edge Function accepts at most 100 messages per request.
+  for (let offset = 0; offset < items.length; offset += 100) {
+    const { data, error } = await client.functions.invoke('cloud-history', {
+      body: { action: 'decrypt', conversation_id: conversationId, items: items.slice(offset, offset + 100) }
+    });
+    if (error) throw error;
+    for (const item of data?.items || []) {
+      if (item?.id && typeof item.plaintext === 'string') plaintextById[item.id] = item.plaintext;
+    }
+  }
+  return plaintextById;
+}
+
 
 function parseMediaPayload(content) {
   try { const value=JSON.parse(content); return value && value.schema==='nexura-media-v1'?value:null; } catch { return null; }
@@ -303,7 +343,10 @@ function App() {
       .then(({data}) => setProfile(data));
   }, [session?.user?.id]);
 
-  const decryptMessageRow = useCallback(async (chat, message) => {
+  const decryptMessageRow = useCallback(async (chat, message, cloudPlaintext) => {
+    if (typeof cloudPlaintext === 'string') {
+      return { ...message, content: cloudPlaintext, decrypted: true, encrypted: false, decryptionError: null };
+    }
     if (!isEncrypted(message.content)) return message;
     try {
       const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
@@ -323,13 +366,15 @@ function App() {
       // The old ascending+limit query could hide all recent messages in long chats.
       const [messageResult, reactionsResult] = await Promise.all([
         supabase.from('messages')
-          .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+          .select('id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
           .eq('conversation_id', chat.id).is('deleted_at', null)
           .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50),
         loadMessageReactions(supabase, chat.id).catch(() => ({}))
       ]);
       if (messageResult.error) throw messageResult.error;
-      const rows = await Promise.all((messageResult.data || []).reverse().map(message => decryptMessageRow(chat, message)));
+      const rawRows = (messageResult.data || []).reverse();
+      const cloudPlaintext = await decryptCloudHistoryRows(supabase, chat.id, rawRows).catch(() => ({}));
+      const rows = await Promise.all(rawRows.map(message => decryptMessageRow(chat, message, cloudPlaintext[message.id])));
       if (requestId !== messageLoadSeq.current) return;
       setMessages(rows);
       setMessageReactions(reactionsResult || {});
@@ -377,7 +422,8 @@ function App() {
           setMessageReactions(previous => { const next = { ...previous }; delete next[source.id]; return next; });
           return;
         }
-        const message = await decryptMessageRow(chat, source);
+        const cloudPlaintext = await decryptCloudHistoryRows(supabase, chat.id, [source]).catch(() => ({}));
+        const message = await decryptMessageRow(chat, source, cloudPlaintext[source.id]);
         if (!active) return;
         setMessages(previous => {
           const next = [...previous.filter(item => item.id !== message.id), message]
