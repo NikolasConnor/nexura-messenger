@@ -558,3 +558,5 @@ body{overscroll-behavior:none}
 .file-download{font-size:10px;font-weight:700;color:#d6c2ff}
 @media(max-width:520px){.composer-input-row{gap:5px}.composer-attach,.composer-mic{width:34px;height:36px;flex-basis:34px}.voice-player{min-width:min(235px,68vw)}}
 @media(prefers-reduced-motion:reduce){.composer-mic.recording,.recording-dot{animation:none}}
+
+.media-image-preview{display:block;max-width:min(320px,68vw);max-height:280px;object-fit:contain;border-radius:10px}.media-video-preview{display:block;width:min(340px,70vw);max-height:280px;border-radius:10px;background:#000}
