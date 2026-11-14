@@ -91,6 +91,8 @@ function MediaMessage({ payload, supabase }) {
   const toggle=async()=>{const audio=audioRef.current;if(!audio)return;try{if(audio.paused)await audio.play();else audio.pause();}catch(e){setError('Браузер не смог воспроизвести аудио');}};
   if (busy) return <div className="media-loading">Расшифровываем вложение…</div>;
   if (error) return <div className="media-error">{error}</div>;
+  if (payload.media_type==='image') return <img className="media-image-preview" src={url} alt={payload.name || 'Изображение'}/>;
+  if (payload.media_type==='video') return <video className="media-video-preview" src={url} controls preload="metadata"/>;
   if (payload.media_type==='audio') return <div className="voice-player">
     <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={e=>setDuration(e.currentTarget.duration||0)} onTimeUpdate={e=>setCurrent(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)}/>
     <button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button>
@@ -715,7 +717,7 @@ function App() {
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
           {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sending}>{sending?'Отправка…':'Отправить'}</button></div>}
           {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
-          <input ref={fileInputRef} type="file" className="visually-hidden-file" accept="audio/*,.pdf,.txt,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.json,.csv" onChange={event=>{const file=event.target.files?.[0];if(file)setPendingMedia(file);event.target.value='';}}/>
+          <input ref={fileInputRef} type="file" className="visually-hidden-file" accept="audio/*,image/*,video/*,.pdf,.txt,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.json,.csv" onChange={event=>{const file=event.target.files?.[0];if(file)setPendingMedia(file);event.target.value='';}}/>
           <div className="composer-input-row">
             <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={!e2eeReady||sending||recording||!!pendingMedia} title="Прикрепить файл" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
             <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={!e2eeReady||sending||!!pendingMedia} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
