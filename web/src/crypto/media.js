@@ -1,12 +1,12 @@
 const MAX_MEDIA_BYTES = 24 * 1024 * 1024;
 const ALLOWED_MIME = new Set([
-  'audio/mp4','audio/aac','audio/mpeg','audio/ogg','audio/wav','audio/x-wav','audio/3gpp','audio/webm',
+  'audio/mp4','audio/aac','audio/mpeg','audio/ogg','audio/wav','audio/x-wav','audio/3gpp','audio/webm','audio/flac','audio/opus','audio/x-m4a',
   'image/jpeg','image/png','image/webp','video/mp4','video/quicktime','video/webm',
   'application/pdf','text/plain','application/rtf','application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-powerpoint','application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/zip','application/json','text/csv'
+  'application/zip','application/x-7z-compressed','application/x-rar-compressed','application/octet-stream','application/json','text/csv','text/markdown','text/html','text/xml'
 ]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const toBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
