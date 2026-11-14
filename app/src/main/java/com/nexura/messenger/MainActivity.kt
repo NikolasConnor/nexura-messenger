@@ -2764,6 +2764,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
                                     val mine = msg.senderId == store.userId
                                     val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
+                                    var swipeDragOffset by remember(msg.id) { mutableStateOf(0f) }
+                                    val swipeTranslation by animateFloatAsState(
+                                        targetValue = swipeDragOffset,
+                                        animationSpec = spring(dampingRatio = 0.78f, stiffness = 520f),
+                                        label = "message-swipe-reply"
+                                    )
                                     Row(
                                         Modifier.fillMaxWidth().padding(vertical = 5.dp)
                                             .pointerInput(msg.id) {
@@ -2771,29 +2777,35 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 detectHorizontalDragGestures(
                                                     onHorizontalDrag = { change, dragAmount ->
                                                         horizontalDrag += dragAmount
+                                                        swipeDragOffset = (swipeDragOffset + dragAmount).coerceIn(0f, 88.dp.toPx())
                                                         change.consume()
                                                     },
                                                     onDragEnd = {
-                                                        if (horizontalDrag > 64.dp.toPx()) {
+                                                        if (horizontalDrag >= 64.dp.toPx()) {
                                                             replyTarget = msg
                                                             reactionPickerFor = null
                                                         }
                                                         horizontalDrag = 0f
+                                                        swipeDragOffset = 0f
                                                     },
-                                                    onDragCancel = { horizontalDrag = 0f }
+                                                    onDragCancel = {
+                                                        horizontalDrag = 0f
+                                                        swipeDragOffset = 0f
+                                                    }
                                                 )
                                             },
                                         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
                                     ) {
                                         Column(
-                                            Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(
-                                                topStart = 20.dp, topEnd = 20.dp,
-                                                bottomStart = if (mine) 20.dp else 6.dp,
-                                                bottomEnd = if (mine) 6.dp else 20.dp
-                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                            Modifier.widthIn(max = 320.dp).graphicsLayer { translationX = swipeTranslation }
+                                                .clip(RoundedCornerShape(
+                                                    topStart = 20.dp, topEnd = 20.dp,
+                                                    bottomStart = if (mine) 20.dp else 6.dp,
+                                                    bottomEnd = if (mine) 6.dp else 20.dp
+                                                )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
-                                                    onClick = { reactionPickerFor = if (reactionPickerFor == msg.id) null else msg.id; openMessageMenu = null },
+                                                    onClick = { reactionPickerFor = null; openMessageMenu = null },
                                                     onLongClick = { reactionPickerFor = null; openMessageMenu = msg.id }
                                                 )
                                                 .padding(horizontal = 15.dp, vertical = 12.dp)
