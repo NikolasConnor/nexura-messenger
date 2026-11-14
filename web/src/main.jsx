@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
+import { loadMessageReactions, toggleMessageReaction, markConversationRead } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
@@ -125,6 +126,7 @@ function App() {
   const [chats, setChats] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [messageReactions, setMessageReactions] = useState({});
   const [loadingChats, setLoadingChats] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [search, setSearch] = useState('');
@@ -238,6 +240,9 @@ function App() {
         }
       }));
       setMessages(rows);
+      const reactions = await loadMessageReactions(supabase, chat.id).catch(() => ({}));
+      setMessageReactions(reactions);
+      markConversationRead(supabase, chat.id).catch(() => {});
     }
     setLoadingMessages(false);
   }, [session?.user?.id]);
@@ -401,6 +406,7 @@ function App() {
                 {!mine && <Avatar className="message-avatar" value={selected.avatar} name={selected.title}/>}
                 <div className="message-bubble">
                   {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
+                  <div className="message-reactions">{(messageReactions[m.id] || []).map(reaction=><button key={reaction.emoji} className={reaction.selectedByMe?"selected":""} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,reaction.emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{reaction.emoji} {reaction.count}</button>)}<button onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,"❤️");setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>＋</button></div>
                   <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{mine && <CheckCheck size={13}/>}</div>
                 </div>
               </div>
