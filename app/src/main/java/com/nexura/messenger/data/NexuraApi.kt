@@ -537,7 +537,8 @@ class NexuraApi(private val store: SessionStore) {
             if (type in setOf("text", "media", "call") &&
                 (E2eeMessageEnvelope.isEnvelope(content) || E2eeGroupMessageEnvelope.isEnvelope(content) ||
                     content == "NEXURA_CLOUD_V1" || cloudPlaintextById.containsKey(id))) {
-                val decrypted = cloudPlaintextById[id] ?: if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
+                val cloudDecryptFailed = content == "NEXURA_CLOUD_V1" && !cloudPlaintextById.containsKey(id)
+                val decrypted = if (cloudDecryptFailed) null else cloudPlaintextById[id] ?: if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
                     runCatching {
                         val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
                         decryptGroupEnvelope(content, chatId, id, senderId, client)
@@ -604,6 +605,7 @@ class NexuraApi(private val store: SessionStore) {
                 MessageItem(
                     id, senderId,
                     when {
+                        cloudDecryptFailed -> "⚠ Не удалось загрузить облачное сообщение. Проверьте соединение и обновите чат."
                         decrypted == null -> "🔒 Сообщение зашифровано. Проверьте устройство или восстановите защищённую сессию."
                         type == "media" && mediaUri == null -> "⚠ Не удалось проверить или открыть медиафайл"
                         type == "media" -> mediaUri!!
