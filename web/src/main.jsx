@@ -219,7 +219,7 @@ function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: 'conversation_id=eq.' + selected.id }, () => loadMessages(selected))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [selected?.id, loadMessages]);
+  }, [selected?.id, loadMessages, e2eeReady]);
 
   const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
 
