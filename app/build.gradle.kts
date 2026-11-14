@@ -7,14 +7,19 @@ plugins {
 android {
     namespace = "com.nexura.messenger"
     compileSdk = 35
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     defaultConfig {
         applicationId = "com.nexura.messenger"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        val backupBaseUrl = providers.gradleProperty("NEXURA_BACKUP_BASE_URL").orElse("").get().trim().trimEnd('/')
+        buildConfigField("String", "NEXURA_BACKUP_BASE_URL", "\"$backupBaseUrl\"")
     }
-    buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
