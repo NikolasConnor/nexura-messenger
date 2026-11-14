@@ -3499,6 +3499,7 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
     LaunchedEffect(pressed) {
         if (pressed) {
             delay(430)
+            onClick()
             pressed = false
         }
     }
@@ -3509,7 +3510,7 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
             rotationZ = rotation
             translationY = lift * density
         }.clip(CircleShape).background(if (pressed) Accent.copy(alpha = 0.24f) else Surface2)
-            .clickable { pressed = true; onClick() },
+            .clickable { if (!pressed) pressed = true },
         contentAlignment = Alignment.Center
     ) { Text(emoji, fontSize = 21.sp) }
 }
