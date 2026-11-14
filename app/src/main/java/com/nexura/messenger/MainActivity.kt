@@ -2058,7 +2058,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     if (chatThemeOpen) {
-                        val wallpaperOptions = listOf("Фиолетовая ночь" to Color(0xFF100C1D), "Графит" to Color(0xFF171D27), "Сланец" to Color(0xFF1B2634), "Синий вечер" to Color(0xFF101D32), "Лес" to Color(0xFF14251F), "Бордовый" to Color(0xFF2A1922))
+                        val wallpaperOptions = listOf(
+                            Triple("midnight", "Полночь", Color(0xFF100C1D)), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
+                            Triple("forest", "Тайга", Color(0xFF101D1A)), Triple("ocean", "Глубина", Color(0xFF0D1C27)), Triple("rain", "Дождь", Color(0xFF171C27)),
+                            Triple("mono", "Графит", Color(0xFF17191F)), Triple("bloom", "Сакура", Color(0xFF211923)), Triple("ember", "Жар", Color(0xFF241815)),
+                            Triple("geometry", "Контур", Color(0xFF171725)), Triple("pixel", "Пиксель", Color(0xFF151B25)), Triple("tide", "Прилив", Color(0xFF101F25))
+                        )
                         val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
@@ -2067,16 +2072,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Text("Фон переписки", color = MainText, fontWeight = FontWeight.SemiBold)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                                        wallpaperOptions.forEach { (label, color) ->
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(54.dp).clickable {
-                                                chatWallpaperColor = color
-                                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().putInt("wallpaper_$id", color.toArgb()).apply() }
-                                            }) {
-                                                Box(Modifier.size(38.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
-                                                    if (chatWallpaperColor == color) Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(17.dp))
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        wallpaperOptions.chunked(3).forEach { themes ->
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                                themes.forEach { (wallpaperId, label, color) ->
+                                                    Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).border(1.dp, if (chatWallpaperId == wallpaperId) Accent else Surface2, RoundedCornerShape(10.dp)).clickable {
+                                                        chatWallpaperId = wallpaperId
+                                                        chatWallpaperColor = color
+                                                        selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_" + store.userId.orEmpty(), Context.MODE_PRIVATE).edit().putString("wallpaper_pattern_" + id, wallpaperId).putInt("wallpaper_" + id, color.toArgb()).apply() }
+                                                    }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Box(Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(7.dp)).background(color).nexuraWallpaperPattern(wallpaperId), contentAlignment = Alignment.Center) {
+                                                            if (chatWallpaperId == wallpaperId) Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(17.dp))
+                                                        }
+                                                        Text(label, color = if (chatWallpaperId == wallpaperId) MainText else SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+                                                    }
                                                 }
-                                                Text(label, color = SecondaryText, fontSize = 9.sp, maxLines = 1)
+                                                repeat(3 - themes.size) { Spacer(Modifier.weight(1f)) }
                                             }
                                         }
                                     }
