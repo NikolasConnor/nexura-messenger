@@ -100,12 +100,11 @@ export async function ensureBrowserE2eeDevice(supabase, userId) {
   return { deviceId: bundle.device_id, availableKeys: count || 0 };
 }
 
-async function consumePreKey(supabase, chatId, recipientUserId, device) {
+async function consumePreKey(supabase, chatId, localUserId, recipientUserId, device) {
+  const ownDevice = recipientUserId === localUserId;
   const { data, error } = await supabase.rpc(
-    recipientUserId === (await supabase.auth.getUser()).data.user?.id
-      ? 'consume_own_e2ee_one_time_key'
-      : 'consume_e2ee_one_time_key',
-    recipientUserId === (await supabase.auth.getUser()).data.user?.id
+    ownDevice ? 'consume_own_e2ee_one_time_key' : 'consume_e2ee_one_time_key',
+    ownDevice
       ? { p_conversation_id: chatId, p_device_id: device.device_id }
       : { p_conversation_id: chatId, p_recipient_user_id: recipientUserId, p_device_id: device.device_id }
   );
@@ -167,7 +166,12 @@ export async function sendBrowserDirectMessage(supabase, {
       const result = encrypt_message(session, bytes);
       kind = 'normal'; ciphertext = result.olm_envelope; nextSession = result.session_pickle;
     } else {
-      const preKey = await consumePreKey(supabase, chatId, device.user_id, device);
+      let preKey;
+      try { preKey = await consumePreKey(supabase, chatId, uid, device.user_id, device); }
+      catch (error) {
+        if (device.user_id === uid && /no available one-time key|одноразов.*ключ/i.test(error?.message || '')) continue;
+        throw error;
+      }
       const { start_outbound_session } = await import('./pkg/nexura_crypto_wasm.js');
       const result = start_outbound_session(account, device.curve25519_key, preKey.one_time_key, bytes);
       kind = 'prekey'; ciphertext = result.olm_envelope; nextSession = result.session_pickle;
@@ -216,12 +220,12 @@ export async function decryptBrowserGroupMessage(supabase, userId, chatId, messa
       uuid(envelope.sender_user_id, 'sender') !== uuid(message.sender_id, 'message sender')) {
     throw new Error('E2EE-конверт не соответствует переписке');
   }
-  if (message.sender_id === uid) {
+  const bundle = await loadEncryptedRecord(uid, 'public-device');
+  if (message.sender_id === uid && envelope.sender_device_id === bundle?.device_id) {
     const own = await loadEncryptedRecord(uid, 'sent:' + message.id);
     if (typeof own !== 'string') throw new Error('Локальная копия отправленного сообщения недоступна');
     return own;
   }
-  const bundle = await loadEncryptedRecord(uid, 'public-device');
   if (!bundle) throw new Error('Браузерное E2EE-устройство не зарегистрировано');
   const recipient = (envelope.recipients || []).find(r => r.user_id === uid && r.device_id === bundle.device_id);
   if (!recipient) throw new Error('Сообщение адресовано другому устройству');
