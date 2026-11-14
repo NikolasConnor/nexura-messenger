@@ -362,6 +362,8 @@ function App() {
   useEffect(() => {
     if (!selected) { messageLoadSeq.current++; setMessages([]); setMessageReactions({}); return; }
     const chat = selected;
+    setMessages([]);
+    setMessageReactions({});
     loadMessages(chat);
     let active = true;
     const channel = supabase.channel('web-chat-' + chat.id)
@@ -685,7 +687,7 @@ function App() {
   }
 
   async function signOut() { await supabase.auth.signOut(); }
-  function openChat(chat) { setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
+  function openChat(chat) { setChats(previous => previous.map(item => item.id === chat.id ? { ...item, unread: 0 } : item)); setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
   const activeMenuMessage = messages.find(message => message.id === messageMenu) || null;
   const activeMenuMine = activeMenuMessage?.sender_id === session?.user?.id;
