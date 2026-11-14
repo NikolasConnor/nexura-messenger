@@ -621,3 +621,11 @@ body{overscroll-behavior:none}
 .audio-dock .voice-play{width:39px;height:39px;flex:0 0 39px}
 .audio-dock-close{width:28px;height:28px;border:0;border-radius:9px;background:#ffffff0d;color:#c9bed8;font-size:21px;line-height:1}
 @media(max-width:520px){.audio-dock{bottom:max(10px,env(safe-area-inset-bottom));gap:9px;padding:10px}.audio-dock-icon{width:35px;height:35px;flex-basis:35px}.audio-dock-info b{font-size:11px}}
+
+.pending-chat-media{display:flex;align-items:center;gap:10px;min-width:180px;max-width:290px;padding:9px 10px;border-radius:13px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09)}
+.pending-chat-media>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pending-chat-media b{font-size:12px;max-width:185px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pending-chat-media small{font-size:10px;color:var(--muted,#aaa)}
+.pending-chat-media button{align-self:flex-start;border:0;background:transparent;color:#c5aaff;font-size:11px;padding:2px 0;cursor:pointer}
+.pending-chat-media .pending-audio-preview{width:190px;max-width:100%;height:32px}
+.media-send-status{font-size:13px;line-height:1;color:inherit;margin-left:3px;font-variant-numeric:tabular-nums}
