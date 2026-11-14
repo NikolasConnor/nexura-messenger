@@ -244,6 +244,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showChatModeDialog by remember { mutableStateOf(false) }
     var changingChatMode by remember { mutableStateOf(false) }
     var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
+    var chatWallpaperId by remember { mutableStateOf("midnight") }
     var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -311,9 +312,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         selected?.id?.let { chatId ->
             val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
             chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
+            chatWallpaperId = prefs.getString("wallpaper_pattern_$chatId", "midnight") ?: "midnight"
             chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
         } ?: run {
             chatWallpaperColor = Color(0xFF100C1D)
+            chatWallpaperId = "midnight"
             chatBubbleColor = Color(0xFF6945C7)
         }
     }
@@ -2661,7 +2664,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 LazyColumn(
                                     state = messageListState,
-                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor),
+                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor).nexuraWallpaperPattern(chatWallpaperId),
                                     contentPadding = PaddingValues(bottom = 16.dp)
                                 ) {
                                     items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
