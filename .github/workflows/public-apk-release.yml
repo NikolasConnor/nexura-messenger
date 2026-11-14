@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Тег релиза, для которого собрать и опубликовать APK"
+        required: true
+        default: "v0.2.0"
+        type: string
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -24,6 +31,8 @@ jobs:
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Check release signing secrets
         env:
