@@ -2327,8 +2327,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     // Keep the chat viewport below the status bar and resize it above the keyboard.
                     // The message area takes the remaining height; the composer stays at the bottom.
-                    Box(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                    Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                        Column(Modifier.fillMaxSize()) {
                         Row(
                             Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -2572,7 +2572,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 LazyColumn(
                                     state = messageListState,
                                     modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor),
-                                    contentPadding = PaddingValues(bottom = 180.dp)
+                                    contentPadding = PaddingValues(bottom = 16.dp)
                                 ) {
                                     items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
                                     val mine = msg.senderId == store.userId
@@ -2896,12 +2896,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
 
                         Column(
-                            Modifier.fillMaxWidth()
+                            Modifier.fillMaxWidth().imePadding().navigationBarsPadding()
                         ) {
                             if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                             if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                             Column(
-                                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).navigationBarsPadding().padding(horizontal = 10.dp, vertical = 9.dp)
+                                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).padding(horizontal = 10.dp, vertical = 9.dp)
                             ) {
                             if (replyTarget != null) {
                                 Row(
