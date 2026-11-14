@@ -268,7 +268,7 @@ function App() {
     } finally {
       if (requestId === chatLoadSeq.current) setLoadingChats(false);
     }
-  }, [session?.user?.id, chats.length]);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (!session) { setCryptoRuntimeError(''); return; }
@@ -386,7 +386,22 @@ function App() {
       })
       .subscribe();
     return () => { active = false; supabase.removeChannel(channel); };
-  }, [selected?.id, loadMessages, decryptMessageRow, session?.user?.id]);
+  }, [selected?.id, loadMessages, decryptMessageRow, session?.user?.id, e2eeReady]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let refreshTimer = null;
+    const channel = supabase.channel('web-chat-list-' + session.user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => loadChats({ silent: true }), 350);
+      })
+      .subscribe();
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id, loadChats]);
 
   const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
 
