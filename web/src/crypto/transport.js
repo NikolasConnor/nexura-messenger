@@ -151,7 +151,7 @@ async function consumePreKey(supabase, chatId, localUserId, recipientUserId, dev
 }
 
 export async function sendBrowserDirectMessage(supabase, {
-  userId, conversationId, peerUserId, messageId, plaintext
+  userId, conversationId, peerUserId, messageId, plaintext, replyToId = null, messageType = 'text'
 }) {
   await initializeOlm();
   const uid = uuid(userId, 'user');
@@ -237,7 +237,8 @@ export async function sendBrowserDirectMessage(supabase, {
   ]);
   const payload = {
     id: msgId, conversation_id: chatId, sender_id: uid,
-    message_type: 'text', content: envelope
+    message_type: messageType, content: envelope,
+    ...(replyToId ? { reply_to_id: uuid(replyToId, 'reply') } : {})
   };
   const { data: inserted, error: insertError } = await supabase.from('messages')
     .upsert(payload, { onConflict: 'id', ignoreDuplicates: true }).select('id,sender_id,content');
@@ -253,7 +254,7 @@ export async function sendBrowserDirectMessage(supabase, {
     throw new Error('Сервер не подтвердил сохранение зашифрованного сообщения');
   }
   await saveEncryptedRecords(uid, [['outbox:' + msgId, { conversationId: chatId, messageId: msgId, envelope, state: 'sent' }]]);
-  return { id: msgId, content: plaintext, created_at: new Date().toISOString(), sender_id: uid, message_type: 'text' };
+  return { id: msgId, content: plaintext, created_at: new Date().toISOString(), sender_id: uid, message_type: messageType, reply_to_id: replyToId };
 }
 
 export async function decryptBrowserGroupMessage(supabase, userId, chatId, message) {
