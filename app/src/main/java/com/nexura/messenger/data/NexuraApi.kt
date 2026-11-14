@@ -423,11 +423,32 @@ class NexuraApi(private val store: SessionStore) {
 
     private suspend fun decryptCloudHistory(conversationId: String, rows: JSONArray): Map<String, String> {
         val items = JSONArray()
+        val missingSharedIds = mutableListOf<String>()
         for (index in 0 until rows.length()) {
             val row = rows.getJSONObject(index)
             val cloudContent = row.optString("cloud_content")
             if (cloudContent.isNotBlank() && cloudContent != "null") {
-                items.put(JSONObject().put("id", row.getString("id")).put("cloud_content", cloudContent))
+                items.put(JSONObject().put("id", row.getString("id"))
+                    .put("cloud_content", cloudContent).put("scope", "shared"))
+            } else {
+                missingSharedIds += row.getString("id")
+            }
+        }
+        // Older Olm messages are archived per account by the device that can
+        // still decrypt them. This lets a clean install restore that user's copy.
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (missingSharedIds.isNotEmpty()) {
+            val ids = missingSharedIds.joinToString(",") { normalizeUuid(it) }
+            val archives = JSONArray(call(
+                "/rest/v1/message_cloud_archives?select=message_id,cloud_content" +
+                    "&user_id=eq.$uid&conversation_id=eq.${normalizeUuid(conversationId)}&message_id=in.($ids)"
+            ))
+            for (index in 0 until archives.length()) {
+                val archive = archives.getJSONObject(index)
+                items.put(JSONObject()
+                    .put("id", archive.getString("message_id"))
+                    .put("cloud_content", archive.getString("cloud_content"))
+                    .put("scope", "user"))
             }
         }
         if (items.length() == 0) return emptyMap()
@@ -491,6 +512,7 @@ class NexuraApi(private val store: SessionStore) {
             compareBy<Int> { raw.getJSONObject(it).optString("created_at") }
                 .thenBy { raw.getJSONObject(it).optString("id") }
         )
+        val archiveCandidates = JSONArray()
         val rendered = withContext(Dispatchers.Default) {
             chronologicalIndexes.map { i ->
             val m = raw.getJSONObject(i)
@@ -558,6 +580,11 @@ class NexuraApi(private val store: SessionStore) {
                 } catch (error: Exception) {
                     null
                 }
+                val sharedArchive = m.optString("cloud_content")
+                if (decrypted != null && (sharedArchive.isBlank() || sharedArchive == "null") &&
+                    !cloudPlaintextById.containsKey(id)) {
+                    archiveCandidates.put(JSONObject().put("id", id).put("plaintext", decrypted))
+                }
                 val mediaJson = if (type == "media" && decrypted != null) E2eeMediaCrypto.parsePayload(decrypted) else null
                 val mediaUri = if (mediaJson != null) {
                     runCatching { downloadAndDecryptMedia(mediaJson, id, chatId, senderId) }.getOrNull()
@@ -587,6 +614,21 @@ class NexuraApi(private val store: SessionStore) {
                 )
             }
             }.sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+        }
+        // Migrate only legacy messages this signed-in device successfully decrypted.
+        // Archives are scoped to this account and encrypted before they reach Postgres.
+        if (archiveCandidates.length() > 0) {
+            runCatching {
+                call(
+                    "/functions/v1/cloud-history",
+                    "POST",
+                    JSONObject()
+                        .put("action", "archive")
+                        .put("conversation_id", normalizeUuid(chatId))
+                        .put("items", archiveCandidates)
+                        .toString()
+                )
+            }
         }
         // Backup synchronization is intentionally not part of message paging/polling.
         // It runs during device setup and explicit backup maintenance, not on every refresh.
