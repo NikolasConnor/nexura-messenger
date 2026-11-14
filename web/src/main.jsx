@@ -127,6 +127,7 @@ function App() {
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
   const messageLoadSeq = useRef(0);
+  const messagesPaneRef = useRef(null);
   const [messageReactions, setMessageReactions] = useState({});
   const [loadingChats, setLoadingChats] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -392,6 +393,12 @@ function App() {
   function openChat(chat) { setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
 
+  useEffect(() => {
+    const pane = messagesPaneRef.current;
+    if (!pane || !selected) return;
+    pane.scrollTo({ top: pane.scrollHeight, behavior: loadingMessages ? 'auto' : 'smooth' });
+  }, [selected?.id, messages.length, loadingMessages]);
+
   if (initializing) return <div className="loading-screen"><div className="brand-mark"><MessageCircle/></div><span>Загружаем Nexura…</span></div>;
   if (!session) return <AuthScreen/>;
 
@@ -428,7 +435,7 @@ function App() {
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
       {!selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
         <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
-        <div className="messages-pane">
+        <div className="messages-pane" ref={messagesPaneRef}>
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
           {!loadingMessages && messages.length===0 && <div className="empty-messages"><div className="empty-chat-icon"><MessageCircle size={28}/></div><b>Начните общение</b><span>Напиши первое сообщение — оно появится здесь.</span></div>}
           {messages.map((m,index) => {
@@ -456,8 +463,11 @@ function App() {
         </div>
         {replyTarget && <div className="reply-composer"><span>Ответ на: {String(replyTarget.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>setReplyTarget(null)} aria-label="Отменить ответ">×</button></div>}
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
-          <textarea value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}}} placeholder={e2eeReady ? 'Напиши сообщение…' : 'Защищённое соединение не готово'} maxLength={12000} rows={1} disabled={!e2eeReady || sending}/>
-          <div className="composer-bottom"><span><LockKeyhole size={12}/> {e2eeReady?'Личное сообщение защищено':'Ожидаем подключение шифрования'} · Shift + Enter — новая строка</span><button className="send-button" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button></div>
+          <div className="composer-input-row">
+            <textarea value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}}} placeholder={e2eeReady ? 'Сообщение' : 'Подключаем защищённое соединение…'} maxLength={12000} rows={1} disabled={!e2eeReady || sending}/>
+            <button className="send-button" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button>
+          </div>
+          <div className="composer-hint"><LockKeyhole size={11}/><span>{e2eeReady ? 'Сквозное шифрование включено' : 'Ожидаем подключение шифрования'}</span><span className="composer-shortcut">Enter — отправить · Shift + Enter — перенос</span></div>
         </form> : <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Отправка в группах пока отключена</b><span>Сначала проверяем совместимость личных переписок с Android. Открытый текст не отправляется.</span></div></div>}
         </>
       }
