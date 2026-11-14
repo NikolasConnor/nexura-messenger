@@ -525,6 +525,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         chat: ChatItem, messageId: String, text: String, replyToId: String?, createdAt: String? = null
     ) {
         if (messageDelivery[messageId] == "sending" || messageDelivery[messageId] == "sent") return
+        // A legacy cached chat has no authoritative mode until its metadata request finishes.
+        // Never route a secret outbox item through the cloud sender by guessing.
+        if (chat.chatMode != "cloud" && chat.chatMode != "secret") {
+            messageDelivery[messageId] = "pending"
+            failedMessageRetries.remove(messageId)
+            return
+        }
         messageDelivery[messageId] = "sending"
         failedMessageRetries.remove(messageId)
         scope.launch {
