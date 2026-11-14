@@ -2111,9 +2111,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             },
                             confirmButton = { TextButton(onClick = { chatThemeOpen = false }) { Text("Готово") } },
                             dismissButton = { TextButton(onClick = {
-                                chatWallpaperColor = Color(0xFF0D1118)
+                                chatWallpaperColor = Color(0xFF100C1D)
+                                chatWallpaperId = "midnight"
                                 chatBubbleColor = Color(0xFF304B83)
-                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().remove("wallpaper_$id").remove("bubble_$id").apply() }
+                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().remove("wallpaper_$id").remove("wallpaper_pattern_$id").remove("bubble_$id").apply() }
                             }) { Text("Сбросить") } }
                         )
                     }
