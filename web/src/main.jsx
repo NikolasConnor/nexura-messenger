@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
+import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY';
@@ -127,6 +128,10 @@ function App() {
   const [groupResults, setGroupResults] = useState([]);
   const [groupMembers, setGroupMembers] = useState([]);
   const [groupBusy, setGroupBusy] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [e2eeReady, setE2eeReady] = useState(false);
+  const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
 
   useEffect(() => {
     let alive = true;
@@ -155,7 +160,7 @@ function App() {
         const peer = (c.conversation_members || []).find(m => m.user_id !== session.user.id);
         const p = peer?.profiles;
         return {
-          id: c.id, kind: c.kind, title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
+          id: c.id, kind: c.kind, peerUserId: peer?.user_id || null, title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
           avatar: p?.avatar_url || null, updated: c.last_message_at, unread: unread[c.id] || 0
         };
       }).filter(Boolean);
@@ -170,7 +175,11 @@ function App() {
 
   useEffect(() => {
     if (!session) { setCryptoRuntimeError(''); return; }
-    initializeOlm().catch(error => setCryptoRuntimeError(error?.message || 'Не удалось загрузить криптомодуль'));
+    setE2eeReady(false);
+    setE2eeStatus('Подготавливаем защищённое устройство…');
+    initializeOlm().then(() => ensureBrowserE2eeDevice(supabase, session.user.id))
+      .then(result => { setE2eeReady(true); setE2eeStatus('Защита включена · ' + result.availableKeys + ' одноразовых ключей'); })
+      .catch(error => { setE2eeReady(false); setCryptoRuntimeError(error?.message || 'Не удалось загрузить криптомодуль'); setE2eeStatus('Защита не готова: ' + (error?.message || 'ошибка')); });
   }, [session?.user?.id]);
 
   useEffect(() => {
@@ -188,9 +197,20 @@ function App() {
       .eq('conversation_id', chat.id).is('deleted_at', null)
       .order('created_at', { ascending: true }).limit(100);
     if (error) setNotice('Не удалось открыть переписку: ' + error.message);
-    else setMessages(data || []);
+    else {
+      const rows = await Promise.all((data || []).map(async message => {
+        if (!isEncrypted(message.content)) return message;
+        try {
+          const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
+          return { ...message, content: plaintext, decrypted: true };
+        } catch (decryptError) {
+          return { ...message, encrypted: true, decryptionError: decryptError?.message || 'Не удалось расшифровать сообщение' };
+        }
+      }));
+      setMessages(rows);
+    }
     setLoadingMessages(false);
-  }, []);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (!selected) { setMessages([]); return; }
@@ -250,7 +270,7 @@ function App() {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
         throw new Error('Сервер вернул некорректный ID переписки');
       }
-      const chat = { id, kind: 'direct', title: person.title, avatar: person.avatar, updated: new Date().toISOString(), unread: 0 };
+      const chat = { id, kind: 'direct', peerUserId: person.id, title: person.title, avatar: person.avatar, updated: new Date().toISOString(), unread: 0 };
       setChats(previous => [chat, ...previous.filter(item => item.id !== id)]);
       setSelected(chat); setActiveTab('chats'); setMobileChatOpen(true); setSearch('');
     } catch (error) { setNotice('Не удалось открыть переписку: ' + error.message); }
@@ -270,12 +290,32 @@ function App() {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
         throw new Error('Сервер вернул некорректный ID группы');
       }
-      const chat = { id, kind: 'group', title, avatar: '👥', updated: new Date().toISOString(), unread: 0 };
+      const chat = { id, kind: 'group', peerUserId: null, title, avatar: '👥', updated: new Date().toISOString(), unread: 0 };
       setChats(previous => [chat, ...previous.filter(item => item.id !== id)]);
       setSelected(chat); setActiveTab('chats'); setMobileChatOpen(true);
       setGroupOpen(false); setGroupTitle(''); setGroupQuery(''); setGroupMembers([]); setGroupResults([]);
     } catch (error) { setNotice('Не удалось создать группу: ' + error.message); }
     finally { setGroupBusy(false); }
+  }
+
+  async function sendMessage(event) {
+    event?.preventDefault?.();
+    if (!selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
+    const text = draft.trim();
+    if (!text) return;
+    setSending(true); setNotice('');
+    const messageId = crypto.randomUUID();
+    try {
+      const sent = await sendBrowserDirectMessage(supabase, {
+        userId: session.user.id, conversationId: selected.id,
+        peerUserId: selected.peerUserId, messageId, plaintext: text
+      });
+      setMessages(previous => [...previous, sent]);
+      setDraft('');
+      loadChats();
+    } catch (error) {
+      setNotice('Не удалось отправить защищённое сообщение: ' + (error?.message || 'ошибка'));
+    } finally { setSending(false); }
   }
 
   async function signOut() { await supabase.auth.signOut(); }
@@ -326,14 +366,17 @@ function App() {
             const mine=m.sender_id===session.user.id, encrypted=isEncrypted(m.content);
             return <div key={m.id} className={'message-row '+(mine?'mine':'')}>
               <div className="message-bubble">
-                {encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Зашифрованное сообщение</span><small>Для чтения нужна проверенная E2EE-сессия.</small></div> : <div className="message-content">{m.content}</div>}
+                {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Сообщение адресовано другому устройству или сессия ещё не установлена.'}</small></div> : <div className="message-content">{m.content}</div>}
                 <time>{timeLabel(m.created_at)}</time>
               </div>
             </div>;
           })}
-          <div className="security-note"><LockKeyhole size={15}/><span>Веб-клиент пока не расшифровывает E2EE-сообщения. Они не показываются как обычный текст.</span></div>
+          <div className="security-note"><LockKeyhole size={15}/><span>{e2eeStatus}. Сообщения отправляются только в зашифрованном виде; групповые чаты пока доступны для чтения, но отправка из веба отключена.</span></div>
         </div>
-        <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Отправка сообщений пока отключена</b><span>{cryptoRuntimeError ? 'Криптомодуль не загрузился: ' + cryptoRuntimeError : 'Общий модуль Olm загружен, но веб-отправка будет включена только после проверки ключей и совместимости с Android.'}</span></div></div>
+        {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
+          <input value={draft} onChange={event=>setDraft(event.target.value)} placeholder={e2eeReady ? 'Напиши сообщение…' : 'Защищённое соединение не готово'} maxLength={12000} disabled={!e2eeReady || sending}/>
+          <button className="primary-btn" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить"><Send size={17}/>{sending?'Отправляем…':'Отправить'}</button>
+        </form> : <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Отправка в группах пока отключена</b><span>Сначала проверяем совместимость личных переписок с Android. Открытый текст не отправляется.</span></div></div>}
         </>
       }
     </main>
