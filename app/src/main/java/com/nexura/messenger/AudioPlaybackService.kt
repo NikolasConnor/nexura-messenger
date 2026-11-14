@@ -48,6 +48,7 @@ class AudioPlaybackService : Service() {
                 if (uri != null) {
                     title = intent.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() } ?: "Голосовое сообщение"
                     subtitle = intent.getStringExtra(EXTRA_SUBTITLE)?.takeIf { it.isNotBlank() } ?: "Nexura"
+                    currentTitle = title
                     startForeground(NOTIFICATION_ID, buildNotification())
                     startPlayback(uri)
                 }
@@ -176,7 +177,7 @@ class AudioPlaybackService : Service() {
             .setContentIntent(openIntent)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(playing)
+            .setOngoing(true)
             .setOnlyAlertOnce(true)
             .addAction(pauseIcon, pauseLabel, pauseIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Закрыть", stopIntent)
@@ -217,6 +218,8 @@ class AudioPlaybackService : Service() {
         private const val CHANNEL_ID = "nexura_audio_playback"
         private const val NOTIFICATION_ID = 4107
 
+        @Volatile var currentTitle: String = "Голосовое сообщение"
+            private set
         @Volatile var activeUri: String? = null
             private set
         @Volatile var loading: Boolean = false
