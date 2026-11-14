@@ -38,7 +38,7 @@ class NexuraApi(private val store: SessionStore) {
 
     suspend fun checkConnection(): Boolean = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$" + "BASE_URL/auth/v1/health")
+            .url("${BASE_URL}/auth/v1/health")
             .header("apikey", PUBLIC_KEY)
             .header("Accept", "application/json")
             .get()
