@@ -24,8 +24,11 @@ export async function markConversationRead(supabase, chatId, share = true) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Сессия истекла');
   const now = new Date().toISOString();
+  const { data: profile, error: profileError } = await supabase.from('profiles')
+    .select('read_receipts_enabled').eq('id', user.id).maybeSingle();
+  if (profileError) throw profileError;
   const patch = { last_read_at: now };
-  if (share) patch.last_receipt_at = now;
+  if (share && (profile?.read_receipts_enabled ?? true)) patch.last_receipt_at = now;
   const { error } = await supabase.from('conversation_members').update(patch)
     .eq('conversation_id', id(chatId)).eq('user_id', user.id);
   if (error) throw error;
