@@ -2332,10 +2332,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     Box(
                         Modifier.fillMaxSize()
                             .statusBarsPadding()
-                            // The Activity uses adjustResize: Android shrinks this viewport for the IME.
-                            // Apply only the persistent system-bar inset here; adding IME padding as well
-                            // double-counts the keyboard height on devices that dispatch resize + IME insets.
+                            // Edge-to-edge keeps the app content behind system bars. Consume the IME
+                            // inset here so the whole chat viewport (including the composer) moves
+                            // above the keyboard. Compose inset consumption prevents double padding.
                             .navigationBarsPadding()
+                            .imePadding()
                     ) {
                         Column(Modifier.fillMaxSize()) {
                         Row(
