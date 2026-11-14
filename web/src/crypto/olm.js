@@ -53,11 +53,18 @@ export async function createBrowserDevice(userId) {
   await initializeOlm();
   if (await loadEncryptedRecord(userId, 'account')) throw new Error('На этом браузере уже есть E2EE-устройство');
   const created = create_device(50);
+  const publicKeys = {
+    ...created.public_keys,
+    protocol: 'olm-v1',
+    bundle_version: 1,
+    device_id: crypto.randomUUID(),
+    one_time_keys: created.public_keys.one_time_keys.map(key => ({ ...key, key_id: crypto.randomUUID() }))
+  };
   await saveEncryptedRecords(userId, [
     ['account', created.account_pickle],
-    ['public-device', created.public_keys]
+    ['public-device', publicKeys]
   ]);
-  return created.public_keys;
+  return publicKeys;
 }
 
 export async function replenishBrowserOneTimeKeys(userId, count = 30) {
@@ -65,11 +72,12 @@ export async function replenishBrowserOneTimeKeys(userId, count = 30) {
   const account = await loadEncryptedRecord(userId, 'account');
   if (!account) throw new Error('E2EE-устройство не создано');
   const generated = generate_one_time_keys(account, count);
+  const keys = generated.one_time_keys.map(key => ({ ...key, key_id: crypto.randomUUID() }));
   await saveEncryptedRecords(userId, [
     ['account', generated.account_pickle],
-    ['pending-public-keys', generated.one_time_keys]
+    ['pending-public-keys', keys]
   ]);
-  return generated.one_time_keys;
+  return keys;
 }
 
 export async function acknowledgeBrowserOneTimeKeysPublished(userId) {
