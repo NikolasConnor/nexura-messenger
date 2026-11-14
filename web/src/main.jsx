@@ -96,8 +96,11 @@ function BrowserAudioDock({state,onToggle,onSeek,onClose}) { if(!state.active)re
 function PendingMediaPreview({ file }) {
   const [url,setUrl]=useState('');
   useEffect(()=>{const next=URL.createObjectURL(file);setUrl(next);return()=>URL.revokeObjectURL(next);},[file]);
-  if (!url || !file.type.startsWith('audio/')) return null;
-  return <audio className="pending-audio-preview" controls preload="metadata" src={url}/>;
+  if (!url) return null;
+  if (file.type.startsWith('image/')) return <img className="media-image-preview pending-image-preview" src={url} alt={file.name || 'Фото'}/>;
+  if (file.type.startsWith('video/')) return <video className="media-video-preview pending-video-preview" controls preload="metadata" src={url}/>;
+  if (file.type.startsWith('audio/')) return <audio className="pending-audio-preview" controls preload="metadata" src={url}/>;
+  return <span className="pending-file-icon">📎</span>;
 }
 
 function AuthScreen() {
