@@ -629,3 +629,7 @@ body{overscroll-behavior:none}
 .pending-chat-media button{align-self:flex-start;border:0;background:transparent;color:#c5aaff;font-size:11px;padding:2px 0;cursor:pointer}
 .pending-chat-media .pending-audio-preview{width:190px;max-width:100%;height:32px}
 .media-send-status{font-size:13px;line-height:1;color:inherit;margin-left:3px;font-variant-numeric:tabular-nums}
+
+.pending-chat-media .pending-image-preview{display:block;width:min(220px,42vw);max-height:180px;object-fit:cover;border-radius:9px}
+.pending-chat-media .pending-video-preview{display:block;width:min(230px,45vw);max-height:170px;border-radius:9px}
+.pending-chat-media .pending-file-icon{font-size:24px;flex:0 0 auto}
