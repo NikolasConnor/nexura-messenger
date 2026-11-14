@@ -21,5 +21,9 @@ class SessionStore(context: Context) {
     var userId: String?
         get() = prefs.getString("user_id", null)
         set(value) { prefs.edit().putString("user_id", value).apply() }
+    var limitedAccessMode: Boolean
+        get() = prefs.getBoolean("limited_access_mode", false)
+        set(value) { prefs.edit().putBoolean("limited_access_mode", value).apply() }
+
     fun clear() { prefs.edit().clear().apply() }
 }

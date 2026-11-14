@@ -112,6 +112,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var limitedModeEnabled by remember { mutableStateOf(store.limitedAccessMode) }
+    var connectionReachable by remember { mutableStateOf(true) }
+    var connectionFailures by remember { mutableStateOf(0) }
+    var limitedModePrompt by remember { mutableStateOf(false) }
     var homeTab by remember { mutableStateOf("chats") }
     var deviceContacts by remember { mutableStateOf(emptyList<DeviceContact>()) }
     var syncingContacts by remember { mutableStateOf(false) }
@@ -134,6 +138,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editDraft by remember { mutableStateOf("") }
+
+    fun setLimitedMode(enabled: Boolean) {
+        limitedModeEnabled = enabled
+        store.limitedAccessMode = enabled
+        if (enabled) limitedModePrompt = false
+    }
 
     fun syncContacts() {
         scope.launch {
@@ -249,6 +259,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось восстановить сессию"
                 if (store.accessToken.isNullOrBlank()) signedIn = false
+            }
+        }
+    }
+
+    // Monitor the existing Supabase endpoint. This detects reachability problems;
+    // it does not bypass carrier restrictions or change the backend destination.
+    LaunchedEffect(signedIn, limitedModeEnabled) {
+        if (signedIn) {
+            delay(5000)
+            while (true) {
+                val reachable = try { api.checkConnection() } catch (_: Exception) { false }
+                connectionReachable = reachable
+                if (reachable) {
+                    connectionFailures = 0
+                    limitedModePrompt = false
+                } else {
+                    connectionFailures += 1
+                    if (connectionFailures >= 2 && !limitedModeEnabled) limitedModePrompt = true
+                }
+                delay(20000)
             }
         }
     }
@@ -388,7 +418,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                 }
                 selected == null && settingsOpen -> {
-                    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+                    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState())) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { settingsOpen = false; error = ""; notice = "" }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
                             Text("Настройки", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -412,6 +442,31 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
                             }
                         }
+                        Text("ПОДКЛЮЧЕНИЕ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 18.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Режим ограниченного доступа", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            if (connectionReachable) "Сервер Nexura доступен" else "Сервер пока не отвечает",
+                                            color = if (connectionReachable) Success else Danger, fontSize = 12.sp,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                    }
+                                    Switch(checked = limitedModeEnabled, onCheckedChange = { setLimitedMode(it) })
+                                }
+                                Text(
+                                    "Nexura автоматически проверяет соединение и предложит включить этот режим при повторных сбоях. Переключатель сохраняется на устройстве.",
+                                    color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)
+                                )
+                                Text(
+                                    "Важно: режим повторяет проверки доступности текущего сервера. Он не маскирует трафик и не гарантирует обход ограничений операторов.",
+                                    color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                        }
+
                         Text("СЕАНС И БЕЗОПАСНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
@@ -422,7 +477,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
                         if (notice.isNotBlank()) Text(notice, color = Success, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                        Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.height(12.dp))
                         OutlinedButton(onClick = { showLogoutDialog = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp).height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) { Text("Выйти из аккаунта") }
                     }
                     if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { api.signOut(); signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; notice = "" } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
@@ -440,6 +495,42 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) { Icon(Icons.Default.GroupAdd, "Создать группу", tint = Accent) }
                             IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                 Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
+                            }
+                        }
+                        if (limitedModeEnabled || limitedModePrompt || !connectionReachable) {
+                            Card(
+                                Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                                colors = CardDefaults.cardColors(containerColor = if (connectionReachable) Surface1 else Color(0xFF382A25)),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                when {
+                                                    limitedModeEnabled -> "Режим ограниченного доступа"
+                                                    !connectionReachable -> "Проблемы с подключением"
+                                                    else -> "Соединение нестабильно"
+                                                },
+                                                color = MainText, fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                when {
+                                                    limitedModeEnabled && connectionReachable -> "Сервер отвечает. Режим включён."
+                                                    limitedModeEnabled -> "Проверяем доступность сервера. Повторим проверку автоматически."
+                                                    else -> "Nexura не может связаться с сервером. Можно включить режим диагностики."
+                                                },
+                                                color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)
+                                            )
+                                        }
+                                        Switch(checked = limitedModeEnabled, onCheckedChange = { setLimitedMode(it) })
+                                    }
+                                    if (!limitedModeEnabled && limitedModePrompt) {
+                                        TextButton(onClick = { setLimitedMode(true) }, modifier = Modifier.align(Alignment.End)) {
+                                            Text("Включить режим")
+                                        }
+                                    }
+                                }
                             }
                         }
                         if (homeTab == "chats" && showChatFilter) {

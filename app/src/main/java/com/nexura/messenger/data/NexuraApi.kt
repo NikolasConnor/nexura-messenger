@@ -36,6 +36,17 @@ class NexuraApi(private val store: SessionStore) {
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
 
+    suspend fun checkConnection(): Boolean = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("${BASE_URL}/auth/v1/health")
+            .header("apikey", PUBLIC_KEY)
+            .header("Accept", "application/json")
+            .get()
+            .build()
+        client.newCall(request).execute().use { it.isSuccessful }
+    }
+
+
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
         fun buildRequest(token: String?): Request {
