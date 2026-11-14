@@ -347,6 +347,17 @@ function App() {
     if (typeof cloudPlaintext === 'string') {
       return { ...message, content: cloudPlaintext, decrypted: true, encrypted: false, decryptionError: null };
     }
+    // Android cloud chats deliberately store this sentinel in content; the
+    // actual authenticated ciphertext is in cloud_content and is decrypted
+    // through the cloud-history Edge Function above.
+    if (message.content === 'NEXURA_CLOUD_V1') {
+      return {
+        ...message,
+        content: '⚠ Не удалось загрузить облачное сообщение. Проверьте соединение и обновите чат.',
+        encrypted: true,
+        decryptionError: 'Облачная копия недоступна или не прошла проверку подлинности'
+      };
+    }
     if (!isEncrypted(message.content)) return message;
     try {
       const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
