@@ -397,3 +397,42 @@ body{overscroll-behavior:none}
   .message-row{animation:none}
   .message-bubble,.send-button,.composer-input-row{transition:none}
 }
+
+
+/* Telegram-like reactions and message action menu */
+.message-shell{position:relative;display:flex;flex-direction:column;align-items:flex-start;max-width:min(76%,660px);min-width:0}
+.message-row.mine .message-shell{align-items:flex-end}
+.message-shell .message-bubble{max-width:100%;width:fit-content}
+.message-meta .edited-label{font-size:9px;color:#b9accb;margin-left:2px}
+.message-tools{position:relative;display:flex;align-items:center;min-height:25px;max-width:100%}
+.message-reactions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:4px 0 0;min-height:24px}
+.message-reactions .reaction-chip{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:32px;height:25px;padding:2px 7px;border-radius:14px;background:#211d2a;border:1px solid #ffffff12;color:#eee7f8;font-size:12px;line-height:1;cursor:pointer;transition:transform .16s cubic-bezier(.2,.8,.2,1),background .16s,border-color .16s,box-shadow .16s}
+.message-reactions .reaction-chip span{font-size:14px}
+.message-reactions .reaction-chip b{font-size:10px;font-weight:650;color:#b9afc8}
+.message-reactions .reaction-chip:hover{transform:translateY(-2px) scale(1.04);background:#342a43;border-color:#a78bfa66}
+.message-reactions .reaction-chip.selected{background:#49366a;border-color:#b69aff;color:#fff;box-shadow:0 0 0 1px #a78bfa22,inset 0 0 12px #a78bfa14}
+.message-reactions .reaction-chip.selected b{color:#e4d8ff}
+.message-reactions .reaction-add,.message-reactions .message-more{display:grid;place-items:center;width:25px;height:25px;padding:0;border-radius:50%;background:transparent;border:1px solid transparent;color:#a99eb8;opacity:.55;cursor:pointer;transition:opacity .15s,background .15s,color .15s,transform .15s}
+.message-row:hover .reaction-add,.message-row:hover .message-more,.message-row:focus-within .reaction-add,.message-row:focus-within .message-more{opacity:1}
+.message-reactions .reaction-add:hover,.message-reactions .message-more:hover{background:#ffffff12;color:#fff;transform:scale(1.08)}
+.reaction-picker{position:absolute;z-index:12;left:0;bottom:32px;display:flex;align-items:center;gap:3px;padding:6px;background:#292334;border:1px solid #ffffff1c;border-radius:22px;box-shadow:0 12px 35px #0008;animation:reaction-pop .16s cubic-bezier(.2,.8,.2,1) both}
+.message-row.mine .reaction-picker{left:auto;right:0}
+.reaction-picker button{display:grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:transparent;font-size:19px;cursor:pointer;transition:background .14s,transform .14s}
+.reaction-picker button:hover{background:#ffffff16;transform:scale(1.2)}
+@keyframes reaction-pop{from{opacity:0;transform:translateY(6px) scale(.94)}to{opacity:1;transform:translateY(0) scale(1)}}
+.message-context-menu{position:absolute;z-index:15;left:0;top:30px;min-width:185px;display:grid;gap:2px;padding:6px;background:#282332;border:1px solid #ffffff18;border-radius:13px;box-shadow:0 16px 42px #0009;animation:reaction-pop .14s ease both}
+.message-row.mine .message-context-menu{left:auto;right:0}
+.message-context-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border:0;border-radius:8px;background:transparent;color:#eee8f5;text-align:left;font:500 12px 'DM Sans',sans-serif;cursor:pointer;white-space:nowrap}
+.message-context-menu button svg{color:#b7a6d2}
+.message-context-menu button:hover{background:#ffffff10}
+.message-context-menu button.danger-action,.message-context-menu button.danger-action svg{color:#f19aa8}
+.message-context-menu button.danger-action:hover{background:#8f344322}
+@media(max-width:800px){
+ .message-shell{max-width:88%}
+ .message-reactions .reaction-add,.message-reactions .message-more{opacity:.8}
+ .reaction-picker{max-width:min(300px,88vw);flex-wrap:wrap}
+}
+@media(prefers-reduced-motion:reduce){
+ .message-reactions .reaction-chip,.message-reactions .reaction-add,.message-reactions .message-more,.reaction-picker button{transition:none}
+ .reaction-picker,.message-context-menu{animation:none}
+}
