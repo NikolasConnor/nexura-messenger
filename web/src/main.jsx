@@ -351,20 +351,20 @@ function App() {
 
   async function reactToMessage(message, emoji) {
     const current = messageReactions[message.id] || [];
+    const active = current.find(item => item.selectedByMe);
     const existing = current.find(item => item.emoji === emoji);
-    const next = existing
-      ? (existing.selectedByMe ? current.filter(item => item.emoji !== emoji).map(item => ({...item})) : current.map(item => ({...item})))
-      : [...current.map(item => ({...item})), { emoji, count: 1, selectedByMe: true }];
-    if (existing && !existing.selectedByMe) {
-      const item = next.find(row => row.emoji === emoji);
-      if (item) { item.count += 1; item.selectedByMe = true; }
-    } else if (existing?.selectedByMe) {
-      const item = next.find(row => row.emoji === emoji);
-      if (item) item.count = Math.max(0, item.count - 1);
-    } else {
-      next.forEach(item => { if (item.emoji !== emoji) item.selectedByMe = false; });
-    }
-    setMessageReactions(previous => ({...previous, [message.id]: next.filter(item => item.count > 0)}));
+    const removing = !!existing?.selectedByMe;
+    const next = current.map(item => {
+      const wasMine = item.selectedByMe;
+      const becomesMine = !removing && item.emoji === emoji;
+      return {
+        ...item,
+        count: Math.max(0, item.count - (wasMine && !becomesMine ? 1 : 0) + (!wasMine && becomesMine ? 1 : 0)),
+        selectedByMe: becomesMine
+      };
+    }).filter(item => item.count > 0);
+    if (!removing && !existing) next.push({ emoji, count: 1, selectedByMe: true });
+    setMessageReactions(previous => ({...previous, [message.id]: next}));
     setReactionPickerFor(null);
     try {
       await toggleMessageReaction(supabase, selected.id, message.id, emoji);
