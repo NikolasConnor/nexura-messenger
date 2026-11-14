@@ -2903,7 +2903,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 }
                             }
-                        }
 
                         Column(
                             // Insets are handled once by the chat viewport above, not by this child.
@@ -3048,6 +3047,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         }
                             }
+                        }
                         }
                         }
                     }
