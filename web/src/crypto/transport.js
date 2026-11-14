@@ -1,6 +1,7 @@
 import {
   initializeOlm, createBrowserDevice, replenishBrowserOneTimeKeys,
-  acknowledgeBrowserOneTimeKeysPublished, verifyBrowserOneTimeKey
+  acknowledgeBrowserOneTimeKeysPublished, verifyBrowserOneTimeKey,
+  rotateBrowserDeviceIdentity
 } from './olm.js';
 import {
   loadEncryptedRecord, saveEncryptedRecords
@@ -61,21 +62,42 @@ export async function ensureBrowserE2eeDevice(supabase, userId) {
     bundle = await createBrowserDevice(userId);
     account = await loadEncryptedRecord(userId, 'account');
   }
-  const payload = {
-    user_id: userId, device_id: bundle.device_id,
-    curve25519_key: bundle.curve25519, ed25519_key: bundle.ed25519,
-    protocol: 'olm-v1', bundle_version: 1, is_active: true
+
+  const register = async () => {
+    const payload = {
+      user_id: userId, device_id: bundle.device_id,
+      curve25519_key: bundle.curve25519, ed25519_key: bundle.ed25519,
+      protocol: 'olm-v1', bundle_version: 1, is_active: true
+    };
+    const { error } = await supabase.from('e2ee_devices')
+      .upsert(payload, { onConflict: 'user_id,device_id', ignoreDuplicates: true });
+    if (error) throw error;
+    const { data, error: readError } = await supabase.from('e2ee_devices')
+      .select('curve25519_key,ed25519_key,protocol,bundle_version,is_active')
+      .eq('user_id', userId).eq('device_id', bundle.device_id).maybeSingle();
+    if (readError) throw readError;
+    return data;
   };
-  const { error: upsertError } = await supabase.from('e2ee_devices')
-    .upsert(payload, { onConflict: 'user_id,device_id', ignoreDuplicates: true });
-  if (upsertError) throw upsertError;
-  const { data: saved, error: readError } = await supabase.from('e2ee_devices')
-    .select('curve25519_key,ed25519_key,protocol,bundle_version,is_active')
-    .eq('user_id', userId).eq('device_id', bundle.device_id).maybeSingle();
-  if (readError) throw readError;
+
+  let saved;
+  try {
+    saved = await register();
+  } catch (error) {
+    // A revoked identity is permanently tombstoned on the server. Never try to
+    // resurrect it: create a new Olm account, new public keys and a new device UUID.
+    if (!/revoked/i.test(error?.message || '')) throw error;
+    bundle = await rotateBrowserDeviceIdentity(userId);
+    account = await loadEncryptedRecord(userId, 'account');
+    saved = await register();
+  }
+  if (saved && !saved.is_active) {
+    bundle = await rotateBrowserDeviceIdentity(userId);
+    account = await loadEncryptedRecord(userId, 'account');
+    saved = await register();
+  }
   if (!saved || saved.curve25519_key !== bundle.curve25519 || saved.ed25519_key !== bundle.ed25519 ||
       saved.protocol !== 'olm-v1' || saved.bundle_version !== 1 || !saved.is_active) {
-    throw new Error('Ключи браузерного устройства не совпадают с регистрацией сервера');
+    throw new Error('Ключи нового браузерного устройства не совпадают с регистрацией сервера');
   }
 
   let pending = await loadEncryptedRecord(userId, 'pending-public-keys');
@@ -86,7 +108,6 @@ export async function ensureBrowserE2eeDevice(supabase, userId) {
   }
   await publishKeys(supabase, userId, bundle.device_id, pending || []);
   if (pending?.length) await acknowledgeBrowserOneTimeKeysPublished(userId);
-  // The device identity is immutable; publish the bundle without private key material.
   await saveEncryptedRecords(userId, [['public-device', { ...bundle, one_time_keys: [] }]]);
   const { count, error: countError } = await supabase.from('e2ee_one_time_keys')
     .select('key_id', { count: 'exact', head: true })
