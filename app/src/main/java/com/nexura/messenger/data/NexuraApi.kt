@@ -1717,7 +1717,8 @@ class NexuraApi(private val store: SessionStore) {
         e2ee: E2eeClient,
         encryptedMedia: EncryptedMediaFile,
         caption: String = "",
-        replyToId: String? = null
+        replyToId: String? = null,
+        messageId: String = UUID.randomUUID().toString()
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) throw IOException("Зашифрованный файл превышает лимит Storage")
@@ -1754,7 +1755,6 @@ class NexuraApi(private val store: SessionStore) {
             .put("cipher_sha256", encryptedMedia.cipherSha256)
             .put("caption", caption.trim())
             .toString()
-        val messageId = UUID.randomUUID().toString()
         try {
             // If the POST committed but its read-back confirmation was interrupted,
             // keep the ciphertext object: deleting it could break a valid message.
@@ -1769,7 +1769,8 @@ class NexuraApi(private val store: SessionStore) {
         e2ee: E2eeClient,
         encryptedMedia: EncryptedMediaFile,
         caption: String = "",
-        replyToId: String? = null
+        replyToId: String? = null,
+        messageId: String = UUID.randomUUID().toString()
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) {
@@ -1809,7 +1810,7 @@ class NexuraApi(private val store: SessionStore) {
             .put("caption", caption.trim())
             .toString()
         try {
-            sendEncryptedGroupMessage(chat, e2ee, UUID.randomUUID().toString(), payload, "media", replyToId)
+            sendEncryptedGroupMessage(chat, e2ee, messageId, payload, "media", replyToId)
         } finally {
             encryptedMedia.file.delete()
         }
