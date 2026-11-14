@@ -639,7 +639,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     activeChat = activeChat.copy(chatMode = resolvedMode)
                     if (selected?.id == activeChat.id) {
                         selected = activeChat
-                        chats = chats.map { if (it.id == activeChat.id) activeChat else it }
+                        val updatedChats = chats.map { if (it.id == activeChat.id) activeChat else it }
+                        chats = updatedChats
+                        withContext(Dispatchers.IO) {
+                            localCache.saveChats(store.userId.orEmpty(), updatedChats)
+                        }
                     }
                 }
 
