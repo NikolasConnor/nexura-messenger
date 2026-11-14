@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
-import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile } from './api/messenger.js';
+import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
@@ -150,6 +150,9 @@ function App() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
+  const [messageMenu, setMessageMenu] = useState(null);
+  const [reactionPickerFor, setReactionPickerFor] = useState(null);
+  const [editingMessageId, setEditingMessageId] = useState(null);
   const [sending, setSending] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
@@ -346,20 +349,84 @@ function App() {
     finally { setGroupBusy(false); }
   }
 
+  async function reactToMessage(message, emoji) {
+    const current = messageReactions[message.id] || [];
+    const existing = current.find(item => item.emoji === emoji);
+    const next = existing
+      ? (existing.selectedByMe ? current.filter(item => item.emoji !== emoji).map(item => ({...item})) : current.map(item => ({...item})))
+      : [...current.map(item => ({...item})), { emoji, count: 1, selectedByMe: true }];
+    if (existing && !existing.selectedByMe) {
+      const item = next.find(row => row.emoji === emoji);
+      if (item) { item.count += 1; item.selectedByMe = true; }
+    } else if (existing?.selectedByMe) {
+      const item = next.find(row => row.emoji === emoji);
+      if (item) item.count = Math.max(0, item.count - 1);
+    } else {
+      next.forEach(item => { if (item.emoji !== emoji) item.selectedByMe = false; });
+    }
+    setMessageReactions(previous => ({...previous, [message.id]: next.filter(item => item.count > 0)}));
+    setReactionPickerFor(null);
+    try {
+      await toggleMessageReaction(supabase, selected.id, message.id, emoji);
+      setMessageReactions(await loadMessageReactions(supabase, selected.id));
+    } catch (error) {
+      setMessageReactions(await loadMessageReactions(supabase, selected.id).catch(() => current));
+      setNotice('Не удалось поставить реакцию: ' + error.message);
+    }
+  }
+
+  async function copyMessage(message) {
+    if (message.encrypted) { setNotice('Нерасшифрованное сообщение нельзя скопировать.'); return; }
+    try {
+      await navigator.clipboard.writeText(String(message.content || ''));
+      setNotice('Сообщение скопировано');
+    } catch { setNotice('Браузер не разрешил копирование'); }
+    setMessageMenu(null);
+  }
+
+  async function removeOwnMessage(message) {
+    if (message.sender_id !== session.user.id) return;
+    try {
+      await deleteMessage(supabase, message.id);
+      setMessages(previous => previous.filter(item => item.id !== message.id));
+      setMessageReactions(previous => { const next = {...previous}; delete next[message.id]; return next; });
+    } catch (error) { setNotice('Не удалось удалить сообщение: ' + error.message); }
+    setMessageMenu(null);
+  }
+
+  function startEditing(message) {
+    if (message.sender_id !== session.user.id || selected?.kind !== 'direct' || message.encrypted) return;
+    setEditingMessageId(message.id);
+    setDraft(String(message.content || ''));
+    setReplyTarget(null);
+    setMessageMenu(null);
+  }
+
   async function sendMessage(event) {
     event?.preventDefault?.();
     if (!selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
     const text = draft.trim();
     if (!text) return;
     setSending(true); setNotice('');
-    const messageId = crypto.randomUUID();
     try {
-      const sent = await sendBrowserDirectMessage(supabase, {
-        userId: session.user.id, conversationId: selected.id,
-        peerUserId: selected.peerUserId, messageId, plaintext: text,
-        replyToId: replyTarget?.id || null
-      });
-      setMessages(previous => [...previous, sent]);
+      if (editingMessageId) {
+        const original = messages.find(item => item.id === editingMessageId);
+        if (!original) throw new Error('Исходное сообщение не найдено');
+        const sent = await editEncryptedDirectMessage(supabase, {
+          userId: session.user.id, chatId: selected.id, peerUserId: selected.peerUserId,
+          oldMessage: original, newText: text
+        });
+        setMessages(previous => [...previous.filter(item => item.id !== editingMessageId), {...sent, edited_at: new Date().toISOString()}].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)));
+        setEditingMessageId(null);
+      } else {
+        const messageId = crypto.randomUUID();
+        const sent = await sendBrowserDirectMessage(supabase, {
+          userId: session.user.id, conversationId: selected.id,
+          peerUserId: selected.peerUserId, messageId, plaintext: text,
+          replyToId: replyTarget?.id || null
+        });
+        setMessages(previous => [...previous, sent]);
+      }
       setDraft('');
       setReplyTarget(null);
       loadChats();
@@ -442,26 +509,40 @@ function App() {
             const mine=m.sender_id===session.user.id;
             const previous=messages[index-1];
             const showDate=!previous || dateLabel(previous.created_at)!==dateLabel(m.created_at);
+            const reactions=messageReactions[m.id] || [];
+            const popular=['❤️','👍','😂','🔥','🥰','👏','😮','😢'];
             return <React.Fragment key={m.id}>
               {showDate && <div className="day-divider"><span>{dateLabel(m.created_at)}</span></div>}
-              <div id={'message-'+m.id} className={'message-row '+(mine?'mine':'')}>
+              <div id={'message-'+m.id} className={'message-row '+(mine?'mine':'')} onContextMenu={event=>{event.preventDefault();setMessageMenu(messageMenu===m.id?null:m.id);setReactionPickerFor(null);}}>
                 {!mine && <Avatar className="message-avatar" value={selected.avatar} name={selected.title}/>}
-                <div className="message-bubble">
-                  {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
-                  {m.reply_to_id && <div className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}>↪ Ответ на сообщение</div>}
-                  <div className="message-reactions">
-                    {(messageReactions[m.id] || []).map(reaction=><button key={reaction.emoji} className={reaction.selectedByMe?"selected":""} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,reaction.emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{reaction.emoji} {reaction.count}</button>)}
-                    {['❤️','👍','😂'].filter(emoji=>!(messageReactions[m.id] || []).some(item=>item.emoji===emoji)).map(emoji=><button key={emoji} className="quick-reaction" title={'Поставить '+emoji} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{emoji}</button>)}
-                    <button className="reply-action" onClick={()=>setReplyTarget(m)} aria-label="Ответить" title="Ответить">↩</button>
+                <div className="message-shell">
+                  <div className="message-bubble">
+                    {m.reply_to_id && <div className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}>↪ Ответ на сообщение</div>}
+                    {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
+                    <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && <CheckCheck size={13}/>}</div>
                   </div>
-                  <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{mine && <CheckCheck size={13}/>}</div>
+                  <div className="message-tools">
+                    <div className="message-reactions">
+                      {reactions.map(reaction=><button key={reaction.emoji} className={'reaction-chip '+(reaction.selectedByMe?'selected':'')} onClick={()=>reactToMessage(m,reaction.emoji)} title={reaction.selectedByMe?'Убрать реакцию':'Поставить реакцию'}><span>{reaction.emoji}</span><b>{reaction.count}</b></button>)}
+                      <button className="reaction-add" onClick={()=>{setReactionPickerFor(reactionPickerFor===m.id?null:m.id);setMessageMenu(null);}} title="Добавить реакцию"><SmilePlus size={15}/></button>
+                      <button className="message-more" onClick={()=>{setMessageMenu(messageMenu===m.id?null:m.id);setReactionPickerFor(null);}} title="Действия с сообщением" aria-label="Действия с сообщением"><MoreHorizontal size={16}/></button>
+                    </div>
+                    {reactionPickerFor===m.id && <div className="reaction-picker">{popular.map(emoji=><button key={emoji} onClick={()=>reactToMessage(m,emoji)}>{emoji}</button>)}</div>}
+                    {messageMenu===m.id && <div className="message-context-menu">
+                      <button onClick={()=>{setReplyTarget(m);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
+                      <button onClick={()=>copyMessage(m)}><Copy size={15}/>Копировать</button>
+                      {mine && selected.kind==='direct' && !m.encrypted && <button onClick={()=>startEditing(m)}><Pencil size={15}/>Изменить</button>}
+                      <button onClick={()=>{setDraft(String(m.content||''));setReplyTarget(null);setMessageMenu(null);setNotice('Текст подготовлен для пересылки — выбери чат и вставь его в сообщение.')}}><Forward size={15}/>Переслать</button>
+                      {mine && <button className="danger-action" onClick={()=>removeOwnMessage(m)}><Trash2 size={15}/>Удалить</button>}
+                    </div>}
+                  </div>
                 </div>
               </div>
             </React.Fragment>;
           })}
           <div className="security-note"><LockKeyhole size={14}/><span>{e2eeStatus}</span></div>
         </div>
-        {replyTarget && <div className="reply-composer"><span>Ответ на: {String(replyTarget.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>setReplyTarget(null)} aria-label="Отменить ответ">×</button></div>}
+        {(replyTarget || editingMessageId) && <div className="reply-composer"><span>{editingMessageId ? 'Редактирование сообщения' : 'Ответ на: '+String(replyTarget?.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>{setReplyTarget(null);setEditingMessageId(null);setDraft('');}} aria-label="Отменить">×</button></div>}
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
           <div className="composer-input-row">
             <textarea value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}}} placeholder={e2eeReady ? 'Сообщение' : 'Подключаем защищённое соединение…'} maxLength={12000} rows={1} disabled={!e2eeReady || sending}/>
