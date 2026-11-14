@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 
 /**
@@ -71,6 +72,7 @@ class AudioPlaybackService : Service() {
         try {
             val next = MediaPlayer()
             player = next
+            next.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
             next.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
