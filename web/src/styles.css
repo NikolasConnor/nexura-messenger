@@ -474,3 +474,17 @@ body{overscroll-behavior:none}
  .message-row{transition:none}
  .reply-reference{transition:none}
 }
+
+
+/* Keep empty action rails out of the conversation until needed */
+.message-tools{opacity:0;max-height:0;min-height:0;pointer-events:none;transition:opacity .16s ease,max-height .16s ease}
+.message-tools.has-reactions,.message-row:hover .message-tools,.message-row:focus-within .message-tools{opacity:1;max-height:44px;min-height:25px;pointer-events:auto}
+.message-tools.has-reactions .message-reactions{margin-top:4px}
+.message-reactions .reaction-chip{animation:reaction-chip-enter .2s cubic-bezier(.18,.85,.32,1.25) both}
+@keyframes reaction-chip-enter{from{opacity:0;transform:translateY(4px) scale(.82)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:800px){
+ .message-tools{opacity:1;max-height:44px;min-height:25px;pointer-events:auto}
+}
+@media(prefers-reduced-motion:reduce){
+ .message-tools,.message-reactions .reaction-chip{transition:none;animation:none}
+}
