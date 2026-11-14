@@ -176,3 +176,21 @@ body{overscroll-behavior:none}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}
 }
+
+
+/* Profile editor */
+.profile-form{display:grid;gap:15px;min-height:0;overflow:auto;padding-right:2px}
+.profile-avatar-picker{display:flex;align-items:center;gap:12px}
+.profile-avatar-picker .avatar{width:54px;height:54px;flex-basis:54px;border-radius:18px;font-size:23px}
+.profile-avatar-picker>div:last-child{display:grid;gap:4px}
+.profile-avatar-picker b{font-size:13px;color:#eee8f7}
+.profile-avatar-picker span{font-size:10px;color:#9b91a8}
+.emoji-picker{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px}
+.emoji-picker button{height:39px;border:1px solid #ffffff10;border-radius:11px;background:#211c2b;font-size:20px;transition:background .15s,border-color .15s}
+.emoji-picker button:hover,.emoji-picker button.active{background:#3b2e53;border-color:#a78bfa}
+.profile-form .modal-label textarea{width:100%;resize:vertical;min-height:76px;background:#120f1a;border:1px solid #393047;border-radius:10px;padding:12px 13px;color:#fff;outline:0;font:12px/1.5 'DM Sans',sans-serif}
+.profile-form .modal-label textarea:focus{border-color:#a78bfa;box-shadow:0 0 0 3px #a78bfa1a}
+.profile-form-foot{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.profile-form-foot>span{font-size:10px;color:#8f859e}
+.profile-form-foot .primary-btn{padding:11px 15px;font-size:12px}
+@media(max-width:520px){.group-modal{padding:18px}.emoji-picker{grid-template-columns:repeat(6,minmax(0,1fr))}}
