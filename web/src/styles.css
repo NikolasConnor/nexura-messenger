@@ -144,3 +144,10 @@ body{overscroll-behavior:none}
   .composer{padding-top:6px;padding-bottom:7px}
   .composer textarea{min-height:36px;max-height:76px}
 }
+
+
+/* Message feature parity controls */
+.message-reactions{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.message-reactions button{border:1px solid #ffffff14;background:#211c2b;color:#e7dcf7;border-radius:14px;padding:3px 8px;font-size:10px;cursor:pointer}
+.message-reactions button.selected{border-color:#a78bfa;background:#44345f;color:#fff}
+.message-reactions button:last-child{color:#b9a7d8}
