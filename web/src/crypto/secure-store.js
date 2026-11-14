@@ -37,22 +37,28 @@ async function getWrappingKey(userId) {
     if (existing?.key) return existing.key;
 
     const candidate = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-    // The read/write transaction serializes competing tabs. Keep the first key
-    // committed; never overwrite a key that may already protect stored records.
-    const tx = db.transaction(KEY_STORE, 'readwrite');
-    const store = tx.objectStore(KEY_STORE);
-    const current = await requestValue(store.get(userId));
-    if (current?.key) {
-      await new Promise((resolve, reject) => {
-        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
-      });
-      return current.key;
-    }
-    store.put({ userId, key: candidate, createdAt: new Date().toISOString() });
-    await new Promise((resolve, reject) => {
-      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+    // Resolve the read and conditional insert inside one readwrite transaction.
+    // IndexedDB serializes competing writers, preventing two tabs from replacing
+    // a key that may already protect protocol state.
+    const key = await new Promise((resolve, reject) => {
+      const tx = db.transaction(KEY_STORE, 'readwrite');
+      const store = tx.objectStore(KEY_STORE);
+      let selectedKey = null;
+      const request = store.get(userId);
+      request.onsuccess = () => {
+        if (request.result?.key) selectedKey = request.result.key;
+        else {
+          selectedKey = candidate;
+          store.put({ userId, key: candidate, createdAt: new Date().toISOString() });
+        }
+      };
+      request.onerror = () => { try { tx.abort(); } catch {} };
+      tx.oncomplete = () => resolve(selectedKey);
+      tx.onerror = () => reject(tx.error || new Error('Не удалось создать ключ защищённого хранилища'));
+      tx.onabort = () => reject(tx.error || new Error('Создание ключа защищённого хранилища отменено'));
     });
-    return candidate;
+    if (!key) throw new Error('Не удалось получить ключ защищённого хранилища');
+    return key;
   } finally { db.close(); }
 }
 
