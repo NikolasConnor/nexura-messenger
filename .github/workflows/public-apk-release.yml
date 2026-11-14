@@ -58,9 +58,10 @@ jobs:
       - name: Run native E2EE tests
         run: cargo test --manifest-path crypto-jni/Cargo.toml
 
+      - name: Configure Android NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
       - name: Build native E2EE libraries
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
         working-directory: crypto-jni
         run: |
           cargo install cargo-ndk --version 3.5.4 --locked
