@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
-import { loadMessageReactions, toggleMessageReaction, markConversationRead } from './api/messenger.js';
+import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
@@ -144,6 +144,9 @@ function App() {
   const [groupResults, setGroupResults] = useState([]);
   const [groupMembers, setGroupMembers] = useState([]);
   const [groupBusy, setGroupBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileDraft, setProfileDraft] = useState({ display_name: '', avatar_url: '🙂', bio: '' });
+  const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
   const [sending, setSending] = useState(false);
@@ -364,6 +367,27 @@ function App() {
     } finally { setSending(false); }
   }
 
+  function openProfileSettings() {
+    setProfileDraft({
+      display_name: profile?.display_name || session.user.email?.split('@')[0] || '',
+      avatar_url: profile?.avatar_url || '🙂',
+      bio: profile?.bio || ''
+    });
+    setSettingsOpen(true);
+  }
+
+  async function saveProfileSettings(event) {
+    event.preventDefault();
+    setProfileBusy(true); setNotice('');
+    try {
+      await updateMyProfile(supabase, profileDraft);
+      setProfile(previous => ({ ...previous, ...profileDraft, display_name: profileDraft.display_name.trim() }));
+      setSettingsOpen(false);
+    } catch (error) {
+      setNotice('Не удалось сохранить профиль: ' + (error?.message || 'ошибка'));
+    } finally { setProfileBusy(false); }
+  }
+
   async function signOut() { await supabase.auth.signOut(); }
   function openChat(chat) { setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
@@ -374,7 +398,7 @@ function App() {
   return <div className="messenger">
     <aside className={'sidebar '+(mobileChatOpen?'mobile-hidden':'')}>
       <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><div className="side-actions"><button className="icon-button" onClick={()=>setGroupOpen(true)} title="Создать группу"><Plus size={18}/></button><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div></div>
-      <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>В сети</span></div><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
+      <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>В сети</span></div><button className="icon-button" onClick={openProfileSettings} title="Настройки профиля"><Settings size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
       <div className="side-tabs"><button className={activeTab==='chats'?'active':''} onClick={()=>setActiveTab('chats')}><MessageCircle size={17}/> Чаты</button><button className={activeTab==='contacts'?'active':''} onClick={()=>setActiveTab('contacts')}><Users size={17}/> Контакты</button></div>
       <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':'ПОИСК ЛЮДЕЙ'}</span><span>{activeTab==='chats'?chats.length:contactResults.length}</span></div>
       <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:contactQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setContactQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
@@ -438,6 +462,20 @@ function App() {
         </>
       }
     </main>
+    {settingsOpen && <div className="modal-backdrop" onClick={()=>setSettingsOpen(false)}>
+      <section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">ТВОЙ АККАУНТ</div><h3>Профиль</h3></div><button className="icon-button" onClick={()=>setSettingsOpen(false)} aria-label="Закрыть">×</button></div>
+        <form className="profile-form" onSubmit={saveProfileSettings}>
+          <div className="profile-avatar-picker"><Avatar value={profileDraft.avatar_url} name={profileDraft.display_name}/><div><b>Аватар</b><span>Выбери значок для своего профиля</span></div></div>
+          <div className="emoji-picker" aria-label="Выбор аватара">
+            {['🙂','😎','🤝','🦊','🐼','🐱','🐸','🐻','🌙','⭐','🔥','💜'].map(emoji=><button type="button" key={emoji} className={profileDraft.avatar_url===emoji?'active':''} onClick={()=>setProfileDraft(value=>({...value,avatar_url:emoji}))}>{emoji}</button>)}
+          </div>
+          <label className="modal-label">Имя<input value={profileDraft.display_name} onChange={event=>setProfileDraft(value=>({...value,display_name:event.target.value}))} placeholder="Как тебя называть" maxLength={40} required/></label>
+          <label className="modal-label">О себе<textarea value={profileDraft.bio} onChange={event=>setProfileDraft(value=>({...value,bio:event.target.value}))} placeholder="Пара слов о себе" maxLength={160} rows={3}/></label>
+          <div className="profile-form-foot"><span>{profileDraft.bio.length}/160</span><button className="primary-btn" type="submit" disabled={profileBusy}>{profileBusy?'Сохраняем…':'Сохранить профиль'}</button></div>
+        </form>
+      </section>
+    </div>}
     {groupOpen && <div className="modal-backdrop" onClick={()=>setGroupOpen(false)}>
       <section className="group-modal" onClick={event=>event.stopPropagation()}>
         <div className="modal-head"><div><div className="eyebrow">НОВАЯ ПЕРЕПИСКА</div><h3>Создать группу</h3></div><button className="icon-button" onClick={()=>setGroupOpen(false)}>×</button></div>
