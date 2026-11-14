@@ -2896,7 +2896,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
 
                         Column(
-                            Modifier.fillMaxWidth().imePadding().navigationBarsPadding()
+                            // Use the larger of IME and navigation-bar insets, not their sum.
+                            // This keeps the composer attached to the bottom on devices that resize
+                            // the window while also dispatching keyboard insets (e.g. older Honor phones).
+                            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                         ) {
                             if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                             if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
