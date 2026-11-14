@@ -170,6 +170,7 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [outgoingMediaStatus, setOutgoingMediaStatus] = useState({});
   const messageLoadSeq = useRef(0);
+  const pendingMediaOutboxRef = useRef(new Map());
   const messagesPaneRef = useRef(null);
   const [messageReactions, setMessageReactions] = useState({});
   const [loadingChats, setLoadingChats] = useState(false);
@@ -332,7 +333,8 @@ function App() {
       if (messageResult.error) throw messageResult.error;
       const rows = await Promise.all((messageResult.data || []).reverse().map(message => decryptMessageRow(chat, message)));
       if (requestId !== messageLoadSeq.current) return;
-      setMessages(rows);
+      const localPending = [...pendingMediaOutboxRef.current.values()].filter(item => item.conversation_id === chat.id);
+      setMessages([...rows.filter(item => !localPending.some(pending => pending.id === item.id)), ...localPending].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-50));
       setMessageReactions(reactionsResult || {});
       markConversationRead(supabase, chat.id).catch(() => {});
     } catch (error) {
@@ -380,6 +382,7 @@ function App() {
         }
         const message = await decryptMessageRow(chat, source);
         if (!active) return;
+        pendingMediaOutboxRef.current.delete(message.id);
         setMessages(previous => {
           const next = [...previous.filter(item => item.id !== message.id), message]
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -577,6 +580,7 @@ function App() {
         message_type:'media', encrypted:false, uploading:true, localMediaFile:file,
         reply_to_id:replyTarget?.id || null
       };
+      pendingMediaOutboxRef.current.set(messageId, {...optimistic,conversation_id:selected.id});
       setMessages(previous=>[...previous,optimistic]);
     }
     setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sending'}));
@@ -586,6 +590,7 @@ function App() {
         userId:session.user.id, conversationId:selected.id, peerUserId:selected.peerUserId,
         messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId:replyTarget?.id || null
       });
+      pendingMediaOutboxRef.current.delete(messageId);
       setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
       setPendingMedia(null); setReplyTarget(null); loadChats();
