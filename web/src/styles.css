@@ -488,3 +488,38 @@ body{overscroll-behavior:none}
 @media(prefers-reduced-motion:reduce){
  .message-tools,.message-reactions .reaction-chip{transition:none;animation:none}
 }
+
+
+/* Reaction feedback: animate the emoji itself and the changing counter. */
+.message-reactions .reaction-chip{transform-origin:50% 75%;will-change:transform}
+.message-reactions .reaction-emoji{display:inline-block;transform-origin:50% 80%;animation:reaction-emoji-bounce .42s cubic-bezier(.2,.9,.25,1.25) both}
+.message-reactions .reaction-count{display:inline-block;animation:reaction-count-pop .24s ease-out both}
+@keyframes reaction-emoji-bounce{0%{opacity:.55;transform:translateY(5px) scale(.55) rotate(-12deg)}48%{opacity:1;transform:translateY(-3px) scale(1.28) rotate(7deg)}72%{transform:translateY(1px) scale(.92) rotate(-3deg)}100%{transform:translateY(0) scale(1) rotate(0)}}
+@keyframes reaction-count-pop{0%{opacity:.4;transform:translateY(5px) scale(.7)}70%{opacity:1;transform:translateY(-1px) scale(1.12)}100%{transform:translateY(0) scale(1)}}
+
+/* Message actions are portaled above the scrolling message layer, never clipped by it. */
+.message-context-menu-floating{position:fixed;z-index:10000;left:0;top:0;min-width:190px;max-width:min(240px,calc(100vw - 24px));}
+.chat-theme-trigger{flex:0 0 auto}
+.messages-pane{background-color:var(--chat-wallpaper,#100d19)}
+.message-bubble{background:var(--incoming-bubble,#272432)}
+.message-row.mine .message-bubble{background:var(--outgoing-bubble,#49366a)}
+.profile-preview-card{display:flex;align-items:center;gap:13px;padding:14px;margin:2px 0 16px;border:1px solid #ffffff14;border-radius:16px;background:linear-gradient(135deg,#302342,#1c1827)}
+.profile-preview-card>.avatar{width:54px;height:54px;flex:0 0 54px;font-size:23px}
+.profile-preview-card>div{display:grid;gap:3px;min-width:0;flex:1}
+.profile-preview-card b{font-size:14px;color:#fff}
+.profile-preview-card span{font-size:11px;color:#b5a9c5;overflow:hidden;text-overflow:ellipsis}
+.profile-preview-card small{font-size:11px;color:#91869e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-preview-card>svg{color:#bca3ee}
+.theme-description{font-size:12px;color:#a99fb5;line-height:1.5;margin:0 0 14px}
+.theme-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.theme-preset{display:grid;gap:7px;padding:7px;border:1px solid #ffffff12;border-radius:12px;background:#171321;color:#ddd4e8;text-align:left;cursor:pointer;transition:border-color .16s,transform .16s,background .16s}
+.theme-preset:hover{transform:translateY(-2px);border-color:#a78bfa88}
+.theme-preset.active{border-color:#b69aff;background:#302442;box-shadow:0 0 0 1px #a78bfa22}
+.theme-preset>b{font-size:11px;font-weight:600}
+.theme-preview{height:58px;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px}
+.theme-preview i{display:block;width:35%;height:15px;border-radius:8px 8px 8px 3px;box-shadow:0 2px 4px #0002}
+.theme-preview i:last-child{height:19px;border-radius:8px 8px 3px 8px;transform:translateY(8px)}
+.theme-modal-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px}
+.theme-modal-foot>span{font-size:10px;color:#8f859e}
+@media(max-width:520px){.theme-presets{grid-template-columns:repeat(2,minmax(0,1fr))}.message-context-menu-floating{max-height:60vh}}
+@media(prefers-reduced-motion:reduce){.reaction-emoji,.reaction-count{animation:none!important}}
