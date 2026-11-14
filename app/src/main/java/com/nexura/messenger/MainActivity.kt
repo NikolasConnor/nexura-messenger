@@ -37,7 +37,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -223,6 +225,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val chatPreviews = remember { mutableStateMapOf<String, String>() }
     var showChatFilter by remember { mutableStateOf(false) }
     var openMessageMenu by remember { mutableStateOf<String?>(null) }
+    var reactionPickerFor by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showTerminateOthersDialog by remember { mutableStateOf(false) }
     val messageDelivery = remember { mutableStateMapOf<String, String>() }
@@ -2587,7 +2590,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
                                     val mine = msg.senderId == store.userId
                                     val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
-                                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                                            .pointerInput(msg.id) {
+                                                var horizontalDrag = 0f
+                                                detectHorizontalDragGestures(
+                                                    onHorizontalDrag = { change, dragAmount ->
+                                                        horizontalDrag += dragAmount
+                                                        change.consume()
+                                                    },
+                                                    onDragEnd = {
+                                                        if (horizontalDrag > 64.dp.toPx()) {
+                                                            replyTarget = msg
+                                                            reactionPickerFor = null
+                                                        }
+                                                        horizontalDrag = 0f
+                                                    },
+                                                    onDragCancel = { horizontalDrag = 0f }
+                                                )
+                                            },
+                                        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
+                                    ) {
                                         Column(
                                             Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(
                                                 topStart = 20.dp, topEnd = 20.dp,
@@ -2596,11 +2619,40 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
-                                                    onClick = { },
-                                                    onLongClick = { openMessageMenu = msg.id }
+                                                    onClick = { reactionPickerFor = if (reactionPickerFor == msg.id) null else msg.id; openMessageMenu = null },
+                                                    onLongClick = { reactionPickerFor = null; openMessageMenu = msg.id }
                                                 )
                                                 .padding(horizontal = 15.dp, vertical = 12.dp)
                                         ) {
+                                            AnimatedVisibility(
+                                                visible = reactionPickerFor == msg.id,
+                                                enter = fadeIn() + expandVertically(),
+                                                exit = fadeOut() + shrinkVertically()
+                                            ) {
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(bottom = 9.dp)
+                                                        .clip(RoundedCornerShape(22.dp))
+                                                        .background(Surface1.copy(alpha = 0.96f))
+                                                        .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(22.dp))
+                                                        .padding(horizontal = 7.dp, vertical = 6.dp),
+                                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
+                                                        AnimatedReactionPickerItem(emoji = emoji) {
+                                                            reactionPickerFor = null
+                                                            scope.launch {
+                                                                try {
+                                                                    api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                    messageReactions = api.messageReactions(chat.id)
+                                                                } catch (e: Exception) {
+                                                                    error = e.message ?: "Не удалось поставить реакцию"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
                                             } else if (msg.securityWarning) {
@@ -2803,7 +2855,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             horizontalArrangement = Arrangement.spacedBy(5.dp),
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                            listOf("👍", "❤️", "😂", "😮", "😢", "🔥", "👏", "🙏").forEach { emoji ->
+                                                            listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
                                                                 AnimatedReactionPickerItem(
                                                                     emoji = emoji,
                                                                     onClick = {
@@ -3417,22 +3469,49 @@ private fun chatMessagePreview(message: MessageItem, ownUserId: String): String 
 private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
     var pressed by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 1.22f else 1f,
-        animationSpec = spring(dampingRatio = 0.38f, stiffness = 620f),
+        targetValue = if (pressed) when (emoji) {
+            "❤️" -> 1.34f
+            "👍" -> 1.22f
+            "😂" -> 1.30f
+            "😮" -> 1.38f
+            "😢" -> 1.20f
+            else -> 1.32f
+        } else 1f,
+        animationSpec = spring(dampingRatio = 0.34f, stiffness = 430f),
         label = "reaction-picker-scale"
+    )
+    val rotation by animateFloatAsState(
+        targetValue = if (pressed) when (emoji) {
+            "❤️" -> 360f
+            "😂" -> 14f
+            "😢" -> -12f
+            "🔥" -> 9f
+            else -> 0f
+        } else 0f,
+        animationSpec = spring(dampingRatio = 0.42f, stiffness = 360f),
+        label = "reaction-picker-rotation"
+    )
+    val lift by animateFloatAsState(
+        targetValue = if (pressed && emoji == "👍") -13f else if (pressed && emoji == "🔥") -5f else 0f,
+        animationSpec = spring(dampingRatio = 0.32f, stiffness = 420f),
+        label = "reaction-picker-lift"
     )
     LaunchedEffect(pressed) {
         if (pressed) {
-            delay(150)
+            delay(430)
             pressed = false
         }
     }
     Box(
-        Modifier.size(36.dp).graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(CircleShape).background(Surface2)
+        Modifier.size(38.dp).graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            rotationZ = rotation
+            translationY = lift * density
+        }.clip(CircleShape).background(if (pressed) Accent.copy(alpha = 0.24f) else Surface2)
             .clickable { pressed = true; onClick() },
         contentAlignment = Alignment.Center
-    ) { Text(emoji, fontSize = 20.sp) }
+    ) { Text(emoji, fontSize = 21.sp) }
 }
 
 @Composable
