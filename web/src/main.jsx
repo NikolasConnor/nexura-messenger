@@ -595,7 +595,6 @@ function App() {
   function retryMediaMessage(message) {
     const file = message.localMediaFile;
     if (!file) { setNotice('Исходный файл больше недоступен. Выбери его заново.'); return; }
-    setMessages(previous=>previous.filter(item=>item.id!==message.id));
     setOutgoingMediaStatus(previous=>({...previous,[message.id]:'sending'}));
     sendAttachment(file,message.id);
   }
