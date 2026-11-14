@@ -90,6 +90,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.paint
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -99,6 +100,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import coil.compose.rememberAsyncImagePainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -246,6 +248,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var changingChatMode by remember { mutableStateOf(false) }
     var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
     var chatWallpaperId by remember { mutableStateOf("midnight") }
+    var chatWallpaperImage by remember { mutableStateOf<String?>(null) }
     var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -314,10 +317,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
             chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
             chatWallpaperId = prefs.getString("wallpaper_pattern_$chatId", "midnight") ?: "midnight"
+            chatWallpaperImage = prefs.getString("wallpaper_image_$chatId", null)
             chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
         } ?: run {
             chatWallpaperColor = Color(0xFF100C1D)
             chatWallpaperId = "midnight"
+            chatWallpaperImage = null
             chatBubbleColor = Color(0xFF6945C7)
         }
     }
@@ -484,6 +489,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         profilePhotoUri = uri
+    }
+    val chatWallpaperPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            chatWallpaperImage = uri.toString()
+            chatWallpaperId = "custom"
+            selected?.id?.let { id ->
+                context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
+                    .edit().putString("wallpaper_image_$id", uri.toString()).putString("wallpaper_pattern_$id", "custom").apply()
+            }
+        }
     }
 
     val visibleChats = chats
@@ -2105,14 +2121,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             text = {
                                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Text("Фон переписки", color = MainText, fontWeight = FontWeight.SemiBold)
+                                    OutlinedButton(onClick = { chatWallpaperPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
+                                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(if (chatWallpaperImage != null) "Изменить свои обои" else "Выбрать фото из галереи")
+                                    }
+                                    if (chatWallpaperImage != null) {
+                                        AsyncImage(model = chatWallpaperImage, contentDescription = "Предпросмотр обоев чата", modifier = Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                                    }
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         wallpaperOptions.chunked(3).forEach { themes ->
                                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                                 themes.forEach { (wallpaperId, label, color) ->
                                                     Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).border(1.dp, if (chatWallpaperId == wallpaperId) Accent else Surface2, RoundedCornerShape(10.dp)).clickable {
                                                         chatWallpaperId = wallpaperId
+                                                        chatWallpaperImage = null
                                                         chatWallpaperColor = color
-                                                        selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_" + store.userId.orEmpty(), Context.MODE_PRIVATE).edit().putString("wallpaper_pattern_" + id, wallpaperId).putInt("wallpaper_" + id, color.toArgb()).apply() }
+                                                        selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_" + store.userId.orEmpty(), Context.MODE_PRIVATE).edit().remove("wallpaper_image_" + id).putString("wallpaper_pattern_" + id, wallpaperId).putInt("wallpaper_" + id, color.toArgb()).apply() }
                                                     }.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                                         Box(Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(7.dp)).background(color).nexuraWallpaperPattern(wallpaperId), contentAlignment = Alignment.Center) {
                                                             if (chatWallpaperId == wallpaperId) Icon(Icons.Default.Check, "Выбрано", tint = Color.White, modifier = Modifier.size(17.dp))
@@ -2146,8 +2171,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             dismissButton = { TextButton(onClick = {
                                 chatWallpaperColor = Color(0xFF100C1D)
                                 chatWallpaperId = "midnight"
+                                chatWallpaperImage = null
                                 chatBubbleColor = Color(0xFF304B83)
-                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().remove("wallpaper_$id").remove("wallpaper_pattern_$id").remove("bubble_$id").apply() }
+                                selected?.id?.let { id -> context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE).edit().remove("wallpaper_$id").remove("wallpaper_pattern_$id").remove("wallpaper_image_$id").remove("bubble_$id").apply() }
                             }) { Text("Сбросить") } }
                         )
                     }
@@ -2732,7 +2758,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 LazyColumn(
                                     state = messageListState,
-                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor).nexuraWallpaperPattern(chatWallpaperId),
+                                    modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp)).background(chatWallpaperColor).then(if (chatWallpaperImage != null) Modifier.paint(rememberAsyncImagePainter(chatWallpaperImage), contentScale = ContentScale.Crop) else Modifier.nexuraWallpaperPattern(chatWallpaperId)),
                                     contentPadding = PaddingValues(bottom = 16.dp)
                                 ) {
                                     items(visibleMessages, key = { it.id }, contentType = { it.messageType }) { msg ->
