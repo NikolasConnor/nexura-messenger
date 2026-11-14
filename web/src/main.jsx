@@ -231,38 +231,44 @@ function App() {
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  const loadChats = useCallback(async () => {
+  const chatLoadSeq = useRef(0);
+  const loadChats = useCallback(async ({ silent = false } = {}) => {
     if (!session?.user?.id) return;
-    setLoadingChats(true); setNotice('');
+    const requestId = ++chatLoadSeq.current;
+    if (!silent && chats.length === 0) setLoadingChats(true);
+    if (!silent) setNotice('');
     try {
-      const { data, error } = await supabase.from('conversation_members')
-        .select('conversation_id, joined_at, conversations(id,kind,title,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))')
-        .eq('user_id', session.user.id).order('joined_at', { ascending: false });
-      if (error) throw error;
-      const ids = (data || []).map(x => x.conversation_id).filter(Boolean);
-      let unread = {};
-      if (ids.length) {
-        const { data: counts, error: countError } = await supabase.rpc('get_my_unread_counts');
-        if (!countError) for (const row of counts || []) unread[row.conversation_id] = row.unread_count || 0;
-      }
-      const list = (data || []).map(row => {
+      // Fetch the membership list and unread counters together: neither query
+      // depends on the other, so the sidebar is not held up by the RPC.
+      const [membershipResult, unreadResult] = await Promise.all([
+        supabase.from('conversation_members')
+          .select('conversation_id, joined_at, conversations(id,kind,title,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))')
+          .eq('user_id', session.user.id).order('joined_at', { ascending: false }),
+        supabase.rpc('get_my_unread_counts')
+      ]);
+      if (membershipResult.error) throw membershipResult.error;
+      if (requestId !== chatLoadSeq.current) return;
+      const unread = {};
+      if (!unreadResult.error) for (const row of unreadResult.data || []) unread[row.conversation_id] = Number(row.unread_count) || 0;
+      const list = (membershipResult.data || []).map(row => {
         const c = row.conversations;
         if (!c) return null;
         const peer = (c.conversation_members || []).find(m => m.user_id !== session.user.id);
         const p = peer?.profiles;
         return {
-          id: c.id, kind: c.kind, peerUserId: peer?.user_id || null, title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
+          id: c.id, kind: c.kind, peerUserId: peer?.user_id || null,
+          title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
           avatar: p?.avatar_url || null, updated: c.last_message_at, unread: unread[c.id] || 0
         };
       }).filter(Boolean).sort((a, b) => new Date(b.updated || 0) - new Date(a.updated || 0));
       setChats(list);
-      if (selected) {
-        const fresh = list.find(c => c.id === selected.id);
-        if (fresh) setSelected(fresh);
-      }
-    } catch (e) { setNotice('Не удалось загрузить чаты: ' + e.message); }
-    finally { setLoadingChats(false); }
-  }, [session?.user?.id, selected?.id]);
+      setSelected(current => current ? (list.find(c => c.id === current.id) || current) : current);
+    } catch (e) {
+      if (requestId === chatLoadSeq.current && !silent) setNotice('Не удалось загрузить чаты: ' + (e?.message || 'ошибка'));
+    } finally {
+      if (requestId === chatLoadSeq.current) setLoadingChats(false);
+    }
+  }, [session?.user?.id, chats.length]);
 
   useEffect(() => {
     if (!session) { setCryptoRuntimeError(''); return; }
@@ -297,38 +303,43 @@ function App() {
       .then(({data}) => setProfile(data));
   }, [session?.user?.id]);
 
-  const loadMessages = useCallback(async (chat) => {
+  const decryptMessageRow = useCallback(async (chat, message) => {
+    if (!isEncrypted(message.content)) return message;
+    try {
+      const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
+      return { ...message, content: plaintext, decrypted: true, encrypted: false, decryptionError: null };
+    } catch (decryptError) {
+      return { ...message, encrypted: true, decryptionError: decryptError?.message || 'Не удалось расшифровать сообщение' };
+    }
+  }, [session?.user?.id]);
+
+  const loadMessages = useCallback(async (chat, { silent = false } = {}) => {
     if (!chat?.id) return;
     const requestId = ++messageLoadSeq.current;
-    setLoadingMessages(true);
-    setNotice('');
+    if (!silent && messages.length === 0) setLoadingMessages(true);
+    if (!silent) setNotice('');
     try {
-      const { data, error } = await supabase.from('messages')
-        .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
-        .eq('conversation_id', chat.id).is('deleted_at', null)
-        .order('created_at', { ascending: true }).limit(100);
-      if (error) throw error;
-      const rows = await Promise.all((data || []).map(async message => {
-        if (!isEncrypted(message.content)) return message;
-        try {
-          const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
-          return { ...message, content: plaintext, decrypted: true };
-        } catch (decryptError) {
-          return { ...message, encrypted: true, decryptionError: decryptError?.message || 'Не удалось расшифровать сообщение' };
-        }
-      }));
+      // Load the newest page, then reverse it for chronological rendering.
+      // The old ascending+limit query could hide all recent messages in long chats.
+      const [messageResult, reactionsResult] = await Promise.all([
+        supabase.from('messages')
+          .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+          .eq('conversation_id', chat.id).is('deleted_at', null)
+          .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50),
+        loadMessageReactions(supabase, chat.id).catch(() => ({}))
+      ]);
+      if (messageResult.error) throw messageResult.error;
+      const rows = await Promise.all((messageResult.data || []).reverse().map(message => decryptMessageRow(chat, message)));
       if (requestId !== messageLoadSeq.current) return;
       setMessages(rows);
-      const reactions = await loadMessageReactions(supabase, chat.id).catch(() => ({}));
-      if (requestId !== messageLoadSeq.current) return;
-      setMessageReactions(reactions);
+      setMessageReactions(reactionsResult || {});
       markConversationRead(supabase, chat.id).catch(() => {});
     } catch (error) {
-      if (requestId === messageLoadSeq.current) setNotice('Не удалось открыть переписку: ' + (error?.message || 'ошибка'));
+      if (requestId === messageLoadSeq.current && !silent) setNotice('Не удалось открыть переписку: ' + (error?.message || 'ошибка'));
     } finally {
       if (requestId === messageLoadSeq.current) setLoadingMessages(false);
     }
-  }, [session?.user?.id]);
+  }, [session?.user?.id, decryptMessageRow, messages.length]);
 
   useEffect(() => {
     if (!messageMenu && !reactionPickerFor) return;
@@ -350,12 +361,32 @@ function App() {
 
   useEffect(() => {
     if (!selected) { messageLoadSeq.current++; setMessages([]); setMessageReactions({}); return; }
-    loadMessages(selected);
-    const channel = supabase.channel('web-chat-' + selected.id)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: 'conversation_id=eq.' + selected.id }, () => loadMessages(selected))
+    const chat = selected;
+    loadMessages(chat);
+    let active = true;
+    const channel = supabase.channel('web-chat-' + chat.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: 'conversation_id=eq.' + chat.id }, async payload => {
+        if (!active) return;
+        const eventType = payload.eventType;
+        const source = eventType === 'DELETE' ? payload.old : payload.new;
+        if (!source?.id) return;
+        if (eventType === 'DELETE' || source.deleted_at) {
+          setMessages(previous => previous.filter(message => message.id !== source.id));
+          setMessageReactions(previous => { const next = { ...previous }; delete next[source.id]; return next; });
+          return;
+        }
+        const message = await decryptMessageRow(chat, source);
+        if (!active) return;
+        setMessages(previous => {
+          const next = [...previous.filter(item => item.id !== message.id), message]
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+          return next.slice(-50);
+        });
+        if (message.sender_id !== session?.user?.id) markConversationRead(supabase, chat.id).catch(() => {});
+      })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [selected?.id, loadMessages, e2eeReady]);
+    return () => { active = false; supabase.removeChannel(channel); };
+  }, [selected?.id, loadMessages, decryptMessageRow, session?.user?.id]);
 
   const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
 
