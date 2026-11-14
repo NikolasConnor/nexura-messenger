@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null)
+data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null, val chatMode: String = "secret")
 data class MessageReaction(val emoji: String, val count: Int, val selectedByMe: Boolean)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
@@ -353,7 +353,7 @@ class NexuraApi(private val store: SessionStore) {
             val memberships = async {
                 call(
                     "/rest/v1/conversation_members?select=conversation_id," +
-                        "conversations(id,kind,title,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))" +
+                        "conversations(id,kind,title,last_message_at,chat_mode,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))" +
                         "&user_id=eq.$uid&order=joined_at.desc" +
                         "&conversations.conversation_members.user_id=neq.$uid"
                 )
@@ -402,7 +402,8 @@ class NexuraApi(private val store: SessionStore) {
                 updated = conversation.optString("last_message_at").takeIf { it.isNotBlank() && it != "null" },
                 unreadCount = unreadByChat[id] ?: 0,
                 avatar = avatar,
-                peerUserId = peerId
+                peerUserId = peerId,
+                chatMode = conversation.optString("chat_mode").takeIf { it == "cloud" || it == "secret" } ?: "secret"
             )
         }
     }
@@ -524,7 +525,8 @@ class NexuraApi(private val store: SessionStore) {
             val edited = m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" }
 
             if (type in setOf("text", "media", "call") &&
-                (E2eeMessageEnvelope.isEnvelope(content) || E2eeGroupMessageEnvelope.isEnvelope(content))) {
+                (E2eeMessageEnvelope.isEnvelope(content) || E2eeGroupMessageEnvelope.isEnvelope(content) ||
+                    content == "NEXURA_CLOUD_V1" || cloudPlaintextById.containsKey(id))) {
                 val decrypted = cloudPlaintextById[id] ?: if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
                     runCatching {
                         val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
@@ -1097,6 +1099,43 @@ class NexuraApi(private val store: SessionStore) {
      * per-device format used by group chats, so every logged-in device can decrypt
      * its own copy while the server only stores ciphertext.
      */
+    /** Telegram-style cloud message: server stores only an authenticated AES-GCM envelope. */
+    suspend fun sendCloudMessage(
+        conversationId: String,
+        messageId: String,
+        plaintext: String,
+        replyToId: String? = null
+    ) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val chatId = normalizeUuid(conversationId)
+        val bytes = plaintext.toByteArray(Charsets.UTF_8)
+        if (plaintext.isBlank() || bytes.size > 12_000) {
+            throw IOException("Сообщение пустое или слишком большое")
+        }
+        val cloudContent = encryptCloudHistory(chatId, messageId, plaintext)
+        val payload = JSONObject()
+            .put("id", normalizeUuid(messageId))
+            .put("conversation_id", chatId)
+            .put("sender_id", uid)
+            .put("message_type", "text")
+            .put("content", "NEXURA_CLOUD_V1")
+            .put("cloud_content", cloudContent)
+        if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
+        val inserted = JSONArray(call(
+            "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
+            prefer = "resolution=ignore-duplicates,return=representation"
+        ))
+        val saved = if (inserted.length() == 1) inserted else JSONArray(call(
+            "/rest/v1/messages?select=id,sender_id,content,cloud_content&id=eq.${normalizeUuid(messageId)}&conversation_id=eq.$chatId&limit=1"
+        ))
+        if (saved.length() != 1 || saved.getJSONObject(0).optString("sender_id") != uid ||
+            saved.getJSONObject(0).optString("content") != "NEXURA_CLOUD_V1" ||
+            saved.getJSONObject(0).optString("cloud_content") != cloudContent) {
+            throw IOException("Сервер не подтвердил сохранение облачного сообщения")
+        }
+        if (inserted.length() == 1) notifyChatPush(chatId)
+    }
+
     suspend fun sendEncryptedDirectMessage(
         conversationId: String,
         e2ee: E2eeClient,
