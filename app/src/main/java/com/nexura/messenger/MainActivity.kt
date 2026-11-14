@@ -2944,8 +2944,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             .border(1.dp, Accent.copy(alpha = 0.20f), RoundedCornerShape(16.dp))
                                                             .clickable {
                                                                 try {
-                                                                    val local = File(mediaUri.path ?: throw IOException("Файл недоступен"))
-                                                                    val contentUri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", local)
+                                                                    val contentUri = if (mediaUri.scheme == "content") {
+                                                                        mediaUri
+                                                                    } else {
+                                                                        val local = File(mediaUri.path ?: throw IOException("Файл недоступен"))
+                                                                        androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", local)
+                                                                    }
                                                                     context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(contentUri, msg.mediaMimeType ?: "*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                                                                 } catch (_: Exception) { notice = "Не удалось открыть документ. Установите приложение для этого формата." }
                                                             }.padding(12.dp),
