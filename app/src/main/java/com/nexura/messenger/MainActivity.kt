@@ -525,9 +525,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         scope.launch {
             try {
                 val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
-                // Durably queue the plaintext under the Android Keystore key before any ratchet advance or network I/O.
-                withContext(Dispatchers.IO) {
-                    client.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
+                // Secret chats keep the durable local E2EE outbox. Cloud chats use
+                // the server-managed AES-GCM archive and do not advance an Olm ratchet.
+                if (chat.chatMode == "secret") {
+                    withContext(Dispatchers.IO) {
+                        client.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
+                    }
                 }
                 var delivered = false
                 var lastFailure: Exception? = null
@@ -536,7 +539,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         messageSendMutex.withLock {
                             // Olm/JNI encryption is CPU work; never run it on Compose's main thread.
                             withContext(Dispatchers.Default) {
-                                if (chat.kind == "direct") {
+                                if (chat.chatMode == "cloud") {
+                                    api.sendCloudMessage(chat.id, messageId, text, replyToId)
+                                } else if (chat.kind == "direct") {
                                     api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
                                 } else {
                                     api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
@@ -556,9 +561,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (delivered) {
                     messageDelivery[messageId] = "sent"
                     failedMessageRetries.remove(messageId)
-                    // Persist the advanced Olm ratchet and the sender's local plaintext cache
-                    // to the encrypted cloud backup as soon as the send succeeds.
-                    runCatching { api.syncE2eeBackupIfEnabled(client) }
+                    // Only secret chats advance Olm ratchets and need E2EE backup sync.
+                    if (chat.chatMode == "secret") {
+                        runCatching { api.syncE2eeBackupIfEnabled(client) }
+                    }
                 } else {
                     throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
                 }
