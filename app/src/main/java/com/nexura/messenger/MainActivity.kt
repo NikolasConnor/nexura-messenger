@@ -524,12 +524,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         failedMessageRetries.remove(messageId)
         scope.launch {
             try {
-                val client = e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
+                val secureClient = if (chat.chatMode == "secret") {
+                    e2eeClient ?: throw IllegalStateException("Локальный ключ E2EE ещё не готов")
+                } else null
                 // Secret chats keep the durable local E2EE outbox. Cloud chats use
                 // the server-managed AES-GCM archive and do not advance an Olm ratchet.
                 if (chat.chatMode == "secret") {
                     withContext(Dispatchers.IO) {
-                        client.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
+                        secureClient!!.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
                     }
                 }
                 var delivered = false
@@ -542,9 +544,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 if (chat.chatMode == "cloud") {
                                     api.sendCloudMessage(chat.id, messageId, text, replyToId)
                                 } else if (chat.kind == "direct") {
-                                    api.sendEncryptedDirectMessage(chat.id, client, messageId, text, replyToId)
+                                    api.sendEncryptedDirectMessage(chat.id, secureClient!!, messageId, text, replyToId)
                                 } else {
-                                    api.sendEncryptedGroupMessage(chat.id, client, messageId, text, replyToId = replyToId)
+                                    api.sendEncryptedGroupMessage(chat.id, secureClient!!, messageId, text, replyToId = replyToId)
                                 }
                             }
                         }
@@ -563,7 +565,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     failedMessageRetries.remove(messageId)
                     // Only secret chats advance Olm ratchets and need E2EE backup sync.
                     if (chat.chatMode == "secret") {
-                        runCatching { api.syncE2eeBackupIfEnabled(client) }
+                        runCatching { api.syncE2eeBackupIfEnabled(secureClient!!) }
                     }
                 } else {
                     throw lastFailure ?: IOException("Не удалось отправить защищённое сообщение")
