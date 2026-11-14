@@ -241,6 +241,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
     var chatThemeOpen by remember { mutableStateOf(false) }
+    var showChatModeDialog by remember { mutableStateOf(false) }
+    var changingChatMode by remember { mutableStateOf(false) }
     var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
     var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
     var recordingVoice by remember { mutableStateOf(false) }
@@ -2003,6 +2005,55 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
+                    if (showChatModeDialog) {
+                        AlertDialog(
+                            onDismissRequest = { if (!changingChatMode) showChatModeDialog = false },
+                            containerColor = Surface1,
+                            title = { Text("Режим переписки", color = MainText, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.ChatBubbleOutline, null, tint = Accent)
+                                        Column(Modifier.padding(start = 10.dp)) {
+                                            Text("Облачный чат", color = MainText, fontWeight = FontWeight.SemiBold)
+                                            Text("История синхронизируется через сервер и доступна на ваших устройствах. Это не сквозное E2EE.", color = SecondaryText, fontSize = 12.sp)
+                                        }
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Lock, null, tint = Success)
+                                        Column(Modifier.padding(start = 10.dp)) {
+                                            Text("Секретный чат", color = MainText, fontWeight = FontWeight.SemiBold)
+                                            Text("Новые сообщения шифруются между устройствами. Доступность истории зависит от ключей устройств.", color = SecondaryText, fontSize = 12.sp)
+                                        }
+                                    }
+                                    Text("Старые сообщения сохраняют прежний способ хранения и шифрования. Режим меняется для всех участников чата.", color = SecondaryText, fontSize = 11.sp)
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(enabled = !changingChatMode, onClick = {
+                                    val nextMode = if (chat.chatMode == "cloud") "secret" else "cloud"
+                                    changingChatMode = true
+                                    scope.launch {
+                                        try {
+                                            api.updateConversationChatMode(chat.id, nextMode)
+                                            val updated = ChatItem(chat.id, chat.title, chat.kind, chat.updated, chat.unreadCount, chat.avatar, chat.peerUserId, nextMode)
+                                            selected = updated
+                                            chats = chats.map { if (it.id == updated.id) updated else it }
+                                            showChatModeDialog = false
+                                            notice = if (nextMode == "secret") "Включён секретный режим. Новые сообщения будут E2EE." else "Включён облачный режим. Новые сообщения будут синхронизироваться через сервер."
+                                        } catch (e: Exception) {
+                                            error = e.message ?: "Не удалось изменить режим. Изменять его может создатель чата."
+                                        } finally { changingChatMode = false }
+                                    }
+                                }) {
+                                    Text(if (changingChatMode) "Сохраняем…" else "Переключить на " + if (chat.chatMode == "cloud") "секретный" else "облачный")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showChatModeDialog = false }, enabled = !changingChatMode) { Text("Закрыть") }
+                            }
+                        )
+                    }
                     if (chatThemeOpen) {
                         val wallpaperOptions = listOf("Фиолетовая ночь" to Color(0xFF100C1D), "Графит" to Color(0xFF171D27), "Сланец" to Color(0xFF1B2634), "Синий вечер" to Color(0xFF101D32), "Лес" to Color(0xFF14251F), "Бордовый" to Color(0xFF2A1922))
                         val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
@@ -2412,6 +2463,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     color = if (presence?.isOnline == true) Success else SecondaryText,
                                     fontSize = 12.sp,
                                     maxLines = 1
+                                )
+                            }
+                            IconButton(onClick = { showChatModeDialog = true }) {
+                                Icon(
+                                    if (chat.chatMode == "secret") Icons.Default.Lock else Icons.Default.ChatBubbleOutline,
+                                    "Режим чата",
+                                    tint = if (chat.chatMode == "secret") Success else Accent
                                 )
                             }
                             IconButton(onClick = { chatThemeOpen = true }) {
