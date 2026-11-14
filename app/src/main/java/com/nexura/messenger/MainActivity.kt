@@ -609,7 +609,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         chatSearchQuery = ""
         scope.launch {
             try {
-                // Render the encrypted local snapshot immediately; network sync follows.
+                // Show the encrypted local snapshot immediately, without waiting for network.
                 val cachedMessages = withContext(Dispatchers.IO) {
                     localCache.readMessages(store.userId.orEmpty(), chat.id)
                 }
@@ -621,12 +621,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     lastSyncedMessageTimestamp = cachedNewest?.createdAt
                     lastSyncedMessageId = cachedNewest?.id
                 }
+
+                // Older cache versions did not persist chat_mode. Resolve those entries
+                // from the server before deciding whether a send needs E2EE.
+                var activeChat = chat
+                if (activeChat.chatMode == "unknown") {
+                    val resolvedMode = withContext(Dispatchers.IO) {
+                        api.conversationChatMode(activeChat.id)
+                    }
+                    activeChat = activeChat.copy(chatMode = resolvedMode)
+                    if (selected?.id == activeChat.id) {
+                        selected = activeChat
+                        chats = chats.map { if (it.id == activeChat.id) activeChat else it }
+                    }
+                }
+
                 // Start with a smaller first network page on low-memory phones.
                 val loadedMessages = withContext(Dispatchers.IO) {
-                    api.messages(chat.id, e2eeClient, pageSize = 20)
+                    api.messages(activeChat.id, e2eeClient, pageSize = 20)
                 }
                 val pendingForChat = withContext(Dispatchers.IO) {
-                    e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == chat.id }
+                    e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == activeChat.id }
                 }
                 if (selected?.id != chat.id) return@launch
 
@@ -648,7 +663,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 lastSyncedMessageId = newest?.id
 
                 pendingForChat.forEach { pending ->
-                    dispatchSecureMessage(chat, pending.messageId, pending.plaintext, pending.replyToId, pending.createdAt)
+                    dispatchSecureMessage(activeChat, pending.messageId, pending.plaintext, pending.replyToId, pending.createdAt)
                 }
 
                 // These metadata requests are independent. Run them together after
@@ -688,6 +703,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
         if (text.isBlank()) return
+        if (chat.chatMode != "cloud" && chat.chatMode != "secret") {
+            error = "Подключаем чат. Подожди пару секунд и отправь сообщение ещё раз."
+            return
+        }
         val messageId = UUID.randomUUID().toString()
         draft = ""
         chatDrafts[chat.id] = ""
@@ -757,18 +776,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     cachedPreviews.forEach { (chatId, preview) -> chatPreviews[chatId] = preview }
                 }
                 api.restoreSession()
-                api.myProfile() // Create a profile row for accounts that have not opened settings yet.
-                val initialPrivacy = api.privacySettings()
-                showOnlineStatus = initialPrivacy.showOnlineStatus
-                readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
-                // Prepare local E2EE state before chats become tappable; key publication is
-                // network work and happens after the chat list has rendered.
+                // Build the local E2EE client immediately after session restoration.
+                // This local-only step must not wait for profile/privacy/chat-list requests:
+                // a fast tap on a cached secret chat must not race device initialization.
                 val e2eeUserId = store.userId
                 val localE2eeClient = if (!e2eeUserId.isNullOrBlank()) {
                     runCatching { E2eeClient(context.applicationContext, e2eeUserId) }
                         .onFailure { e2eeStatus = "Не удалось подготовить E2EE: ${it.message ?: "ошибка устройства"}" }
                         .getOrNull()
                 } else null
+                if (localE2eeClient != null) e2eeClient = localE2eeClient
+
+                api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                val initialPrivacy = api.privacySettings()
+                showOnlineStatus = initialPrivacy.showOnlineStatus
+                readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
                 val latestChats = api.chats()
                 chats = latestChats
                 withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
@@ -778,7 +800,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     // Cloud-history messages are restored independently of the legacy Olm
                     // device backup. A new install must not be blocked by a recovery code.
                     e2eeRecoveryRequired = false
-                    e2eeClient = localE2eeClient
                     try {
                         val available = api.publishE2eeDevice(localE2eeClient)
                         e2eeStatus = if (!hadLocalDevice && previousServerDevice) {
