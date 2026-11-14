@@ -165,6 +165,7 @@ function App() {
   const [chats, setChats] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [outgoingMediaStatus, setOutgoingMediaStatus] = useState({});
   const messageLoadSeq = useRef(0);
   const messagesPaneRef = useRef(null);
   const [messageReactions, setMessageReactions] = useState({});
@@ -561,20 +562,42 @@ function App() {
     setMessageMenu(null);
   }
 
-  async function sendAttachment() {
-    if (!pendingMedia || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
+  async function sendAttachment(fileOverride = pendingMedia, existingMessageId = null) {
+    const file = fileOverride;
+    if (!file || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
     setSending(true); setNotice('');
+    const messageId = existingMessageId || crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    if (!existingMessageId) {
+      const optimistic = {
+        id:messageId, sender_id:session.user.id, content:'', created_at:createdAt,
+        message_type:'media', encrypted:false, uploading:true, localMediaFile:file,
+        reply_to_id:replyTarget?.id || null
+      };
+      setMessages(previous=>[...previous,optimistic]);
+    }
+    setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sending'}));
     try {
-      const messageId = crypto.randomUUID();
-      const metadata = await encryptAndUploadMedia(supabase, { file:pendingMedia, userId:session.user.id, conversationId:selected.id, messageId });
+      const metadata = await encryptAndUploadMedia(supabase, { file, userId:session.user.id, conversationId:selected.id, messageId });
       const sent = await sendBrowserDirectMessage(supabase, {
         userId:session.user.id, conversationId:selected.id, peerUserId:selected.peerUserId,
         messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId:replyTarget?.id || null
       });
-      setMessages(previous=>[...previous,{...sent,content:JSON.stringify(metadata),media:metadata}]);
+      setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
+      setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
       setPendingMedia(null); setReplyTarget(null); loadChats();
-    } catch(error) { setNotice('Не удалось отправить вложение: '+(error?.message||'ошибка')); }
-    finally { setSending(false); }
+    } catch(error) {
+      setOutgoingMediaStatus(previous=>({...previous,[messageId]:'failed'}));
+      setNotice('Не удалось отправить вложение: '+(error?.message||'ошибка'));
+    } finally { setSending(false); }
+  }
+
+  function retryMediaMessage(message) {
+    const file = message.localMediaFile;
+    if (!file) { setNotice('Исходный файл больше недоступен. Выбери его заново.'); return; }
+    setMessages(previous=>previous.filter(item=>item.id!==message.id));
+    setOutgoingMediaStatus(previous=>({...previous,[message.id]:'sending'}));
+    sendAttachment(file,message.id);
   }
 
   async function startVoiceRecording() {
@@ -759,8 +782,8 @@ function App() {
                 <div className="message-shell">
                   <div className="message-bubble">
                     {m.reply_to_id && <button className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}><span>↪ {replyMessage?.sender_id===session.user.id?'Вы':selected.title}</span><b>{replyMessage?.content || 'Ответ на сообщение'}</b></button>}
-                    {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : parseMediaPayload(m.content) ? <MediaMessage payload={parseMediaPayload(m.content)} supabase={supabase} chatTitle={selected.title}/> : <div className="message-content">{m.content}</div>}
-                    <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && <CheckCheck size={13}/>}</div>
+                    {m.uploading ? <div className="pending-chat-media"><PendingMediaPreview file={m.localMediaFile}/><div><b>{m.localMediaFile?.name || 'Вложение'}</b><small>{outgoingMediaStatus[m.id]==='failed'?'Не отправлено': 'Отправляется…'}</small>{outgoingMediaStatus[m.id]==='failed' && <button type="button" onClick={()=>retryMediaMessage(m)}>Повторить</button>}</div></div> : m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : parseMediaPayload(m.content) ? <MediaMessage payload={parseMediaPayload(m.content)} supabase={supabase} chatTitle={selected.title}/> : <div className="message-content">{m.content}</div>}
+                    <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && (m.uploading ? <span className="media-send-status">{outgoingMediaStatus[m.id]==='failed'?'!':'◷'}</span> : <span className="media-send-status">{outgoingMediaStatus[m.id]==='sent'?'✓':'✓✓'}</span>)}</div>
                   </div>
                   <div className={"message-tools "+(reactions.length?"has-reactions":"")}>
                     <div className="message-reactions">
