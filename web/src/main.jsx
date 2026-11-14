@@ -79,6 +79,7 @@ function MediaMessage({ payload, supabase }) {
   const [playing,setPlaying]=useState(false);
   const [duration,setDuration]=useState(0);
   const [current,setCurrent]=useState(0);
+  const [speed,setSpeed]=useState(1);
   const audioRef=useRef(null);
   useEffect(()=>{
     let alive=true, objectUrl='';
@@ -89,17 +90,27 @@ function MediaMessage({ payload, supabase }) {
     return ()=>{alive=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
   },[payload.path,supabase]);
   const toggle=async()=>{const audio=audioRef.current;if(!audio)return;try{if(audio.paused)await audio.play();else audio.pause();}catch(e){setError('Браузер не смог воспроизвести аудио');}};
+  const changeSpeed=()=>{const next=speed===1?1.5:speed===1.5?2:1;setSpeed(next);if(audioRef.current)audioRef.current.playbackRate=next;};
   if (busy) return <div className="media-loading">Расшифровываем вложение…</div>;
   if (error) return <div className="media-error">{error}</div>;
-  if (payload.media_type==='image') return <img className="media-image-preview" src={url} alt={payload.name || 'Изображение'}/>;
-  if (payload.media_type==='video') return <video className="media-video-preview" src={url} controls preload="metadata"/>;
   if (payload.media_type==='audio') return <div className="voice-player">
-    <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={e=>setDuration(e.currentTarget.duration||0)} onTimeUpdate={e=>setCurrent(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)}/>
+    <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={e=>setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0)} onTimeUpdate={e=>setCurrent(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{setPlaying(false);setCurrent(0);}}/>
     <button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button>
-    <div className="voice-track"><input aria-label="Позиция воспроизведения" type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={e=>{if(audioRef.current)audioRef.current.currentTime=Number(e.target.value);}}/><div className="voice-time"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div>
-    <span className="voice-icon">♫</span>
+    <div className="voice-track">
+      <div className="voice-wave" aria-hidden="true">{Array.from({length:32},(_,i)=><span key={i} style={{height:(7+Math.abs(Math.sin(i*2.17)*Math.cos(i*.43))*19)+'px',opacity:duration&&i/32<=current/duration?1:.55}}/>)}</div>
+      <input aria-label="Позиция воспроизведения" type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={e=>{if(audioRef.current)audioRef.current.currentTime=Number(e.target.value);}}/>
+      <div className="voice-time"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div>
+    </div>
+    <button type="button" className="voice-speed" onClick={changeSpeed} aria-label="Скорость воспроизведения">{speed}×</button>
   </div>;
   return <a className="file-attachment" href={url} download={payload.name || 'attachment'}><span className="file-attachment-icon">↧</span><span className="file-attachment-info"><b>{payload.name}</b><small>{(payload.size/1024/1024).toFixed(2)} МБ · зашифрованный файл</small></span><span className="file-download">Скачать</span></a>;
+}
+
+function PendingMediaPreview({ file }) {
+  const [url,setUrl]=useState('');
+  useEffect(()=>{const next=URL.createObjectURL(file);setUrl(next);return()=>URL.revokeObjectURL(next);},[file]);
+  if (!url || !file.type.startsWith('audio/')) return null;
+  return <audio className="pending-audio-preview" controls preload="metadata" src={url}/>;
 }
 
 function AuthScreen() {
@@ -542,6 +553,11 @@ function App() {
     } catch(error) { setNotice(error?.name==='NotAllowedError'?'Разреши Nexura доступ к микрофону.':'Не удалось начать запись: '+(error?.message||'ошибка')); }
   }
   function stopVoiceRecording() { if(recorderRef.current?.state==='recording') recorderRef.current.stop(); }
+  function cancelVoiceRecording() {
+    const recorder=recorderRef.current;
+    if(recorder?.state==='recording'){recorder.onstop=null;recorder.stream?.getTracks?.().forEach(track=>track.stop());recorder.stop();}
+    recordingChunksRef.current=[];setRecording(false);setRecordingSeconds(0);
+  }
 
   useEffect(()=>{
     if(!recording)return;
@@ -715,8 +731,8 @@ function App() {
         </div>
         {(replyTarget || editingMessageId) && <div className="reply-composer"><span>{editingMessageId ? 'Редактирование сообщения' : 'Ответ на: '+String(replyTarget?.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>{setReplyTarget(null);setEditingMessageId(null);setDraft('');}} aria-label="Отменить">×</button></div>}
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
-          {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sending}>{sending?'Отправка…':'Отправить'}</button></div>}
-          {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
+          {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><PendingMediaPreview file={pendingMedia}/><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sending}>{sending?'Отправка…':'Отправить'}</button></div>}
+          {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={cancelVoiceRecording}>Отмена</button><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
           <input ref={fileInputRef} type="file" className="visually-hidden-file" accept="audio/*,image/*,video/*,.pdf,.txt,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.json,.csv" onChange={event=>{const file=event.target.files?.[0];if(file)setPendingMedia(file);event.target.value='';}}/>
           <div className="composer-input-row">
             <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={!e2eeReady||sending||recording||!!pendingMedia} title="Прикрепить файл" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
