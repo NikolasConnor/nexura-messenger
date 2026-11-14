@@ -113,8 +113,17 @@ jobs:
 
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs website/downloads/Nexura.apk
           sha256sum website/downloads/Nexura.apk | awk '{print $1 "  Nexura.apk"}' > website/downloads/SHA256SUMS.txt
-          VERSION="${GITHUB_REF_NAME#v}"
-          printf 'Nexura version %s\nPublished from tag %s\n' "$VERSION" "$GITHUB_REF_NAME" > website/downloads/RELEASE.txt
+          RELEASE_TAG="${{ inputs.release_tag || github.ref_name }}"
+          VERSION="${RELEASE_TAG#v}"
+          printf 'Nexura version %s\nPublished from tag %s\n' "$VERSION" "$RELEASE_TAG" > website/downloads/RELEASE.txt
+
+      - name: Attach APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release upload "$RELEASE_TAG" website/downloads/Nexura.apk website/downloads/SHA256SUMS.txt website/downloads/RELEASE.txt --clobber
 
       - name: Set up Rust and WebAssembly target
         uses: dtolnay/rust-toolchain@stable
