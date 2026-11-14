@@ -195,6 +195,23 @@ function App() {
       .catch(error => { setE2eeReady(false); setCryptoRuntimeError(error?.message || 'Не удалось загрузить криптомодуль'); setE2eeStatus('Защита не готова: ' + (error?.message || 'ошибка')); });
   }, [session?.user?.id]);
 
+  // Keep this browser's published pre-key reserve topped up while the user is
+  // signed in. Other users' private keys are never generated or modified here.
+  useEffect(() => {
+    if (!session?.user?.id || !e2eeReady) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const result = await ensureBrowserE2eeDevice(supabase, session.user.id);
+        if (active) setE2eeStatus('Защита включена · ' + result.availableKeys + ' одноразовых ключей');
+      } catch (error) {
+        if (active) setE2eeStatus('Не удалось обновить ключи: ' + (error?.message || 'ошибка'));
+      }
+    };
+    const timer = setInterval(refresh, 90_000);
+    return () => { active = false; clearInterval(timer); };
+  }, [session?.user?.id, e2eeReady]);
+
   useEffect(() => {
     if (!session) { setChats([]); setSelected(null); setProfile(null); return; }
     loadChats();
