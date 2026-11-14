@@ -13,10 +13,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.Dns
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import java.net.InetAddress
-import java.net.UnknownHostException
 import java.io.File
 import java.io.FileOutputStream
 import org.json.JSONArray
@@ -70,87 +66,6 @@ data class TurnIceServerConfig(
     val credential: String?
 )
 
-/**
- * Resolves the Supabase endpoint through HTTPS DNS when Android's configured
- * resolver is filtered or returns unusable records. TLS still uses the original
- * hostname, so certificate verification and SNI are not weakened.
- */
-private object SupabaseDohDns : Dns {
-    private data class Cached(val addresses: List<InetAddress>, val expiresAt: Long)
-    private val cache = ConcurrentHashMap<String, Cached>()
-
-    private val dohClient = OkHttpClient.Builder()
-        .connectTimeout(2500, TimeUnit.MILLISECONDS)
-        .readTimeout(2500, TimeUnit.MILLISECONDS)
-        .callTimeout(3500, TimeUnit.MILLISECONDS)
-        .dns(object : Dns {
-            override fun lookup(hostname: String): List<InetAddress> {
-                return when (hostname.lowercase()) {
-                    "cloudflare-dns.com" -> listOf(InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)))
-                    "dns.google" -> listOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)))
-                    else -> Dns.SYSTEM.lookup(hostname)
-                }
-            }
-        })
-        .build()
-
-    override fun lookup(hostname: String): List<InetAddress> {
-        if (!hostname.equals("lyhzawblxcvpgpjrkspc.supabase.co", ignoreCase = true)) {
-            return Dns.SYSTEM.lookup(hostname)
-        }
-        val now = System.currentTimeMillis()
-        cache[hostname]?.takeIf { it.expiresAt > now }?.let { return it.addresses }
-
-        val secureAddresses = resolveOverHttps(hostname)
-        val systemAddresses = runCatching { Dns.SYSTEM.lookup(hostname) }.getOrDefault(emptyList())
-        val combined = (secureAddresses + systemAddresses).distinctBy { it.hostAddress }
-        if (combined.isNotEmpty()) {
-            cache[hostname] = Cached(combined, now + 5 * 60 * 1000L)
-            return combined
-        }
-        throw UnknownHostException("Не удалось разрешить адрес серверов Nexura ни через системный DNS, ни через защищённый DNS")
-    }
-
-    private fun resolveOverHttps(hostname: String): List<InetAddress> {
-        val resolvers = listOf(
-            "https://cloudflare-dns.com/dns-query",
-            "https://dns.google/resolve"
-        )
-        for (endpoint in resolvers) {
-            try {
-                val url = endpoint.toHttpUrl().newBuilder()
-                    .addQueryParameter("name", hostname)
-                    .addQueryParameter("type", "A")
-                    .build()
-                val request = Request.Builder().url(url)
-                    .header("Accept", "application/dns-json")
-                    .get().build()
-                dohClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use
-                    val json = JSONObject(response.body?.string().orEmpty())
-                    if (json.optInt("Status", -1) != 0) return@use
-                    val answers = json.optJSONArray("Answer") ?: return@use
-                    val found = mutableListOf<InetAddress>()
-                    for (i in 0 until answers.length()) {
-                        val answer = answers.optJSONObject(i) ?: continue
-                        if (answer.optInt("type") != 1) continue
-                        val octets = answer.optString("data").split(".")
-                        if (octets.size != 4) continue
-                        val bytes = octets.map { it.toIntOrNull()?.takeIf { n -> n in 0..255 }?.toByte() }
-                        if (bytes.all { it != null }) {
-                            found += InetAddress.getByAddress(hostname, bytes.filterNotNull().toByteArray())
-                        }
-                    }
-                    if (found.isNotEmpty()) return found
-                }
-            } catch (_: Exception) {
-                // Try the independent resolver before falling back to Android DNS.
-            }
-        }
-        return emptyList()
-    }
-}
-
 class NexuraApi(private val store: SessionStore) {
     companion object {
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
@@ -164,7 +79,6 @@ class NexuraApi(private val store: SessionStore) {
         .callTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
-        .dns(SupabaseDohDns)
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
     private val remoteDeviceCache = ConcurrentHashMap<String, Pair<E2eeRemoteDevice, Long>>()
