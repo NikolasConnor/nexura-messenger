@@ -113,32 +113,31 @@ Deno.serve(async (req: Request) => {
     if (action === "archive") {
       const items = body?.items;
       if (!Array.isArray(items) || items.length < 1 || items.length > 100) return json({ error: "A batch of 1 to 100 archives is required" }, 400);
-      let archived = 0;
+      const archiveRows = [];
       for (const item of items) {
         if (typeof item?.id !== "string" || !UUID.test(item.id) || typeof item?.plaintext !== "string" ||
             encoder.encode(item.plaintext).length < 1 || encoder.encode(item.plaintext).length > 100000) {
           return json({ error: "Invalid legacy archive item" }, 400);
         }
-        const cloudContent = await encrypt(key, conversationId, item.id, item.plaintext, user.id);
-        const response = await fetch(`${baseUrl}/rest/v1/message_cloud_archives?on_conflict=user_id,message_id`, {
-          method: "POST",
-          headers: {
-            apikey: apiKey,
-            Authorization: authorization,
-            "Content-Type": "application/json",
-            Prefer: "resolution=ignore-duplicates,return=minimal",
-          },
-          body: JSON.stringify({
-            user_id: user.id,
-            conversation_id: conversationId,
-            message_id: item.id,
-            cloud_content: cloudContent,
-          }),
+        archiveRows.push({
+          user_id: user.id,
+          conversation_id: conversationId,
+          message_id: item.id,
+          cloud_content: await encrypt(key, conversationId, item.id, item.plaintext, user.id),
         });
-        if (!response.ok) throw new Error("Unable to save personal cloud history archive");
-        archived++;
       }
-      return json({ archived, version: 1 });
+      const response = await fetch(`${baseUrl}/rest/v1/message_cloud_archives?on_conflict=user_id,message_id`, {
+        method: "POST",
+        headers: {
+          apikey: apiKey,
+          Authorization: authorization,
+          "Content-Type": "application/json",
+          Prefer: "resolution=ignore-duplicates,return=minimal",
+        },
+        body: JSON.stringify(archiveRows),
+      });
+      if (!response.ok) throw new Error("Unable to save personal cloud history archive");
+      return json({ archived: archiveRows.length, version: 1 });
     }
 
     if (action === "decrypt") {
