@@ -2995,7 +2995,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             color = Danger,
                                                             fontSize = 10.sp,
                                                             modifier = Modifier.padding(start = 5.dp).clickable {
-                                                                failedMessageRetries[msg.id]?.let { retry ->
+                                                                failedMediaRetries.remove(msg.id)?.let { retry ->
+                                                                    messages = messages.filterNot { it.id == msg.id }
+                                                                    messageDelivery.remove(msg.id)
+                                                                    sendPendingMedia(retry.first, retry.second, retry.third.first, retry.third.second)
+                                                                } ?: failedMessageRetries[msg.id]?.let { retry ->
                                                                     dispatchSecureMessage(retry.first, msg.id, retry.second, retry.third)
                                                                 }
                                                             }
