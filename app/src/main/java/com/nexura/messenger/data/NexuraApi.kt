@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null, val chatMode: String = "secret")
+data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null, val chatMode: String = "cloud")
 data class MessageReaction(val emoji: String, val count: Int, val selectedByMe: Boolean)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
@@ -344,6 +344,16 @@ class NexuraApi(private val store: SessionStore) {
             store.clear()
         }
     }
+    suspend fun conversationChatMode(conversationId: String): String {
+        val rows = JSONArray(call(
+            "/rest/v1/conversations?select=chat_mode&id=eq." + normalizeUuid(conversationId) + "&limit=1"
+        ))
+        if (rows.length() != 1) throw IOException("Не удалось определить режим чата")
+        return rows.getJSONObject(0).optString("chat_mode")
+            .takeIf { it == "cloud" || it == "secret" }
+            ?: throw IOException("У чата не задан режим переписки")
+    }
+
     suspend fun updateConversationChatMode(conversationId: String, mode: String) {
         if (mode != "cloud" && mode != "secret") throw IOException("Неизвестный режим чата")
         call(
