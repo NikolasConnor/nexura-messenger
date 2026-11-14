@@ -241,6 +241,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
     var chatThemeOpen by remember { mutableStateOf(false) }
+    var showChatOptionsMenu by remember { mutableStateOf(false) }
     var showChatModeDialog by remember { mutableStateOf(false) }
     var changingChatMode by remember { mutableStateOf(false) }
     var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
@@ -2512,78 +2513,93 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     maxLines = 1
                                 )
                             }
-                            IconButton(onClick = { showChatModeDialog = true }) {
-                                Icon(
-                                    if (chat.chatMode == "secret") Icons.Default.Lock else Icons.Default.ChatBubbleOutline,
-                                    "Режим чата",
-                                    tint = if (chat.chatMode == "secret") Success else Accent
-                                )
-                            }
-                            IconButton(onClick = { chatThemeOpen = true }) {
-                                Icon(Icons.Default.Palette, "Оформление чата", tint = if (chatThemeOpen) Accent else SecondaryText)
-                            }
-                            IconButton(onClick = {
-                                scope.launch {
-                                    try {
-                                        val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
-                                        if (chat.kind == "direct") {
-                                            val peerId = api.directPeerUserId(chat.id)
-                                            val devices = api.activeE2eeDevices(peerId)
-                                            if (devices.isEmpty()) throw IllegalStateException("У собеседника пока нет активных устройств Nexura.")
-                                            trustPeerId = peerId
-                                            trustCandidate = devices.first()
-                                        } else {
-                                            val ownDeviceId = client.deviceId()
-                                            val members = api.groupMemberIds(chat.id)
-                                            val queue = members.flatMap { memberId ->
-                                                val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
-                                                if (devices.isEmpty() && memberId != store.userId) throw IllegalStateException("У участника $memberId пока нет активного E2EE-устройства")
-                                                devices.map { memberId to it }
-                                            }.filter { (memberId, device) ->
-                                                !client.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
-                                            }
-                                            if (queue.isEmpty()) {
-                                                notice = "Все активные устройства участников уже подтверждены"
-                                            } else {
-                                                groupTrustQueue = queue
-                                                trustPeerId = queue.first().first
-                                                trustCandidate = queue.first().second
+                            Box {
+                                IconButton(onClick = { showChatOptionsMenu = true }) {
+                                    Icon(Icons.Default.MoreVert, "Действия чата", tint = SecondaryText)
+                                }
+                                DropdownMenu(
+                                    expanded = showChatOptionsMenu,
+                                    onDismissRequest = { showChatOptionsMenu = false },
+                                    modifier = Modifier.background(Surface1)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(if (chat.chatMode == "secret") "Переключить на облачный чат" else "Переключить на секретный чат") },
+                                        leadingIcon = { Icon(if (chat.chatMode == "secret") Icons.Default.ChatBubbleOutline else Icons.Default.Lock, null) },
+                                        onClick = { showChatOptionsMenu = false; showChatModeDialog = true }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Поиск по переписке") },
+                                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                                        onClick = { showChatOptionsMenu = false; chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Медиа и ссылки") },
+                                        leadingIcon = { Icon(Icons.Default.Image, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            scope.launch {
+                                                try {
+                                                    val media = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                                    val recentLinks = api.messages(chat.id, e2eeClient).filter {
+                                                        it.messageType == "text" && Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).containsMatchIn(it.content)
+                                                    }
+                                                    chatGallery = (media + recentLinks).distinctBy { it.id }.sortedByDescending { it.createdAt }
+                                                } catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
                                             }
                                         }
-                                    } catch (e: Exception) {
-                                        error = e.message ?: "Не удалось получить ключи устройств"
-                                    }
-                                }
-                            }) {
-                                Icon(Icons.Default.Lock, if (chat.kind == "group") "Проверить устройства группы" else "Проверить устройство", tint = Accent)
-                            }
-                            IconButton(onClick = {
-                                scope.launch {
-                                    try {
-                                        val media = api.messages(chat.id, e2eeClient, mediaOnly = true)
-                                        val recentLinks = api.messages(chat.id, e2eeClient).filter {
-                                            it.messageType == "text" && Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).containsMatchIn(it.content)
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Проверить устройства") },
+                                        leadingIcon = { Icon(Icons.Default.Lock, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            scope.launch {
+                                                try {
+                                                    val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
+                                                    if (chat.kind == "direct") {
+                                                        val peerId = api.directPeerUserId(chat.id)
+                                                        val devices = api.activeE2eeDevices(peerId)
+                                                        if (devices.isEmpty()) throw IllegalStateException("У собеседника пока нет активных устройств Nexura.")
+                                                        trustPeerId = peerId
+                                                        trustCandidate = devices.first()
+                                                    } else {
+                                                        val ownDeviceId = client.deviceId()
+                                                        val members = api.groupMemberIds(chat.id)
+                                                        val queue = members.flatMap { memberId ->
+                                                            val devices = api.activeE2eeDevices(memberId).filterNot { memberId == store.userId && it.deviceId == ownDeviceId }
+                                                            if (devices.isEmpty() && memberId != store.userId) throw IllegalStateException("У участника $memberId пока нет активного E2EE-устройства")
+                                                            devices.map { memberId to it }
+                                                        }.filter { (memberId, device) ->
+                                                            !client.isRemoteDeviceTrusted(memberId, device.deviceId, device.curve25519Key, device.ed25519Key)
+                                                        }
+                                                        if (queue.isEmpty()) {
+                                                            notice = "Все активные устройства участников уже подтверждены"
+                                                        } else {
+                                                            groupTrustQueue = queue
+                                                            trustPeerId = queue.first().first
+                                                            trustCandidate = queue.first().second
+                                                        }
+                                                    }
+                                                } catch (e: Exception) { error = e.message ?: "Не удалось получить ключи устройств" }
+                                            }
                                         }
-                                        chatGallery = (media + recentLinks).distinctBy { it.id }.sortedByDescending { it.createdAt }
-                                    } catch (e: Exception) { error = e.message ?: "Не удалось загрузить галерею чата" }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Обновить чат") },
+                                        leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            scope.launch {
+                                                try {
+                                                    messages = api.messages(chat.id, e2eeClient)
+                                                    messageReactions = api.messageReactions(chat.id)
+                                                    pinnedMessageId = api.pinnedMessage(chat.id)
+                                                    canManagePins = api.canManageConversation(chat.id)
+                                                } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" }
+                                            }
+                                        }
+                                    )
                                 }
-                            }) {
-                                Icon(Icons.Default.Image, "Медиа чата", tint = if (chatGallery != null) Accent else SecondaryText)
-                            }
-                            IconButton(onClick = { chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }) {
-                                Icon(Icons.Default.Search, "Поиск по переписке", tint = if (chatSearchOpen) Accent else SecondaryText)
-                            }
-                            IconButton(onClick = {
-                                scope.launch {
-                                    try {
-                                        messages = api.messages(chat.id, e2eeClient)
-                                        messageReactions = api.messageReactions(chat.id)
-                                        pinnedMessageId = api.pinnedMessage(chat.id)
-                                        canManagePins = api.canManageConversation(chat.id)
-                                    } catch (e: Exception) { error = e.message ?: "Не удалось обновить чат" }
-                                }
-                            }) {
-                                Icon(Icons.Default.Refresh, "Обновить сообщения", tint = SecondaryText)
                             }
                         }
                         if (chatSearchOpen) {
