@@ -1,0 +1,34 @@
+name: Nexura browser crypto adapter
+
+on:
+  push:
+    branches: [ release/messenger-first, security/e2ee-phase-2 ]
+    paths:
+      - "crypto-core/**"
+      - "crypto-wasm/**"
+      - ".github/workflows/crypto-wasm-tests.yml"
+  pull_request:
+    paths:
+      - "crypto-core/**"
+      - "crypto-wasm/**"
+      - ".github/workflows/crypto-wasm-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Run shared Olm protocol tests
+        run: cargo test --manifest-path crypto-core/Cargo.toml
+      - name: Compile browser WebAssembly adapter
+        run: wasm-pack build crypto-wasm --target web --out-dir ../web/src/crypto/pkg
+      - name: Check generated browser package
+        run: test -s web/src/crypto/pkg/nexura_crypto_wasm.js && test -s web/src/crypto/pkg/nexura_crypto_wasm_bg.wasm
