@@ -226,7 +226,7 @@ function App() {
     if (!chat?.id) return;
     setLoadingMessages(true); setNotice('');
     const { data, error } = await supabase.from('messages')
-      .select('id,sender_id,content,created_at,message_type,deleted_at')
+      .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
       .eq('conversation_id', chat.id).is('deleted_at', null)
       .order('created_at', { ascending: true }).limit(100);
     if (error) setNotice('Не удалось открыть переписку: ' + error.message);
