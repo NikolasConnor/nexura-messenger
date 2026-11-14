@@ -9,6 +9,7 @@ import {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEXT_BYTES = 12000;
 const PROTOCOL = 'nexura-olm-group-v1';
+const decryptLocks = new Map();
 
 function uuid(value, label) {
   const result = String(value || '').toLowerCase();
@@ -213,6 +214,14 @@ export async function sendBrowserDirectMessage(supabase, {
 }
 
 export async function decryptBrowserGroupMessage(supabase, userId, chatId, message) {
+  const lockKey = String(userId) + ':' + String(message.id);
+  if (decryptLocks.has(lockKey)) return decryptLocks.get(lockKey);
+  const task = decryptBrowserGroupMessageOnce(supabase, userId, chatId, message);
+  decryptLocks.set(lockKey, task);
+  try { return await task; } finally { decryptLocks.delete(lockKey); }
+}
+
+async function decryptBrowserGroupMessageOnce(supabase, userId, chatId, message) {
   const uid = uuid(userId, 'user');
   let envelope;
   try { envelope = JSON.parse(message.content); } catch { throw new Error('Повреждённый E2EE-конверт'); }
@@ -220,6 +229,8 @@ export async function decryptBrowserGroupMessage(supabase, userId, chatId, messa
       uuid(envelope.sender_user_id, 'sender') !== uuid(message.sender_id, 'message sender')) {
     throw new Error('E2EE-конверт не соответствует переписке');
   }
+  const alreadyReceived = await loadEncryptedRecord(uid, 'received:' + message.id);
+  if (typeof alreadyReceived === 'string') return alreadyReceived;
   const bundle = await loadEncryptedRecord(uid, 'public-device');
   if (message.sender_id === uid && envelope.sender_device_id === bundle?.device_id) {
     const own = await loadEncryptedRecord(uid, 'sent:' + message.id);
