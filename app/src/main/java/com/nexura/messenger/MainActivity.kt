@@ -914,7 +914,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             realtimeClient.observeConversations(watchedIds).collect { event ->
                 realtimeConnected = event.connected
                 val changedChatId = event.changedConversationId
-                if (event.connected && event.messageChanged && changedChatId != null && e2eeClient != null) {
+                if (event.connected && event.messageChanged && changedChatId != null) {
+                    val changedChat = chats.firstOrNull { it.id == changedChatId }
+                    if (changedChat?.chatMode == "cloud" || e2eeClient != null) {
                     runCatching {
                         val cached = withContext(Dispatchers.IO) {
                             localCache.readMessages(store.userId.orEmpty(), changedChatId)
@@ -955,6 +957,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
