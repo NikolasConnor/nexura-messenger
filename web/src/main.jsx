@@ -370,25 +370,30 @@ function App() {
     <main className={'chat-area '+(mobileChatOpen?'mobile-visible':'')}>
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
       {!selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)}><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><div className="header-secure"><ShieldCheck size={16}/> Nexura</div></header>
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
         <div className="messages-pane">
-          <div className="date-chip">История переписки</div>
-          {loadingMessages && <div className="list-hint">Загружаем сообщения…</div>}
-          {!loadingMessages && messages.length===0 && <div className="empty-messages"><MessageCircle size={28}/><b>Здесь пока нет сообщений</b><span>История появится после синхронизации.</span></div>}
-          {messages.map(m => {
-            const mine=m.sender_id===session.user.id, encrypted=isEncrypted(m.content);
-            return <div key={m.id} className={'message-row '+(mine?'mine':'')}>
-              <div className="message-bubble">
-                {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Сообщение адресовано другому устройству или сессия ещё не установлена.'}</small></div> : <div className="message-content">{m.content}</div>}
-                <time>{timeLabel(m.created_at)}</time>
+          {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
+          {!loadingMessages && messages.length===0 && <div className="empty-messages"><div className="empty-chat-icon"><MessageCircle size={28}/></div><b>Начните общение</b><span>Напиши первое сообщение — оно появится здесь.</span></div>}
+          {messages.map((m,index) => {
+            const mine=m.sender_id===session.user.id;
+            const previous=messages[index-1];
+            const showDate=!previous || dateLabel(previous.created_at)!==dateLabel(m.created_at);
+            return <React.Fragment key={m.id}>
+              {showDate && <div className="day-divider"><span>{dateLabel(m.created_at)}</span></div>}
+              <div className={'message-row '+(mine?'mine':'')}>
+                {!mine && <Avatar className="message-avatar" value={selected.avatar} name={selected.title}/>}
+                <div className="message-bubble">
+                  {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
+                  <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{mine && <CheckCheck size={13}/>}</div>
+                </div>
               </div>
-            </div>;
+            </React.Fragment>;
           })}
-          <div className="security-note"><LockKeyhole size={15}/><span>{e2eeStatus}. Сообщения отправляются только в зашифрованном виде; групповые чаты пока доступны для чтения, но отправка из веба отключена.</span></div>
+          <div className="security-note"><LockKeyhole size={14}/><span>{e2eeStatus}</span></div>
         </div>
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
-          <input value={draft} onChange={event=>setDraft(event.target.value)} placeholder={e2eeReady ? 'Напиши сообщение…' : 'Защищённое соединение не готово'} maxLength={12000} disabled={!e2eeReady || sending}/>
-          <button className="primary-btn" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить"><Send size={17}/>{sending?'Отправляем…':'Отправить'}</button>
+          <textarea value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}}} placeholder={e2eeReady ? 'Напиши сообщение…' : 'Защищённое соединение не готово'} maxLength={12000} rows={1} disabled={!e2eeReady || sending}/>
+          <div className="composer-bottom"><span><LockKeyhole size={12}/> {e2eeReady?'Личное сообщение защищено':'Ожидаем подключение шифрования'} · Shift + Enter — новая строка</span><button className="send-button" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button></div>
         </form> : <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Отправка в группах пока отключена</b><span>Сначала проверяем совместимость личных переписок с Android. Открытый текст не отправляется.</span></div></div>}
         </>
       }
