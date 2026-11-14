@@ -316,7 +316,7 @@ function App() {
   const loadMessages = useCallback(async (chat, { silent = false } = {}) => {
     if (!chat?.id) return;
     const requestId = ++messageLoadSeq.current;
-    if (!silent && messages.length === 0) setLoadingMessages(true);
+    if (!silent) setLoadingMessages(true);
     if (!silent) setNotice('');
     try {
       // Load the newest page, then reverse it for chronological rendering.
@@ -339,7 +339,7 @@ function App() {
     } finally {
       if (requestId === messageLoadSeq.current) setLoadingMessages(false);
     }
-  }, [session?.user?.id, decryptMessageRow, messages.length]);
+  }, [session?.user?.id, decryptMessageRow]);
 
   useEffect(() => {
     if (!messageMenu && !reactionPickerFor) return;
@@ -700,7 +700,8 @@ function App() {
       <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:contactQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setContactQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
       <div className="chat-list">
         {activeTab==='chats' ? <>
-          {loadingChats && <div className="list-hint">Загружаем чаты…</div>}
+          {loadingChats && chats.length===0 && <div className="chat-skeleton-list" aria-label="Загружаем чаты">{Array.from({length:5},(_,i)=><div className="chat-skeleton" key={i}><i/><span><b/><small/></span><em/></div>)}</div>}
+          {loadingChats && chats.length>0 && <div className="list-sync-hint"><span/>Обновляем список</div>}
           {!loadingChats && visibleChats.length===0 && <div className="empty-list"><MessageCircle size={24}/><b>Пока тихо</b><span>Найди человека во вкладке «Контакты» или создай группу кнопкой +.</span></div>}
           {visibleChats.map(chat=><button key={chat.id} className={'chat-item '+(selected?.id===chat.id?'selected':'')} onClick={()=>openChat(chat)}>
             <Avatar value={chat.avatar} name={chat.title}/>
