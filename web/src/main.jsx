@@ -153,6 +153,7 @@ function App() {
   const [messageMenu, setMessageMenu] = useState(null);
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
+  const [pendingAction, setPendingAction] = useState(false);
   const [sending, setSending] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
@@ -262,6 +263,24 @@ function App() {
       if (requestId === messageLoadSeq.current) setLoadingMessages(false);
     }
   }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!messageMenu && !reactionPickerFor) return;
+    const dismiss = event => {
+      if (event.type === 'keydown' && event.key === 'Escape') {
+        setMessageMenu(null); setReactionPickerFor(null); return;
+      }
+      if (event.type === 'pointerdown' && !event.target.closest('.message-tools')) {
+        setMessageMenu(null); setReactionPickerFor(null);
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', dismiss);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', dismiss);
+    };
+  }, [messageMenu, reactionPickerFor]);
 
   useEffect(() => {
     if (!selected) { messageLoadSeq.current++; setMessages([]); setMessageReactions({}); return; }
@@ -377,21 +396,33 @@ function App() {
 
   async function copyMessage(message) {
     if (message.encrypted) { setNotice('Нерасшифрованное сообщение нельзя скопировать.'); return; }
+    const value = String(message.content || '');
     try {
-      await navigator.clipboard.writeText(String(message.content || ''));
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const field = document.createElement('textarea');
+        field.value = value; field.style.position = 'fixed'; field.style.opacity = '0';
+        document.body.appendChild(field); field.select();
+        const copied = document.execCommand('copy'); field.remove();
+        if (!copied) throw new Error('Копирование недоступно');
+      }
       setNotice('Сообщение скопировано');
     } catch { setNotice('Браузер не разрешил копирование'); }
     setMessageMenu(null);
   }
 
   async function removeOwnMessage(message) {
-    if (message.sender_id !== session.user.id) return;
+    if (message.sender_id !== session.user.id || pendingAction) return;
+    if (!window.confirm('Удалить это сообщение?')) { setMessageMenu(null); return; }
+    setPendingAction(true);
     try {
       await deleteMessage(supabase, message.id);
       setMessages(previous => previous.filter(item => item.id !== message.id));
       setMessageReactions(previous => { const next = {...previous}; delete next[message.id]; return next; });
+      setNotice('Сообщение удалено');
     } catch (error) { setNotice('Не удалось удалить сообщение: ' + error.message); }
-    setMessageMenu(null);
+    finally { setPendingAction(false); setMessageMenu(null); }
   }
 
   function startEditing(message) {
@@ -508,31 +539,35 @@ function App() {
           {messages.map((m,index) => {
             const mine=m.sender_id===session.user.id;
             const previous=messages[index-1];
+            const nextMessage=messages[index+1];
             const showDate=!previous || dateLabel(previous.created_at)!==dateLabel(m.created_at);
+            const groupedWithPrevious=!!previous && previous.sender_id===m.sender_id && !showDate && (new Date(m.created_at)-new Date(previous.created_at)<5*60*1000);
+            const groupedWithNext=!!nextMessage && nextMessage.sender_id===m.sender_id && dateLabel(nextMessage.created_at)===dateLabel(m.created_at) && (new Date(nextMessage.created_at)-new Date(m.created_at)<5*60*1000);
             const reactions=messageReactions[m.id] || [];
             const popular=['❤️','👍','😂','🔥','🥰','👏','😮','😢'];
+            const replyMessage=messages.find(item=>item.id===m.reply_to_id);
             return <React.Fragment key={m.id}>
               {showDate && <div className="day-divider"><span>{dateLabel(m.created_at)}</span></div>}
-              <div id={'message-'+m.id} className={'message-row '+(mine?'mine':'')} onContextMenu={event=>{event.preventDefault();setMessageMenu(messageMenu===m.id?null:m.id);setReactionPickerFor(null);}}>
-                {!mine && <Avatar className="message-avatar" value={selected.avatar} name={selected.title}/>}
+              <div id={'message-'+m.id} className={'message-row '+(mine?'mine ':'')+(groupedWithPrevious?'grouped-prev ':'')+(groupedWithNext?'grouped-next':'')} onContextMenu={event=>{event.preventDefault();setMessageMenu(messageMenu===m.id?null:m.id);setReactionPickerFor(null);}}>
+                {!mine && <Avatar className={'message-avatar '+(groupedWithPrevious?'avatar-spacer':'')} value={selected.avatar} name={selected.title}/>}
                 <div className="message-shell">
                   <div className="message-bubble">
-                    {m.reply_to_id && <div className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}>↪ Ответ на сообщение</div>}
+                    {m.reply_to_id && <button className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}><span>↪ {replyMessage?.sender_id===session.user.id?'Вы':selected.title}</span><b>{replyMessage?.content || 'Ответ на сообщение'}</b></button>}
                     {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
                     <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && <CheckCheck size={13}/>}</div>
                   </div>
                   <div className="message-tools">
                     <div className="message-reactions">
                       {reactions.map(reaction=><button key={reaction.emoji} className={'reaction-chip '+(reaction.selectedByMe?'selected':'')} onClick={()=>reactToMessage(m,reaction.emoji)} title={reaction.selectedByMe?'Убрать реакцию':'Поставить реакцию'}><span>{reaction.emoji}</span><b>{reaction.count}</b></button>)}
-                      <button className="reaction-add" onClick={()=>{setReactionPickerFor(reactionPickerFor===m.id?null:m.id);setMessageMenu(null);}} title="Добавить реакцию"><SmilePlus size={15}/></button>
+                      <button className="reaction-add" onClick={()=>{setReactionPickerFor(reactionPickerFor===m.id?null:m.id);setMessageMenu(null);}} title="Добавить реакцию" aria-label="Добавить реакцию"><SmilePlus size={15}/></button>
                       <button className="message-more" onClick={()=>{setMessageMenu(messageMenu===m.id?null:m.id);setReactionPickerFor(null);}} title="Действия с сообщением" aria-label="Действия с сообщением"><MoreHorizontal size={16}/></button>
                     </div>
                     {reactionPickerFor===m.id && <div className="reaction-picker">{popular.map(emoji=><button key={emoji} onClick={()=>reactToMessage(m,emoji)}>{emoji}</button>)}</div>}
-                    {messageMenu===m.id && <div className="message-context-menu">
-                      <button onClick={()=>{setReplyTarget(m);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
-                      <button onClick={()=>copyMessage(m)}><Copy size={15}/>Копировать</button>
-                      {mine && selected.kind==='direct' && !m.encrypted && <button onClick={()=>startEditing(m)}><Pencil size={15}/>Изменить</button>}
-                      {mine && <button className="danger-action" onClick={()=>removeOwnMessage(m)}><Trash2 size={15}/>Удалить</button>}
+                    {messageMenu===m.id && <div className="message-context-menu" role="menu">
+                      <button role="menuitem" onClick={()=>{setReplyTarget(m);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
+                      <button role="menuitem" onClick={()=>copyMessage(m)}><Copy size={15}/>Копировать</button>
+                      {mine && selected.kind==='direct' && !m.encrypted && <button role="menuitem" onClick={()=>startEditing(m)}><Pencil size={15}/>Изменить</button>}
+                      {mine && <button role="menuitem" className="danger-action" onClick={()=>removeOwnMessage(m)} disabled={pendingAction}><Trash2 size={15}/>Удалить</button>}
                     </div>}
                   </div>
                 </div>
