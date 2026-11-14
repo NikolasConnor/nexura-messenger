@@ -1389,6 +1389,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (notice.isNotBlank()) Text(notice, color = Success, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                         OutlinedButton(onClick = { showLogoutDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 28.dp).height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) { Text("Выйти из аккаунта") }
                         }
+                        AudioMiniPlayer()
                         Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                             NexuraBottomBar(
                                 selected = homeTab,
@@ -1874,6 +1875,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         }
+                        AudioMiniPlayer()
                         NexuraBottomBar(
                             selected = homeTab,
                             profileSelected = false,
@@ -3463,6 +3465,69 @@ private fun AudioMessagePlayer(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(if (loading) "Загрузка…" else formatTime(positionMs), color = SecondaryText, fontSize = 10.sp)
             Text(if (durationMs > 0L) formatTime(durationMs) else "--:--", color = SecondaryText, fontSize = 10.sp)
+        }
+    }
+}
+
+
+@Composable
+private fun AudioMiniPlayer() {
+    val context = LocalContext.current
+    var active by remember { mutableStateOf(false) }
+    var playing by remember { mutableStateOf(false) }
+    var position by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var dragging by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            active = AudioPlaybackService.activeUri != null
+            playing = AudioPlaybackService.playing
+            duration = AudioPlaybackService.durationMs
+            if (!dragging) position = AudioPlaybackService.positionMs
+            delay(250)
+        }
+    }
+    if (!active) return
+
+    fun command(action: String, seek: Long? = null) {
+        val intent = Intent(context, AudioPlaybackService::class.java).setAction(action)
+        if (seek != null) intent.putExtra(AudioPlaybackService.EXTRA_POSITION, seek)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
+        }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        color = Surface1,
+        shape = RoundedCornerShape(17.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.22f)),
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.GraphicEq, contentDescription = "Сейчас играет", tint = Accent, modifier = Modifier.size(21.dp))
+                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                    Text(AudioPlaybackService.currentTitle, color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text("Продолжает воспроизводиться", color = SecondaryText, fontSize = 10.sp)
+                }
+                IconButton(onClick = { command(if (playing) AudioPlaybackService.ACTION_PAUSE else AudioPlaybackService.ACTION_RESUME) }) {
+                    Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = if (playing) "Пауза" else "Продолжить", tint = Accent)
+                }
+                IconButton(onClick = { command(AudioPlaybackService.ACTION_STOP) }) {
+                    Icon(Icons.Default.Close, contentDescription = "Остановить", tint = SecondaryText)
+                }
+            }
+            Slider(
+                value = if (duration > 0L) position.coerceIn(0L, duration).toFloat() else 0f,
+                onValueChange = { dragging = true; position = it.toLong() },
+                onValueChangeFinished = { command(AudioPlaybackService.ACTION_SEEK, position); dragging = false },
+                valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+                enabled = duration > 0L,
+                modifier = Modifier.fillMaxWidth().height(20.dp),
+                colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = SecondaryText.copy(alpha = 0.25f))
+            )
         }
     }
 }
