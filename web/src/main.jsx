@@ -74,15 +74,16 @@ function formatDuration(seconds) {
 }
 const sharedVoiceAudio = typeof Audio !== 'undefined' ? new Audio() : null;
 let sharedVoiceUrl = '';
+const browserVoiceUrls = new Set();
 let sharedVoiceMeta = { title:'', subtitle:'', playing:false, current:0, duration:0, speed:1, active:false };
 function publishVoiceState(patch={}) { sharedVoiceMeta={...sharedVoiceMeta,...patch}; if(typeof window!=='undefined') window.dispatchEvent(new CustomEvent('nexura:voice-state',{detail:sharedVoiceMeta})); }
 function formatDuration(seconds) { if(!Number.isFinite(seconds))return '0:00'; const value=Math.max(0,Math.floor(seconds)); return Math.floor(value/60)+':'+String(value%60).padStart(2,'0'); }
 function MediaMessage({ payload, supabase, chatTitle }) {
  const [url,setUrl]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(true),[playerState,setPlayerState]=useState(sharedVoiceMeta),[speed,setSpeed]=useState(1);
- useEffect(()=>{let alive=true,objectUrl='';downloadAndDecryptMedia(supabase,payload).then(blob=>{if(!alive)return;objectUrl=URL.createObjectURL(blob);setUrl(objectUrl);}).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;if(objectUrl&&objectUrl!==sharedVoiceUrl)URL.revokeObjectURL(objectUrl);};},[payload.path,supabase]);
+ useEffect(()=>{let alive=true,objectUrl='';downloadAndDecryptMedia(supabase,payload).then(blob=>{if(!alive)return;objectUrl=URL.createObjectURL(blob);browserVoiceUrls.add(objectUrl);setUrl(objectUrl);}).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;if(objectUrl){browserVoiceUrls.delete(objectUrl);if(objectUrl!==sharedVoiceUrl)URL.revokeObjectURL(objectUrl);}};},[payload.path,supabase]);
  useEffect(()=>{const sync=e=>setPlayerState(e.detail||sharedVoiceMeta);window.addEventListener('nexura:voice-state',sync);return()=>window.removeEventListener('nexura:voice-state',sync);},[]);
  const isCurrent=!!url&&sharedVoiceUrl===url,playing=isCurrent&&playerState.playing,current=isCurrent?playerState.current:0,duration=isCurrent?playerState.duration:0;
- const toggle=async()=>{if(!sharedVoiceAudio||!url)return;try{if(sharedVoiceUrl!==url){sharedVoiceAudio.pause();if(sharedVoiceUrl)URL.revokeObjectURL(sharedVoiceUrl);sharedVoiceAudio.src=url;sharedVoiceUrl=url;sharedVoiceAudio.playbackRate=speed;publishVoiceState({title:payload.name||chatTitle||'Голосовое сообщение',subtitle:chatTitle||'Nexura',playing:false,current:0,duration:0,speed,active:true});}if(sharedVoiceAudio.paused)await sharedVoiceAudio.play();else sharedVoiceAudio.pause();}catch{setError('Браузер не смог воспроизвести аудио');}};
+ const toggle=async()=>{if(!sharedVoiceAudio||!url)return;try{if(sharedVoiceUrl!==url){sharedVoiceAudio.pause();if(sharedVoiceUrl&&!browserVoiceUrls.has(sharedVoiceUrl))URL.revokeObjectURL(sharedVoiceUrl);sharedVoiceAudio.src=url;sharedVoiceUrl=url;sharedVoiceAudio.playbackRate=speed;publishVoiceState({title:payload.name||chatTitle||'Голосовое сообщение',subtitle:chatTitle||'Nexura',playing:false,current:0,duration:0,speed,active:true});}if(sharedVoiceAudio.paused)await sharedVoiceAudio.play();else sharedVoiceAudio.pause();}catch{setError('Браузер не смог воспроизвести аудио');}};
  const changeSpeed=()=>{const next=speed===1?1.5:speed===1.5?2:1;setSpeed(next);if(isCurrent&&sharedVoiceAudio){sharedVoiceAudio.playbackRate=next;publishVoiceState({speed:next});}};
  if(busy)return <div className="media-loading">Расшифровываем вложение…</div>;
  if(error)return <div className="media-error">{error}</div>;
@@ -212,7 +213,7 @@ function App() {
   useEffect(() => {
     if (!sharedVoiceAudio) return;
     const publish=()=>publishVoiceState({playing:!sharedVoiceAudio.paused&&!sharedVoiceAudio.ended,current:Number.isFinite(sharedVoiceAudio.currentTime)?sharedVoiceAudio.currentTime:0,duration:Number.isFinite(sharedVoiceAudio.duration)?sharedVoiceAudio.duration:0});
-    const ended=()=>{publishVoiceState({playing:false,current:0,active:false});if(sharedVoiceUrl)URL.revokeObjectURL(sharedVoiceUrl);sharedVoiceUrl='';};
+    const ended=()=>{publishVoiceState({playing:false,current:0,active:false});if(sharedVoiceUrl){browserVoiceUrls.delete(sharedVoiceUrl);URL.revokeObjectURL(sharedVoiceUrl);}sharedVoiceUrl='';};
     ['timeupdate','loadedmetadata','play','pause'].forEach(name=>sharedVoiceAudio.addEventListener(name,publish));
     sharedVoiceAudio.addEventListener('ended',ended);
     const sync=e=>setBrowserAudioState(e.detail||sharedVoiceMeta);
@@ -843,7 +844,7 @@ function App() {
     <BrowserAudioDock state={browserAudioState}
       onToggle={async()=>{if(!sharedVoiceAudio)return;try{if(sharedVoiceAudio.paused)await sharedVoiceAudio.play();else sharedVoiceAudio.pause();}catch{}}}
       onSeek={value=>{if(sharedVoiceAudio)sharedVoiceAudio.currentTime=value;}}
-      onClose={()=>{if(sharedVoiceAudio){sharedVoiceAudio.pause();sharedVoiceAudio.removeAttribute('src');sharedVoiceAudio.load();}if(sharedVoiceUrl)URL.revokeObjectURL(sharedVoiceUrl);sharedVoiceUrl='';publishVoiceState({active:false,playing:false,current:0,duration:0});}}/>
+      onClose={()=>{if(sharedVoiceAudio){sharedVoiceAudio.pause();sharedVoiceAudio.removeAttribute('src');sharedVoiceAudio.load();}if(sharedVoiceUrl){browserVoiceUrls.delete(sharedVoiceUrl);URL.revokeObjectURL(sharedVoiceUrl);}sharedVoiceUrl='';publishVoiceState({active:false,playing:false,current:0,duration:0});}}/>
   </div>;
 }
 
