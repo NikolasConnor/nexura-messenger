@@ -232,6 +232,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showTerminateOthersDialog by remember { mutableStateOf(false) }
     val messageDelivery = remember { mutableStateMapOf<String, String>() }
     val failedMessageRetries = remember { mutableStateMapOf<String, Triple<ChatItem, String, String?>>() }
+    val failedMediaRetries = remember { mutableStateMapOf<String, Triple<ChatItem, Uri, Pair<String, String?>>>() }
     val messageSendMutex = remember { Mutex() }
     // Serialize Realtime event sync with reconnect catch-up to avoid duplicate unread increments.
     val conversationSyncMutex = remember { Mutex() }
@@ -423,36 +424,66 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     fun sendPendingMedia(chat: ChatItem, uri: Uri, caption: String, replyToId: String?) {
         if (sendingImage) return
         sendingImage = true
-        val submittedCaption = caption
-        val submittedReply = replyTarget
+        val messageId = UUID.randomUUID().toString()
+        val createdAt = java.time.Instant.now().toString()
+        val mimeType = context.contentResolver.getType(uri)
+            ?: if (uri.scheme == "file" && uri.path?.endsWith(".m4a", true) == true) "audio/mp4" else "application/octet-stream"
+        val mediaKind = when {
+            mimeType.startsWith("image/") -> "image"
+            mimeType.startsWith("video/") -> "video"
+            mimeType.startsWith("audio/") -> "audio"
+            else -> "file"
+        }
+        val displayName = runCatching {
+            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/') ?: when(mediaKind) {
+            "audio" -> "Голосовое сообщение"
+            "image" -> "Фото"
+            "video" -> "Видео"
+            else -> "Файл"
+        }
+        val optimistic = MessageItem(
+            messageId, store.userId.orEmpty(), uri.toString(), createdAt,
+            "media", replyToId, encrypted = true, securityWarning = false,
+            mediaKind = mediaKind, mediaCaption = caption, mediaFileName = displayName, mediaMimeType = mimeType
+        )
+        messages = (messages + optimistic).distinctBy { it.id }.sortedBy { it.createdAt }
+        messageDelivery[messageId] = "sending"
+        failedMediaRetries.remove(messageId)
         draft = ""
         chatDrafts[chat.id] = ""
         replyTarget = null
+        pendingMediaUri = null
         scope.launch {
             error = ""
             var encrypted: EncryptedMediaFile? = null
+            var uploaded = false
             try {
                 val client = e2eeClient ?: throw IllegalStateException("Ключ E2EE ещё не готов")
                 encrypted = withContext(Dispatchers.IO) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
                 if (chat.kind == "direct") {
-                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId)
+                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
                 } else {
-                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId)
+                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
                 }
-                pendingMediaUri = null
-                draft = ""
-                replyTarget = null
-                notice = "Медиа отправлено с E2EE-шифрованием"
+                uploaded = true
+                messageDelivery[messageId] = "sent"
+                failedMediaRetries.remove(messageId)
+                if (selected?.id == chat.id) {
+                    runCatching { messages = api.messages(chat.id, e2eeClient) }
+                }
+                notice = "Медиа отправлено"
             } catch (e: Exception) {
                 encrypted?.file?.delete()
-                if (draft.isBlank()) draft = submittedCaption
-                chatDrafts[chat.id] = draft
-                if (replyTarget == null) replyTarget = submittedReply
+                messageDelivery[messageId] = "failed"
+                failedMediaRetries[messageId] = Triple(chat, uri, caption to replyToId)
                 error = e.message ?: "Не удалось отправить медиа"
             } finally {
-                if (uri.scheme == "file") uri.path?.let(::File)?.delete()
+                if (uploaded && uri.scheme == "file") uri.path?.let(::File)?.delete()
                 sendingImage = false
             }
         }
