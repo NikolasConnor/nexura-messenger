@@ -67,6 +67,27 @@ export async function createBrowserDevice(userId) {
   return publicKeys;
 }
 
+// Create a genuinely new browser identity after the previous device was revoked.
+// Keep existing conversation ratchets and message history; only replace the Olm account,
+// device identity and unpublished one-time keys.
+export async function rotateBrowserDeviceIdentity(userId) {
+  await initializeOlm();
+  const created = create_device(50);
+  const publicKeys = {
+    ...created.public_keys,
+    protocol: 'olm-v1',
+    bundle_version: 1,
+    device_id: crypto.randomUUID(),
+    one_time_keys: created.public_keys.one_time_keys.map(key => ({ ...key, key_id: crypto.randomUUID() }))
+  };
+  await saveEncryptedRecords(userId, [
+    ['account', created.account_pickle],
+    ['public-device', publicKeys],
+    ['pending-public-keys', []]
+  ]);
+  return publicKeys;
+}
+
 export async function replenishBrowserOneTimeKeys(userId, count = 30) {
   await initializeOlm();
   const account = await loadEncryptedRecord(userId, 'account');
