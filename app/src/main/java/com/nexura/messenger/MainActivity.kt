@@ -2528,6 +2528,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         onClick = { showChatOptionsMenu = false; showChatModeDialog = true }
                                     )
                                     DropdownMenuItem(
+                                        text = { Text("Оформление чата") },
+                                        leadingIcon = { Icon(Icons.Default.Palette, null) },
+                                        onClick = {
+                                            showChatOptionsMenu = false
+                                            chatThemeOpen = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text("Поиск по переписке") },
                                         leadingIcon = { Icon(Icons.Default.Search, null) },
                                         onClick = { showChatOptionsMenu = false; chatSearchOpen = !chatSearchOpen; if (!chatSearchOpen) chatSearchQuery = "" }
