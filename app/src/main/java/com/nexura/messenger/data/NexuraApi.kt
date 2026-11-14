@@ -403,6 +403,51 @@ class NexuraApi(private val store: SessionStore) {
             )
         }
     }
+    private suspend fun encryptCloudHistory(conversationId: String, messageId: String, plaintext: String): String {
+        val response = JSONObject(call(
+            "/functions/v1/cloud-history",
+            "POST",
+            JSONObject()
+                .put("action", "encrypt")
+                .put("conversation_id", normalizeUuid(conversationId))
+                .put("message_id", normalizeUuid(messageId))
+                .put("plaintext", plaintext)
+                .toString()
+        ))
+        return response.optString("cloud_content").takeIf { it.isNotBlank() }
+            ?: throw IOException("Сервер не вернул зашифрованную облачную копию сообщения")
+    }
+
+    private suspend fun decryptCloudHistory(conversationId: String, rows: JSONArray): Map<String, String> {
+        val items = JSONArray()
+        for (index in 0 until rows.length()) {
+            val row = rows.getJSONObject(index)
+            val cloudContent = row.optString("cloud_content")
+            if (cloudContent.isNotBlank() && cloudContent != "null") {
+                items.put(JSONObject().put("id", row.getString("id")).put("cloud_content", cloudContent))
+            }
+        }
+        if (items.length() == 0) return emptyMap()
+        val response = JSONObject(call(
+            "/functions/v1/cloud-history",
+            "POST",
+            JSONObject()
+                .put("action", "decrypt")
+                .put("conversation_id", normalizeUuid(conversationId))
+                .put("items", items)
+                .toString()
+        ))
+        val decrypted = response.optJSONArray("items") ?: return emptyMap()
+        return buildMap {
+            for (index in 0 until decrypted.length()) {
+                val item = decrypted.optJSONObject(index) ?: continue
+                val id = item.optString("id")
+                val plaintext = item.optString("plaintext")
+                if (id.isNotBlank() && plaintext.isNotBlank() && plaintext != "null") put(id, plaintext)
+            }
+        }
+    }
+
     suspend fun messages(
         chatId: String,
         e2ee: E2eeClient? = null,
@@ -431,9 +476,12 @@ class NexuraApi(private val store: SessionStore) {
         val limit = if (mediaOnly) 1000 else if (afterCreatedAt != null) 100 else pageSize.coerceIn(1, 100)
         val mediaFilter = if (mediaOnly) "&message_type=in.(media,image,file)" else ""
         val raw = JSONArray(call(
-            "/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
+            "/rest/v1/messages?select=id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at" +
                 "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc,id.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
         ))
+        // Decrypt the server-managed archive in one bounded request. Rows from
+        // before cloud-history rollout keep their original Olm-only fallback.
+        val cloudPlaintextById = decryptCloudHistory(chatId, raw)
         // Fetch newest-first for cursor pages, then decrypt chronologically within each page.
         val chronologicalIndexes = (0 until raw.length()).sortedWith(
             compareBy<Int> { raw.getJSONObject(it).optString("created_at") }
@@ -451,7 +499,7 @@ class NexuraApi(private val store: SessionStore) {
 
             if (type in setOf("text", "media", "call") &&
                 (E2eeMessageEnvelope.isEnvelope(content) || E2eeGroupMessageEnvelope.isEnvelope(content))) {
-                val decrypted = if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
+                val decrypted = cloudPlaintextById[id] ?: if (E2eeGroupMessageEnvelope.isEnvelope(content)) {
                     runCatching {
                         val client = e2ee ?: throw IOException("E2EE недоступно на этом устройстве")
                         decryptGroupEnvelope(content, chatId, id, senderId, client)
@@ -870,12 +918,14 @@ class NexuraApi(private val store: SessionStore) {
         val envelope = E2eeGroupMessageEnvelope(
             chatId, uid, ownDeviceId, own.getString("curve25519"), recipients
         ).encode()
+        val cloudContent = encryptCloudHistory(chatId, messageId, plaintext)
         val payload = JSONObject()
             .put("id", normalizeUuid(messageId))
             .put("conversation_id", chatId)
             .put("sender_id", uid)
             .put("message_type", messageType)
             .put("content", envelope)
+            .put("cloud_content", cloudContent)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         val inserted = JSONArray(call(
             "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
@@ -1137,12 +1187,14 @@ class NexuraApi(private val store: SessionStore) {
         val envelope = E2eeGroupMessageEnvelope(
             chatId, uid, ownDeviceId, ownBundle.getString("curve25519"), recipients
         ).encode()
+        val cloudContent = encryptCloudHistory(chatId, messageId, plaintext)
         val payload = JSONObject()
             .put("id", normalizeUuid(messageId))
             .put("conversation_id", chatId)
             .put("sender_id", uid)
             .put("message_type", messageType)
             .put("content", envelope)
+            .put("cloud_content", cloudContent)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         val inserted = JSONArray(call(
             "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
