@@ -77,7 +77,6 @@ let sharedVoiceUrl = '';
 const browserVoiceUrls = new Set();
 let sharedVoiceMeta = { title:'', subtitle:'', playing:false, current:0, duration:0, speed:1, active:false };
 function publishVoiceState(patch={}) { sharedVoiceMeta={...sharedVoiceMeta,...patch}; if(typeof window!=='undefined') window.dispatchEvent(new CustomEvent('nexura:voice-state',{detail:sharedVoiceMeta})); }
-function formatDuration(seconds) { if(!Number.isFinite(seconds))return '0:00'; const value=Math.max(0,Math.floor(seconds)); return Math.floor(value/60)+':'+String(value%60).padStart(2,'0'); }
 function MediaMessage({ payload, supabase, chatTitle }) {
  const [url,setUrl]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(true),[playerState,setPlayerState]=useState(sharedVoiceMeta),[speed,setSpeed]=useState(1);
  useEffect(()=>{let alive=true,objectUrl='';downloadAndDecryptMedia(supabase,payload).then(blob=>{if(!alive)return;objectUrl=URL.createObjectURL(blob);browserVoiceUrls.add(objectUrl);setUrl(objectUrl);}).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;if(objectUrl){browserVoiceUrls.delete(objectUrl);if(objectUrl!==sharedVoiceUrl)URL.revokeObjectURL(objectUrl);}};},[payload.path,supabase]);
