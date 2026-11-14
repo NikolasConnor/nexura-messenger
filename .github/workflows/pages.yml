@@ -6,6 +6,7 @@ on:
       - release/messenger-first
     paths:
       - "website/**"
+      - "web/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -27,6 +28,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Nexura Web
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build -- --base=/nexura-messenger/app/ --outDir=../website/app
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload website
