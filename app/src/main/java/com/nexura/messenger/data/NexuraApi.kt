@@ -143,7 +143,10 @@ class NexuraApi(private val store: SessionStore) {
             val responseText = it.body?.string().orEmpty()
             if (!it.isSuccessful) {
                 val message = try {
-                    JSONObject(responseText).optString("message").ifBlank { responseText }
+                    val payload = JSONObject(responseText)
+                    payload.optString("message")
+                        .ifBlank { payload.optString("error") }
+                        .ifBlank { responseText }
                 } catch (_: Exception) {
                     responseText
                 }
@@ -481,7 +484,8 @@ class NexuraApi(private val store: SessionStore) {
         ))
         // Decrypt the server-managed archive in one bounded request. Rows from
         // before cloud-history rollout keep their original Olm-only fallback.
-        val cloudPlaintextById = decryptCloudHistory(chatId, raw)
+        val cloudPlaintextById = runCatching { decryptCloudHistory(chatId, raw) }
+            .getOrDefault(emptyMap())
         // Fetch newest-first for cursor pages, then decrypt chronologically within each page.
         val chronologicalIndexes = (0 until raw.length()).sortedWith(
             compareBy<Int> { raw.getJSONObject(it).optString("created_at") }
