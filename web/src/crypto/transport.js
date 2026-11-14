@@ -119,7 +119,11 @@ export async function ensureBrowserE2eeDevice(supabase, userId) {
     await publishKeys(supabase, userId, bundle.device_id, more || []);
     if (more?.length) await acknowledgeBrowserOneTimeKeysPublished(userId);
   }
-  return { deviceId: bundle.device_id, availableKeys: count || 0 };
+  const { count: finalCount, error: finalCountError } = await supabase.from('e2ee_one_time_keys')
+    .select('key_id', { count: 'exact', head: true })
+    .eq('user_id', userId).eq('device_id', bundle.device_id).is('consumed_at', null);
+  if (finalCountError) throw finalCountError;
+  return { deviceId: bundle.device_id, availableKeys: finalCount || 0 };
 }
 
 async function consumePreKey(supabase, chatId, localUserId, recipientUserId, device) {
@@ -132,7 +136,10 @@ async function consumePreKey(supabase, chatId, localUserId, recipientUserId, dev
   );
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
-  if (!row) throw new Error('Для устройства не осталось одноразовых ключей');
+  if (!row) {
+    if (recipientUserId === localUserId) throw new Error('На одном из ваших устройств закончились ключи. Оно обновит запас при следующем подключении.');
+    throw new Error('У собеседника закончились одноразовые ключи шифрования. Попросите его открыть Nexura и подождать обновления защиты, затем отправьте сообщение ещё раз.');
+  }
   if (row.ed25519_key !== device.ed25519_key || row.curve25519_key !== device.curve25519_key) {
     throw new Error('Ключ устройства изменился. Отправка отменена.');
   }
