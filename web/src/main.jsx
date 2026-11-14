@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck } from 'lucide-react';
@@ -126,6 +126,7 @@ function App() {
   const [chats, setChats] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
+  const messageLoadSeq = useRef(0);
   const [messageReactions, setMessageReactions] = useState({});
   const [loadingChats, setLoadingChats] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -179,7 +180,7 @@ function App() {
           id: c.id, kind: c.kind, peerUserId: peer?.user_id || null, title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
           avatar: p?.avatar_url || null, updated: c.last_message_at, unread: unread[c.id] || 0
         };
-      }).filter(Boolean);
+      }).filter(Boolean).sort((a, b) => new Date(b.updated || 0) - new Date(a.updated || 0));
       setChats(list);
       if (selected) {
         const fresh = list.find(c => c.id === selected.id);
@@ -224,13 +225,15 @@ function App() {
 
   const loadMessages = useCallback(async (chat) => {
     if (!chat?.id) return;
-    setLoadingMessages(true); setNotice('');
-    const { data, error } = await supabase.from('messages')
-      .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
-      .eq('conversation_id', chat.id).is('deleted_at', null)
-      .order('created_at', { ascending: true }).limit(100);
-    if (error) setNotice('Не удалось открыть переписку: ' + error.message);
-    else {
+    const requestId = ++messageLoadSeq.current;
+    setLoadingMessages(true);
+    setNotice('');
+    try {
+      const { data, error } = await supabase.from('messages')
+        .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+        .eq('conversation_id', chat.id).is('deleted_at', null)
+        .order('created_at', { ascending: true }).limit(100);
+      if (error) throw error;
       const rows = await Promise.all((data || []).map(async message => {
         if (!isEncrypted(message.content)) return message;
         try {
@@ -240,16 +243,21 @@ function App() {
           return { ...message, encrypted: true, decryptionError: decryptError?.message || 'Не удалось расшифровать сообщение' };
         }
       }));
+      if (requestId !== messageLoadSeq.current) return;
       setMessages(rows);
       const reactions = await loadMessageReactions(supabase, chat.id).catch(() => ({}));
+      if (requestId !== messageLoadSeq.current) return;
       setMessageReactions(reactions);
       markConversationRead(supabase, chat.id).catch(() => {});
+    } catch (error) {
+      if (requestId === messageLoadSeq.current) setNotice('Не удалось открыть переписку: ' + (error?.message || 'ошибка'));
+    } finally {
+      if (requestId === messageLoadSeq.current) setLoadingMessages(false);
     }
-    setLoadingMessages(false);
   }, [session?.user?.id]);
 
   useEffect(() => {
-    if (!selected) { setMessages([]); return; }
+    if (!selected) { messageLoadSeq.current++; setMessages([]); setMessageReactions({}); return; }
     loadMessages(selected);
     const channel = supabase.channel('web-chat-' + selected.id)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: 'conversation_id=eq.' + selected.id }, () => loadMessages(selected))
@@ -405,12 +413,16 @@ function App() {
             const showDate=!previous || dateLabel(previous.created_at)!==dateLabel(m.created_at);
             return <React.Fragment key={m.id}>
               {showDate && <div className="day-divider"><span>{dateLabel(m.created_at)}</span></div>}
-              <div className={'message-row '+(mine?'mine':'')}>
+              <div id={'message-'+m.id} className={'message-row '+(mine?'mine':'')}>
                 {!mine && <Avatar className="message-avatar" value={selected.avatar} name={selected.title}/>}
                 <div className="message-bubble">
                   {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
                   {m.reply_to_id && <div className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}>↪ Ответ на сообщение</div>}
-                  <div className="message-reactions">{(messageReactions[m.id] || []).map(reaction=><button key={reaction.emoji} className={reaction.selectedByMe?"selected":""} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,reaction.emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{reaction.emoji} {reaction.count}</button>)}<button onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,"❤️");setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>＋</button><button onClick={()=>setReplyTarget(m)} aria-label="Ответить">↩</button></div>
+                  <div className="message-reactions">
+                    {(messageReactions[m.id] || []).map(reaction=><button key={reaction.emoji} className={reaction.selectedByMe?"selected":""} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,reaction.emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{reaction.emoji} {reaction.count}</button>)}
+                    {['❤️','👍','😂'].filter(emoji=>!(messageReactions[m.id] || []).some(item=>item.emoji===emoji)).map(emoji=><button key={emoji} className="quick-reaction" title={'Поставить '+emoji} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{emoji}</button>)}
+                    <button className="reply-action" onClick={()=>setReplyTarget(m)} aria-label="Ответить" title="Ответить">↩</button>
+                  </div>
                   <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{mine && <CheckCheck size={13}/>}</div>
                 </div>
               </div>
