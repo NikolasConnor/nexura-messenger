@@ -762,22 +762,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (localE2eeClient != null) {
                     val hadLocalDevice = localE2eeClient.hasLocalDevice()
                     val previousServerDevice = !hadLocalDevice && api.hasRegisteredE2eeDevice()
-                    val cloudBackupExists = !hadLocalDevice && api.hasE2eeBackup()
-                    if (!hadLocalDevice && cloudBackupExists) {
-                        e2eeClient = null
-                        e2eeRecoveryRequired = true
-                        e2eeStatus = "Найдена защищённая копия. Требуется восстановление ключей."
-                    } else {
-                        e2eeClient = localE2eeClient
-                        try {
-                            val available = api.publishE2eeDevice(localE2eeClient)
-                            e2eeStatus = if (previousServerDevice) {
-                                "Создано новое E2EE-устройство · старые ключи не найдены"
-                            } else "Устройство зарегистрировано · $available ключей"
-                            runCatching { api.syncE2eeBackupIfEnabled(localE2eeClient) }
-                        } catch (e: Exception) {
-                            e2eeStatus = "Каталог ключей недоступен: ${e.message ?: "ожидается настройка сервера"}"
-                        }
+                    // Cloud-history messages are restored independently of the legacy Olm
+                    // device backup. A new install must not be blocked by a recovery code.
+                    e2eeRecoveryRequired = false
+                    e2eeClient = localE2eeClient
+                    try {
+                        val available = api.publishE2eeDevice(localE2eeClient)
+                        e2eeStatus = if (!hadLocalDevice && previousServerDevice) {
+                            "Новое устройство зарегистрировано · облачная история доступна"
+                        } else "Устройство зарегистрировано · $available ключей"
+                        runCatching { api.syncE2eeBackupIfEnabled(localE2eeClient) }
+                    } catch (e: Exception) {
+                        e2eeStatus = "Каталог ключей недоступен: ${e.message ?: "ожидается настройка сервера"}"
                     }
                 }
                 val outgoingClient = e2eeClient
