@@ -344,6 +344,16 @@ class NexuraApi(private val store: SessionStore) {
             store.clear()
         }
     }
+    suspend fun updateConversationChatMode(conversationId: String, mode: String) {
+        if (mode != "cloud" && mode != "secret") throw IOException("Неизвестный режим чата")
+        call(
+            "/rest/v1/conversations?id=eq." + normalizeUuid(conversationId),
+            "PATCH",
+            JSONObject().put("chat_mode", mode).toString(),
+            prefer = "return=minimal"
+        )
+    }
+
     suspend fun chats(): List<ChatItem> {
         val uid = store.userId ?: return emptyList()
         // Fetch the conversation list, peer profiles and unread counters in two
