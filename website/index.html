@@ -22,6 +22,7 @@
     .features{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.feature{padding:25px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,#1b142b,#130f20);transition:transform .2s,border-color .2s}.feature:hover{transform:translateY(-4px);border-color:#a77bff55}.feature-icon{width:46px;height:46px;border-radius:15px;background:#a77bff1c;display:grid;place-items:center;font-size:22px;margin-bottom:17px}.feature h3{font-size:17px;margin:0 0 8px}.feature p{color:var(--muted);font-size:14px;margin:0}
     .privacy{display:grid;grid-template-columns:.85fr 1.15fr;gap:42px;align-items:center;padding:36px;border:1px solid var(--line);border-radius:28px;background:linear-gradient(120deg,#211735,#151020)}.privacy-art{min-height:245px;border-radius:20px;background:radial-gradient(circle at 50% 45%,#8b5ce6 0,#51358d 22%,#211936 60%);display:grid;place-items:center;font-size:78px}.privacy h2{font-size:clamp(29px,3.5vw,37px);line-height:1.1;letter-spacing:-1.2px;margin:10px 0 14px}.privacy p{color:var(--muted);font-size:14px}.checks{display:grid;gap:10px;margin-top:20px}.checks div{font-size:13px;color:#e6def5}.checks span{color:#b99aff;margin-right:9px}
     .roadmap{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.roadmap-card{padding:22px;border:1px solid var(--line);border-radius:20px;background:#ffffff06}.roadmap-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.roadmap-card h3{font-size:16px;margin:0}.roadmap-card p{font-size:13px;color:var(--muted);margin:8px 0 0}.roadmap-tag{font-size:10px;font-weight:800;letter-spacing:.5px;border-radius:99px;padding:6px 9px;background:#a77bff18;color:#d6c4ff;border:1px solid #a77bff35}.roadmap-tag.planned{background:#ffffff0a;color:#c2b9d0;border-color:var(--line)}.feedback{margin-top:24px;padding:22px;border-radius:20px;border:1px solid #a77bff35;background:#a77bff0b;display:flex;align-items:center;justify-content:space-between;gap:18px}.feedback p{margin:4px 0 0;color:var(--muted);font-size:13px}.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.step{padding:23px;border-radius:20px;background:#ffffff06;border:1px solid var(--line)}.step-num{color:#b99aff;font-weight:850;font-size:12px;letter-spacing:1px}.step h3{font-size:16px;margin:9px 0 6px}.step p{color:var(--muted);font-size:13px;margin:0}
+    .lab{max-width:850px;margin:auto;padding:26px;border:1px solid #a77bff35;border-radius:24px;background:linear-gradient(145deg,#1c1530,#120e1e)}.lab-intro{color:var(--muted);font-size:14px;margin:0 0 20px}.lab-list{display:grid;gap:10px}.lab-item{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--line);border-radius:15px;background:#ffffff05;cursor:pointer}.lab-item input{width:18px;height:18px;margin:3px 0 0;accent-color:#a77bff;flex:none}.lab-item strong{display:block;font-size:14px}.lab-item small{display:block;color:var(--muted);font-size:12px;margin-top:3px}.lab-result{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:18px;padding:16px;border-radius:15px;background:#a77bff12;border:1px solid #a77bff30}.lab-result strong{font-size:14px}.lab-result span{font-size:13px;color:#d7c5ff}.lab-note{font-size:11px;color:#958aa8;margin:13px 0 0}@media(max-width:620px){.lab{padding:18px}.lab-result{align-items:flex-start;flex-direction:column}}
     .faq{max-width:790px;margin:auto;display:grid;gap:10px}.faq details{background:#ffffff06;border:1px solid var(--line);border-radius:16px;padding:17px 19px}.faq summary{cursor:pointer;font-weight:700;list-style:none}.faq summary::-webkit-details-marker{display:none}.faq summary:after{content:"＋";float:right;color:#b99aff}.faq details[open] summary:after{content:"−"}.faq p{color:var(--muted);font-size:14px;margin:12px 0 0}
     .download{padding:50px 30px;text-align:center;border-radius:28px;border:1px solid #a77bff35;background:radial-gradient(ellipse at 50% 0,#57378c55,transparent 65%),#171126}.download h2{font-size:clamp(29px,4vw,39px);letter-spacing:-1px;margin:10px 0}.download p{color:var(--muted);max-width:590px;margin:0 auto 23px}.status{display:inline-flex;align-items:center;gap:8px;border:1px solid #e9bb5a44;background:#e9bb5a12;color:#f3d69a;padding:8px 12px;border-radius:99px;font-size:12px;font-weight:700}.status-dot{width:7px;height:7px;border-radius:50%;background:#e9bb5a}
     footer{padding:32px 0 40px;border-top:1px solid var(--line);color:#9388a6;font-size:12px}.footer-row{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}.footer-links{display:flex;gap:18px;flex-wrap:wrap}
@@ -35,7 +36,7 @@
     <a class="brand" href="#" aria-label="Nexura — главная"><span class="brand-mark">✦</span>Nexura</a>
     <button class="menu-toggle" id="menuToggle" aria-expanded="false" aria-controls="navLinks" aria-label="Открыть меню">☰</button>
     <nav class="navlinks" id="navLinks" aria-label="Главная навигация">
-      <a href="#features">Возможности</a><a href="#privacy">Приватность</a><a href="#how">Как начать</a><a href="#roadmap">Планы</a><a href="#faq">Вопросы</a>
+      <a href="#features">Возможности</a><a href="#privacy">Приватность</a><a href="#lab">Nexura Lab</a><a href="#how">Как начать</a><a href="#roadmap">Планы</a><a href="#faq">Вопросы</a>
       <a class="btn" href="#download">Приложение <span>↗</span></a>
     </nav>
   </header>
@@ -89,6 +90,23 @@
         </div>
       </div>
     </section>
+    <section id="lab">
+      <div class="wrap">
+        <div class="section-head"><div class="kicker">Nexura Lab</div><h2>Насколько ты готов к безопасному общению?</h2><p>Небольшая проверка цифровых привычек. Отметь пункты, которые уже соблюдаешь.</p></div>
+        <div class="lab">
+          <p class="lab-intro">Это не проверка приложения и не аудит безопасности — только полезная памятка для повседневного общения.</p>
+          <div class="lab-list">
+            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>У меня уникальный пароль</strong><small>Не использую один пароль на разных сервисах.</small></span></label>
+            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>Я никому не передаю коды входа</strong><small>Код подтверждения предназначен только для меня.</small></span></label>
+            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>Я проверяю, кому отправляю файлы</strong><small>Перед отправкой проверяю чат и получателя.</small></span></label>
+            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>На устройстве есть блокировка</strong><small>Использую PIN-код, пароль или биометрию.</small></span></label>
+            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>Я обновляю приложения</strong><small>Устанавливаю обновления из доверенных источников.</small></span></label>
+          </div>
+          <div class="lab-result" aria-live="polite"><strong id="lab-score">0 из 5 пунктов отмечено</strong><span id="lab-message">Начни с первого пункта — маленькие привычки важны.</span></div>
+          <p class="lab-note">Отметки обрабатываются только в этой странице: они не отправляются на сервер и не сохраняются.</p>
+        </div>
+      </div>
+    </section>
     <section id="roadmap">
       <div class="wrap">
         <div class="section-head"><div class="kicker">Развитие проекта</div><h2>Nexura становится лучше шаг за шагом</h2><p>Показываем направления работы открыто — без обещаний точных дат и неподтверждённых функций.</p></div>
@@ -121,6 +139,9 @@
   <footer><div class="wrap footer-row"><a class="brand" href="#"><span class="brand-mark">✦</span>Nexura</a><div class="footer-links"><a href="privacy.html">Конфиденциальность</a><a href="mailto:nexuragroupoficial@gmail.com">Контакт: nexuragroupoficial@gmail.com</a><a href="https://github.com/NikolasConnor/nexura-messenger" target="_blank" rel="noopener noreferrer">GitHub проекта ↗</a></div><span>© <span id="year"></span> Nexura</span></div></footer>
   <script>
     document.getElementById('year').textContent=new Date().getFullYear();
+    const labChecks=[...document.querySelectorAll('.lab-check')],labScore=document.getElementById('lab-score'),labMessage=document.getElementById('lab-message');
+    function updateLab(){const n=labChecks.filter(x=>x.checked).length;labScore.textContent=n+' из 5 пунктов отмечено';labMessage.textContent=n===5?'Отлично! Продолжай придерживаться этих привычек.':n>=3?'Хороший результат. Осталось закрепить ещё пару привычек.':n>0?'Хорошее начало — проверь остальные пункты.':'Начни с первого пункта — маленькие привычки важны.'}
+    labChecks.forEach(x=>x.addEventListener('change',updateLab));
     const menu=document.getElementById('menuToggle'),nav=document.getElementById('navLinks');
     menu.addEventListener('click',()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'Закрыть меню':'Открыть меню');menu.textContent=open?'✕':'☰'});
     nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{nav.classList.remove('open');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','Открыть меню');menu.textContent='☰'}));
