@@ -18,7 +18,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         val backupBaseUrl = providers.gradleProperty("NEXURA_BACKUP_BASE_URL").orElse("").get().trim().trimEnd('/')
-        buildConfigField("String", "NEXURA_BACKUP_BASE_URL", "\\\"$backupBaseUrl\\\"")
+        buildConfigField("String", "NEXURA_BACKUP_BASE_URL", "\"$backupBaseUrl\"")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
