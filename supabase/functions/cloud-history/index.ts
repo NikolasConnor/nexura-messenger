@@ -155,10 +155,15 @@ Deno.serve(async (req: Request) => {
             typeof item?.cloud_content !== "string") {
           return json({ error: "Invalid cloud history item" }, 400);
         }
-        output.push({
-          id: item.id,
-          plaintext: await decrypt(key, conversationId, item.id, item.cloud_content),
-        });
+        try {
+          output.push({
+            id: item.id,
+            plaintext: await decrypt(key, conversationId, item.id, item.cloud_content),
+          });
+        } catch {
+          // One damaged or obsolete archive entry must not block the rest of a page.
+          output.push({ id: item.id, error: "decrypt_failed" });
+        }
       }
       return json({ items: output, version: 1 });
     }
