@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createRoot, createPortal } from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
+import { encryptAndUploadMedia, downloadAndDecryptMedia } from './crypto/media.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY';
@@ -59,6 +61,43 @@ function Avatar({ value, name, className = '' }) {
 function isEncrypted(content = '') {
   const value = String(content).trim();
   return value.startsWith('{') && (value.includes('"ciphertext"') || value.includes('"protocol"') || value.includes('"nexura"') || value.includes('"kind"'));
+}
+
+
+function parseMediaPayload(content) {
+  try { const value=JSON.parse(content); return value && value.schema==='nexura-media-v1'?value:null; } catch { return null; }
+}
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) return '0:00';
+  const value=Math.max(0,Math.floor(seconds));
+  return Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
+}
+function MediaMessage({ payload, supabase }) {
+  const [url,setUrl]=useState('');
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(true);
+  const [playing,setPlaying]=useState(false);
+  const [duration,setDuration]=useState(0);
+  const [current,setCurrent]=useState(0);
+  const audioRef=useRef(null);
+  useEffect(()=>{
+    let alive=true, objectUrl='';
+    downloadAndDecryptMedia(supabase,payload).then(blob=>{
+      if(!alive)return; objectUrl=URL.createObjectURL(blob); setUrl(objectUrl);
+    }).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');})
+      .finally(()=>{if(alive)setBusy(false);});
+    return ()=>{alive=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
+  },[payload.path,supabase]);
+  const toggle=async()=>{const audio=audioRef.current;if(!audio)return;try{if(audio.paused)await audio.play();else audio.pause();}catch(e){setError('Браузер не смог воспроизвести аудио');}};
+  if (busy) return <div className="media-loading">Расшифровываем вложение…</div>;
+  if (error) return <div className="media-error">{error}</div>;
+  if (payload.media_type==='audio') return <div className="voice-player">
+    <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={e=>setDuration(e.currentTarget.duration||0)} onTimeUpdate={e=>setCurrent(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)}/>
+    <button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button>
+    <div className="voice-track"><input aria-label="Позиция воспроизведения" type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={e=>{if(audioRef.current)audioRef.current.currentTime=Number(e.target.value);}}/><div className="voice-time"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div>
+    <span className="voice-icon">♫</span>
+  </div>;
+  return <a className="file-attachment" href={url} download={payload.name || 'attachment'}><span className="file-attachment-icon">↧</span><span className="file-attachment-info"><b>{payload.name}</b><small>{(payload.size/1024/1024).toFixed(2)} МБ · зашифрованный файл</small></span><span className="file-download">Скачать</span></a>;
 }
 
 function AuthScreen() {
@@ -149,6 +188,12 @@ function App() {
   const [profileDraft, setProfileDraft] = useState({ display_name: '', avatar_url: '🙂', bio: '', age: '' });
   const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
+  const [pendingMedia, setPendingMedia] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const fileInputRef = useRef(null);
+  const recorderRef = useRef(null);
+  const recordingChunksRef = useRef([]);
   const [replyTarget, setReplyTarget] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
   const [messageMenuPosition, setMessageMenuPosition] = useState({ top: 0, left: 0 });
@@ -456,6 +501,53 @@ function App() {
     setMessageMenu(null);
   }
 
+  async function sendAttachment() {
+    if (!pendingMedia || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
+    setSending(true); setNotice('');
+    try {
+      const messageId = crypto.randomUUID();
+      const metadata = await encryptAndUploadMedia(supabase, { file:pendingMedia, userId:session.user.id, conversationId:selected.id, messageId });
+      const sent = await sendBrowserDirectMessage(supabase, {
+        userId:session.user.id, conversationId:selected.id, peerUserId:selected.peerUserId,
+        messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId:replyTarget?.id || null
+      });
+      setMessages(previous=>[...previous,{...sent,content:JSON.stringify(metadata),media:metadata}]);
+      setPendingMedia(null); setReplyTarget(null); loadChats();
+    } catch(error) { setNotice('Не удалось отправить вложение: '+(error?.message||'ошибка')); }
+    finally { setSending(false); }
+  }
+
+  async function startVoiceRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setNotice('Запись голоса недоступна в этом браузере. Разреши доступ к микрофону или выбери аудиофайл.');
+      return;
+    }
+    try {
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const preferred=['audio/mp4','audio/ogg;codecs=opus','audio/webm;codecs=opus','audio/webm'];
+      const mimeType=preferred.find(type=>MediaRecorder.isTypeSupported(type));
+      const recorder=new MediaRecorder(stream,mimeType?{mimeType}:undefined);
+      recordingChunksRef.current=[];
+      recorder.ondataavailable=event=>{if(event.data?.size)recordingChunksRef.current.push(event.data);};
+      recorder.onstop=()=>{
+        const blob=new Blob(recordingChunksRef.current,{type:recorder.mimeType||'audio/webm'});
+        const extension=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm';
+        if(blob.size) setPendingMedia(new File([blob],'Голосовое.'+extension,{type:blob.type}));
+        stream.getTracks().forEach(track=>track.stop());
+        setRecording(false); setRecordingSeconds(0);
+      };
+      recorderRef.current=recorder; recorder.start(250); setRecording(true); setRecordingSeconds(0);
+    } catch(error) { setNotice(error?.name==='NotAllowedError'?'Разреши Nexura доступ к микрофону.':'Не удалось начать запись: '+(error?.message||'ошибка')); }
+  }
+  function stopVoiceRecording() { if(recorderRef.current?.state==='recording') recorderRef.current.stop(); }
+
+  useEffect(()=>{
+    if(!recording)return;
+    const started=Date.now();
+    const timer=setInterval(()=>setRecordingSeconds(Math.floor((Date.now()-started)/1000)),250);
+    return ()=>clearInterval(timer);
+  },[recording]);
+
   async function sendMessage(event) {
     event?.preventDefault?.();
     if (!selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
@@ -601,7 +693,7 @@ function App() {
                 <div className="message-shell">
                   <div className="message-bubble">
                     {m.reply_to_id && <button className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}><span>↪ {replyMessage?.sender_id===session.user.id?'Вы':selected.title}</span><b>{replyMessage?.content || 'Ответ на сообщение'}</b></button>}
-                    {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
+                    {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : parseMediaPayload(m.content) ? <MediaMessage payload={parseMediaPayload(m.content)} supabase={supabase}/> : <div className="message-content">{m.content}</div>}
                     <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && <CheckCheck size={13}/>}</div>
                   </div>
                   <div className={"message-tools "+(reactions.length?"has-reactions":"")}>
@@ -621,7 +713,12 @@ function App() {
         </div>
         {(replyTarget || editingMessageId) && <div className="reply-composer"><span>{editingMessageId ? 'Редактирование сообщения' : 'Ответ на: '+String(replyTarget?.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>{setReplyTarget(null);setEditingMessageId(null);setDraft('');}} aria-label="Отменить">×</button></div>}
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
+          {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sending}>{sending?'Отправка…':'Отправить'}</button></div>}
+          {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
+          <input ref={fileInputRef} type="file" className="visually-hidden-file" accept="audio/*,.pdf,.txt,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.json,.csv" onChange={event=>{const file=event.target.files?.[0];if(file)setPendingMedia(file);event.target.value='';}}/>
           <div className="composer-input-row">
+            <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={!e2eeReady||sending||recording||!!pendingMedia} title="Прикрепить файл" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
+            <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={!e2eeReady||sending||!!pendingMedia} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
             <textarea ref={composerInputRef} value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}else if(event.key==='Escape'&&(replyTarget||editingMessageId)){setReplyTarget(null);setEditingMessageId(null);setDraft('');}}} placeholder={e2eeReady ? 'Сообщение' : 'Подключаем защищённое соединение…'} maxLength={12000} rows={1} disabled={!e2eeReady || sending}/>
             <button className="send-button" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button>
           </div>
