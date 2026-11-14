@@ -235,7 +235,7 @@ function App() {
   const loadChats = useCallback(async ({ silent = false } = {}) => {
     if (!session?.user?.id) return;
     const requestId = ++chatLoadSeq.current;
-    if (!silent && chats.length === 0) setLoadingChats(true);
+    if (!silent) setLoadingChats(true);
     if (!silent) setNotice('');
     try {
       // Fetch the membership list and unread counters together: neither query
