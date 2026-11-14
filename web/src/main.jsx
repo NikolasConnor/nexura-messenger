@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2 } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
@@ -532,7 +532,6 @@ function App() {
                       <button onClick={()=>{setReplyTarget(m);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
                       <button onClick={()=>copyMessage(m)}><Copy size={15}/>Копировать</button>
                       {mine && selected.kind==='direct' && !m.encrypted && <button onClick={()=>startEditing(m)}><Pencil size={15}/>Изменить</button>}
-                      <button onClick={()=>{setDraft(String(m.content||''));setReplyTarget(null);setMessageMenu(null);setNotice('Текст подготовлен для пересылки — выбери чат и вставь его в сообщение.')}}><Forward size={15}/>Переслать</button>
                       {mine && <button className="danger-action" onClick={()=>removeOwnMessage(m)}><Trash2 size={15}/>Удалить</button>}
                     </div>}
                   </div>
