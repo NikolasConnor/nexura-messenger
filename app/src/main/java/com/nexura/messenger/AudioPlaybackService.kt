@@ -62,6 +62,8 @@ class AudioPlaybackService : Service() {
 
     private fun startPlayback(uri: Uri) {
         stopPlayerOnly()
+        activeUri = uri.toString()
+        loading = true
         playing = false
         positionMs = 0L
         durationMs = 0L
@@ -76,6 +78,7 @@ class AudioPlaybackService : Service() {
             )
             next.setOnPreparedListener { mp ->
                 durationMs = mp.duration.toLong().coerceAtLeast(0L)
+                loading = false
                 positionMs = 0L
                 mp.start()
                 playing = true
@@ -137,6 +140,8 @@ class AudioPlaybackService : Service() {
     private fun stopPlayback(removeNotification: Boolean) {
         stopPlayerOnly()
         playing = false
+        loading = false
+        activeUri = null
         positionMs = 0L
         durationMs = 0L
         if (removeNotification) {
@@ -212,6 +217,10 @@ class AudioPlaybackService : Service() {
         private const val CHANNEL_ID = "nexura_audio_playback"
         private const val NOTIFICATION_ID = 4107
 
+        @Volatile var activeUri: String? = null
+            private set
+        @Volatile var loading: Boolean = false
+            private set
         @Volatile var playing: Boolean = false
             private set
         @Volatile var positionMs: Long = 0L
