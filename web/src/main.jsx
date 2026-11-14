@@ -93,6 +93,8 @@ function MediaMessage({ payload, supabase }) {
   const changeSpeed=()=>{const next=speed===1?1.5:speed===1.5?2:1;setSpeed(next);if(audioRef.current)audioRef.current.playbackRate=next;};
   if (busy) return <div className="media-loading">Расшифровываем вложение…</div>;
   if (error) return <div className="media-error">{error}</div>;
+  if (payload.media_type==='image') return <img className="media-image-preview" src={url} alt={payload.name || 'Изображение'}/>;
+  if (payload.media_type==='video') return <video className="media-video-preview" src={url} controls preload="metadata"/>;
   if (payload.media_type==='audio') return <div className="voice-player">
     <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={e=>setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0)} onTimeUpdate={e=>setCurrent(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{setPlaying(false);setCurrent(0);}}/>
     <button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button>
