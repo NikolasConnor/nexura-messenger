@@ -24,6 +24,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -131,6 +132,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         incomingDeepLink = intent?.data
         val store = SessionStore(this)
         val api = NexuraApi(store)
@@ -2327,7 +2329,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     // Keep the chat viewport below the status bar and resize it above the keyboard.
                     // The message area takes the remaining height; the composer stays at the bottom.
-                    Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                    Box(
+                        Modifier.fillMaxSize()
+                            .statusBarsPadding()
+                            // Reserve keyboard/navigation-bar space for the whole chat viewport.
+                            // The composer then stays at the bottom of the resized Column.
+                            .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                    ) {
                         Column(Modifier.fillMaxSize()) {
                         Row(
                             Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
@@ -2896,10 +2904,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
 
                         Column(
-                            // Use the larger of IME and navigation-bar insets, not their sum.
-                            // This keeps the composer attached to the bottom on devices that resize
-                            // the window while also dispatching keyboard insets (e.g. older Honor phones).
-                            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                            // Insets are handled once by the chat viewport above, not by this child.
+                            Modifier.fillMaxWidth()
                         ) {
                             if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                             if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
