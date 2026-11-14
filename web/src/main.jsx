@@ -12,6 +12,28 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   realtime: { params: { eventsPerSecond: 5 } }
 });
 
+async function searchProfiles(query, currentUserId) {
+  const clean = query.trim();
+  if (clean.length < 2) return [];
+  const columns = 'id,display_name,username,avatar_url';
+  const [byName, byUsername] = await Promise.all([
+    supabase.from('profiles').select(columns).ilike('display_name', '%' + clean + '%').neq('id', currentUserId).limit(20),
+    supabase.from('profiles').select(columns).ilike('username', '%' + clean + '%').neq('id', currentUserId).limit(20)
+  ]);
+  if (byName.error) throw byName.error;
+  if (byUsername.error) throw byUsername.error;
+  const unique = new Map();
+  for (const person of [...(byName.data || []), ...(byUsername.data || [])]) {
+    if (person.id) unique.set(person.id, {
+      id: person.id,
+      title: person.display_name || person.username || 'Пользователь',
+      username: person.username || '',
+      avatar: person.avatar_url || '🙂'
+    });
+  }
+  return [...unique.values()].slice(0, 30);
+}
+
 function initials(name = '?') {
   return name.trim().split(/\s+/).slice(0, 2).map(x => x[0]?.toUpperCase()).join('') || '?';
 }
@@ -96,6 +118,15 @@ function App() {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('chats');
   const [cryptoRuntimeError, setCryptoRuntimeError] = useState('');
+  const [contactQuery, setContactQuery] = useState('');
+  const [contactResults, setContactResults] = useState([]);
+  const [contactBusy, setContactBusy] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [groupTitle, setGroupTitle] = useState('');
+  const [groupQuery, setGroupQuery] = useState('');
+  const [groupResults, setGroupResults] = useState([]);
+  const [groupMembers, setGroupMembers] = useState([]);
+  const [groupBusy, setGroupBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -171,6 +202,82 @@ function App() {
   }, [selected?.id, loadMessages]);
 
   const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!session || activeTab !== 'contacts' || contactQuery.trim().length < 2) {
+      setContactResults([]);
+      setContactBusy(false);
+      return;
+    }
+    setContactBusy(true);
+    const timer = setTimeout(async () => {
+      try {
+        const rows = await searchProfiles(contactQuery, session.user.id);
+        if (!cancelled) setContactResults(rows);
+      } catch (error) {
+        if (!cancelled) setNotice('Не удалось найти пользователей: ' + error.message);
+      } finally {
+        if (!cancelled) setContactBusy(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [session?.user?.id, activeTab, contactQuery]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!groupOpen || !session || groupQuery.trim().length < 2) {
+      setGroupResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const rows = await searchProfiles(groupQuery, session.user.id);
+        if (!cancelled) setGroupResults(rows);
+      } catch (error) {
+        if (!cancelled) setNotice('Не удалось найти участников: ' + error.message);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [session?.user?.id, groupOpen, groupQuery]);
+
+  async function createDirectChat(person) {
+    setContactBusy(true); setNotice('');
+    try {
+      const { data, error } = await supabase.rpc('create_direct_conversation', { p_other_user_id: person.id });
+      if (error) throw error;
+      const id = String(data || '').replace(/^"|"$/g, '');
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        throw new Error('Сервер вернул некорректный ID переписки');
+      }
+      const chat = { id, kind: 'direct', title: person.title, avatar: person.avatar, updated: new Date().toISOString(), unread: 0 };
+      setChats(previous => [chat, ...previous.filter(item => item.id !== id)]);
+      setSelected(chat); setActiveTab('chats'); setMobileChatOpen(true); setSearch('');
+    } catch (error) { setNotice('Не удалось открыть переписку: ' + error.message); }
+    finally { setContactBusy(false); }
+  }
+
+  async function createGroupChat() {
+    const title = groupTitle.trim();
+    const memberIds = [...new Set(groupMembers)];
+    if (title.length < 2 || title.length > 60) { setNotice('Название группы должно содержать от 2 до 60 символов'); return; }
+    if (memberIds.length < 1 || memberIds.length > 49) { setNotice('Выбери от 1 до 49 участников'); return; }
+    setGroupBusy(true); setNotice('');
+    try {
+      const { data, error } = await supabase.rpc('create_group_conversation', { p_title: title, p_member_ids: memberIds });
+      if (error) throw error;
+      const id = String(data || '').replace(/^"|"$/g, '');
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        throw new Error('Сервер вернул некорректный ID группы');
+      }
+      const chat = { id, kind: 'group', title, avatar: '👥', updated: new Date().toISOString(), unread: 0 };
+      setChats(previous => [chat, ...previous.filter(item => item.id !== id)]);
+      setSelected(chat); setActiveTab('chats'); setMobileChatOpen(true);
+      setGroupOpen(false); setGroupTitle(''); setGroupQuery(''); setGroupMembers([]); setGroupResults([]);
+    } catch (error) { setNotice('Не удалось создать группу: ' + error.message); }
+    finally { setGroupBusy(false); }
+  }
+
   async function signOut() { await supabase.auth.signOut(); }
   function openChat(chat) { setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
@@ -180,19 +287,30 @@ function App() {
 
   return <div className="messenger">
     <aside className={'sidebar '+(mobileChatOpen?'mobile-hidden':'')}>
-      <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div>
+      <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><div className="side-actions"><button className="icon-button" onClick={()=>setGroupOpen(true)} title="Создать группу"><Plus size={18}/></button><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div></div>
       <div className="me-card"><div className="avatar self">{initials(profile?.display_name || session.user.email)}</div><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>В сети</span></div><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
       <div className="side-tabs"><button className={activeTab==='chats'?'active':''} onClick={()=>setActiveTab('chats')}><MessageCircle size={17}/> Чаты</button><button className={activeTab==='contacts'?'active':''} onClick={()=>setActiveTab('contacts')}><Users size={17}/> Контакты</button></div>
-      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':'КОНТАКТЫ'}</span><span>{chats.length}</span></div>
-      <div className="search-box"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Поиск переписки"/></div>
+      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':'ПОИСК ЛЮДЕЙ'}</span><span>{activeTab==='chats'?chats.length:contactResults.length}</span></div>
+      <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:contactQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setContactQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
       <div className="chat-list">
-        {loadingChats && <div className="list-hint">Загружаем чаты…</div>}
-        {!loadingChats && visibleChats.length===0 && <div className="empty-list"><MessageCircle size={24}/><b>Пока тихо</b><span>Когда появятся переписки, они будут здесь.</span></div>}
-        {visibleChats.map(chat=><button key={chat.id} className={'chat-item '+(selected?.id===chat.id?'selected':'')} onClick={()=>openChat(chat)}>
-          <div className="avatar">{chat.avatar && !chat.avatar.startsWith('http') ? chat.avatar : initials(chat.title)}</div>
-          <div className="chat-meta"><b>{chat.title}</b><span>{chat.kind==='group'?'Группа':'Личная переписка'}</span></div>
-          <div className="chat-trailing">{chat.updated && <time>{timeLabel(chat.updated)}</time>}{chat.unread>0&&<i>{chat.unread}</i>}</div>
-        </button>)}
+        {activeTab==='chats' ? <>
+          {loadingChats && <div className="list-hint">Загружаем чаты…</div>}
+          {!loadingChats && visibleChats.length===0 && <div className="empty-list"><MessageCircle size={24}/><b>Пока тихо</b><span>Найди человека во вкладке «Контакты» или создай группу кнопкой +.</span></div>}
+          {visibleChats.map(chat=><button key={chat.id} className={'chat-item '+(selected?.id===chat.id?'selected':'')} onClick={()=>openChat(chat)}>
+            <div className="avatar">{chat.avatar && !chat.avatar.startsWith('http') ? chat.avatar : initials(chat.title)}</div>
+            <div className="chat-meta"><b>{chat.title}</b><span>{chat.kind==='group'?'Группа':'Личная переписка'}</span></div>
+            <div className="chat-trailing">{chat.updated && <time>{timeLabel(chat.updated)}</time>}{chat.unread>0&&<i>{chat.unread}</i>}</div>
+          </button>)}
+        </> : <>
+          {contactQuery.trim().length<2 && <div className="empty-list"><Users size={24}/><b>Найди собеседника</b><span>Введи минимум два символа имени или имени пользователя.</span></div>}
+          {contactBusy && <div className="list-hint">Ищем пользователей…</div>}
+          {!contactBusy && contactQuery.trim().length>=2 && contactResults.length===0 && <div className="empty-list"><UserRound size={24}/><b>Никого не нашли</b><span>Попробуй другое имя или username.</span></div>}
+          {contactResults.map(person=><button key={person.id} className="chat-item" onClick={()=>createDirectChat(person)} disabled={contactBusy}>
+            <div className="avatar">{person.avatar && !person.avatar.startsWith('http') ? person.avatar : initials(person.title)}</div>
+            <div className="chat-meta"><b>{person.title}</b><span>{person.username?'@'+person.username:'Пользователь Nexura'}</span></div>
+            <div className="contact-open"><MessageCircle size={16}/></div>
+          </button>)}
+        </>}
       </div>
       <div className="sidebar-foot"><ShieldCheck size={15}/> Nexura · ранняя веб-версия</div>
     </aside>
@@ -219,6 +337,22 @@ function App() {
         </>
       }
     </main>
+    {groupOpen && <div className="modal-backdrop" onClick={()=>setGroupOpen(false)}>
+      <section className="group-modal" onClick={event=>event.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">НОВАЯ ПЕРЕПИСКА</div><h3>Создать группу</h3></div><button className="icon-button" onClick={()=>setGroupOpen(false)}>×</button></div>
+        <label className="modal-label">Название группы<input value={groupTitle} onChange={event=>setGroupTitle(event.target.value)} placeholder="Например, Друзья" maxLength={60}/></label>
+        <label className="modal-label">Добавить участников<input value={groupQuery} onChange={event=>setGroupQuery(event.target.value)} placeholder="Имя или @username"/></label>
+        <div className="member-results">
+          {groupQuery.trim().length<2 && <div className="list-hint">Введи минимум два символа для поиска людей.</div>}
+          {groupResults.map(person=><label className="member-option" key={person.id}>
+            <input type="checkbox" checked={groupMembers.includes(person.id)} onChange={event=>setGroupMembers(previous=>event.target.checked?[...previous,person.id]:previous.filter(id=>id!==person.id))}/>
+            <div className="avatar">{person.avatar && !person.avatar.startsWith('http') ? person.avatar : initials(person.title)}</div>
+            <span><b>{person.title}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span>
+          </label>)}
+        </div>
+        <div className="modal-foot"><span>Выбрано: {groupMembers.length}</span><button className="primary-btn" onClick={createGroupChat} disabled={groupBusy}>{groupBusy?'Создаём…':'Создать группу'}</button></div>
+      </section>
+    </div>}
   </div>;
 }
 
