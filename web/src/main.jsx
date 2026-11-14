@@ -144,6 +144,7 @@ function App() {
   const [groupMembers, setGroupMembers] = useState([]);
   const [groupBusy, setGroupBusy] = useState(false);
   const [draft, setDraft] = useState('');
+  const [replyTarget, setReplyTarget] = useState(null);
   const [sending, setSending] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
@@ -343,10 +344,12 @@ function App() {
     try {
       const sent = await sendBrowserDirectMessage(supabase, {
         userId: session.user.id, conversationId: selected.id,
-        peerUserId: selected.peerUserId, messageId, plaintext: text
+        peerUserId: selected.peerUserId, messageId, plaintext: text,
+        replyToId: replyTarget?.id || null
       });
       setMessages(previous => [...previous, sent]);
       setDraft('');
+      setReplyTarget(null);
       loadChats();
     } catch (error) {
       setNotice('Не удалось отправить защищённое сообщение: ' + (error?.message || 'ошибка'));
@@ -406,7 +409,8 @@ function App() {
                 {!mine && <Avatar className="message-avatar" value={selected.avatar} name={selected.title}/>}
                 <div className="message-bubble">
                   {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : <div className="message-content">{m.content}</div>}
-                  <div className="message-reactions">{(messageReactions[m.id] || []).map(reaction=><button key={reaction.emoji} className={reaction.selectedByMe?"selected":""} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,reaction.emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{reaction.emoji} {reaction.count}</button>)}<button onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,"❤️");setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>＋</button></div>
+                  {m.reply_to_id && <div className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}>↪ Ответ на сообщение</div>}
+                  <div className="message-reactions">{(messageReactions[m.id] || []).map(reaction=><button key={reaction.emoji} className={reaction.selectedByMe?"selected":""} onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,reaction.emoji);setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>{reaction.emoji} {reaction.count}</button>)}<button onClick={async()=>{try{await toggleMessageReaction(supabase,selected.id,m.id,"❤️");setMessageReactions(await loadMessageReactions(supabase,selected.id))}catch(error){setNotice("Не удалось поставить реакцию: "+error.message)}}}>＋</button><button onClick={()=>setReplyTarget(m)} aria-label="Ответить">↩</button></div>
                   <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{mine && <CheckCheck size={13}/>}</div>
                 </div>
               </div>
@@ -414,6 +418,7 @@ function App() {
           })}
           <div className="security-note"><LockKeyhole size={14}/><span>{e2eeStatus}</span></div>
         </div>
+        {replyTarget && <div className="reply-composer"><span>Ответ на: {String(replyTarget.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>setReplyTarget(null)} aria-label="Отменить ответ">×</button></div>}
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
           <textarea value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}}} placeholder={e2eeReady ? 'Напиши сообщение…' : 'Защищённое соединение не готово'} maxLength={12000} rows={1} disabled={!e2eeReady || sending}/>
           <div className="composer-bottom"><span><LockKeyhole size={12}/> {e2eeReady?'Личное сообщение защищено':'Ожидаем подключение шифрования'} · Shift + Enter — новая строка</span><button className="send-button" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button></div>
