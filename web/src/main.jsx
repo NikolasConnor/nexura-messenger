@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, createPortal } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward } from 'lucide-react';
 import './styles.css';
@@ -151,6 +151,9 @@ function App() {
   const [draft, setDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
+  const [messageMenuPosition, setMessageMenuPosition] = useState({ top: 0, left: 0 });
+  const [chatThemeOpen, setChatThemeOpen] = useState(false);
+  const [chatTheme, setChatTheme] = useState(() => { try { return JSON.parse(localStorage.getItem('nexura_chat_theme') || '{}'); } catch { return {}; } });
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -486,6 +489,21 @@ function App() {
     } finally { setSending(false); }
   }
 
+  function toggleMessageMenu(event, messageId) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuHeight = 220;
+    const top = rect.top > menuHeight + 16 ? rect.top - menuHeight - 8 : Math.min(window.innerHeight - menuHeight - 12, rect.bottom + 8);
+    const left = Math.max(12, Math.min(rect.right - 190, window.innerWidth - 202));
+    setMessageMenuPosition({ top: Math.max(12, top), left });
+    setMessageMenu(current => current === messageId ? null : messageId);
+    setReactionPickerFor(null);
+  }
+
+  function applyChatTheme(theme) {
+    setChatTheme(theme);
+    try { localStorage.setItem('nexura_chat_theme', JSON.stringify(theme)); } catch {}
+  }
+
   function openProfileSettings() {
     setProfileDraft({
       display_name: profile?.display_name || session.user.email?.split('@')[0] || '',
@@ -559,8 +577,8 @@ function App() {
     <main className={'chat-area '+(mobileChatOpen?'mobile-visible':'')}>
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
       {!selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
-        <div className="messages-pane" ref={messagesPaneRef}>
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
+        <div className="messages-pane" ref={messagesPaneRef} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
           {!loadingMessages && messages.length===0 && <div className="empty-messages"><div className="empty-chat-icon"><MessageCircle size={28}/></div><b>Начните общение</b><span>Напиши первое сообщение — оно появится здесь.</span></div>}
           {messages.map((m,index) => {
@@ -575,7 +593,7 @@ function App() {
             const replyMessage=messages.find(item=>item.id===m.reply_to_id);
             return <React.Fragment key={m.id}>
               {showDate && <div className="day-divider"><span>{dateLabel(m.created_at)}</span></div>}
-              <div id={'message-'+m.id} className={'message-row '+(mine?'mine ':'')+(groupedWithPrevious?'grouped-prev ':'')+(groupedWithNext?'grouped-next':'')} onContextMenu={event=>{event.preventDefault();setMessageMenu(messageMenu===m.id?null:m.id);setReactionPickerFor(null);}}>
+              <div id={'message-'+m.id} className={'message-row '+(mine?'mine ':'')+(groupedWithPrevious?'grouped-prev ':'')+(groupedWithNext?'grouped-next':'')} onContextMenu={event=>{event.preventDefault();toggleMessageMenu(event,m.id);}}>
                 {!mine && <Avatar className={'message-avatar '+(groupedWithPrevious?'avatar-spacer':'')} value={selected.avatar} name={selected.title}/>}
                 <div className="message-shell">
                   <div className="message-bubble">
@@ -585,18 +603,18 @@ function App() {
                   </div>
                   <div className={"message-tools "+(reactions.length?"has-reactions":"")}>
                     <div className="message-reactions">
-                      {reactions.map(reaction=><button key={reaction.emoji} className={'reaction-chip '+(reaction.selectedByMe?'selected':'')} onClick={()=>reactToMessage(m,reaction.emoji)} title={reaction.selectedByMe?'Убрать реакцию':'Поставить реакцию'}><span>{reaction.emoji}</span><b>{reaction.count}</b></button>)}
+                      {reactions.map(reaction=><button key={reaction.emoji+'-'+reaction.count+'-'+Boolean(reaction.selectedByMe)} className={'reaction-chip '+(reaction.selectedByMe?'selected':'')} onClick={()=>reactToMessage(m,reaction.emoji)} title={reaction.selectedByMe?'Убрать реакцию':'Поставить реакцию'}><span className="reaction-emoji">{reaction.emoji}</span><b key={reaction.count} className="reaction-count">{reaction.count}</b></button>)}
                       <button className="reaction-add" onClick={()=>{setReactionPickerFor(reactionPickerFor===m.id?null:m.id);setMessageMenu(null);}} title="Добавить реакцию" aria-label="Добавить реакцию"><SmilePlus size={15}/></button>
-                      <button className="message-more" onClick={()=>{setMessageMenu(messageMenu===m.id?null:m.id);setReactionPickerFor(null);}} title="Действия с сообщением" aria-label="Действия с сообщением"><MoreHorizontal size={16}/></button>
+                      <button className="message-more" onClick={event=>toggleMessageMenu(event,m.id)} title="Действия с сообщением" aria-label="Действия с сообщением"><MoreHorizontal size={16}/></button>
                     </div>
                     {reactionPickerFor===m.id && <div className="reaction-picker">{popular.map(emoji=><button key={emoji} onClick={()=>reactToMessage(m,emoji)}>{emoji}</button>)}</div>}
-                    {messageMenu===m.id && <div className="message-context-menu" role="menu">
+                    {messageMenu===m.id && createPortal(<div className="message-context-menu message-context-menu-floating" style={{top:messageMenuPosition.top,left:messageMenuPosition.left}} role="menu" onMouseDown={event=>event.stopPropagation()}>
                       <button role="menuitem" onClick={()=>{setReplyTarget(m);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
                       <button role="menuitem" onClick={()=>copyMessage(m)}><Copy size={15}/>Копировать</button>
                       {!m.encrypted && <button role="menuitem" onClick={()=>{setForwardMessage(m);setMessageMenu(null);}}><Forward size={15}/>Переслать</button>}
                       {mine && selected.kind==='direct' && !m.encrypted && <button role="menuitem" onClick={()=>startEditing(m)}><Pencil size={15}/>Изменить</button>}
                       {mine && <button role="menuitem" className="danger-action" onClick={()=>removeOwnMessage(m)} disabled={pendingAction}><Trash2 size={15}/>Удалить</button>}
-                    </div>}
+                    </div>, document.body)}
                   </div>
                 </div>
               </div>
@@ -624,11 +642,12 @@ function App() {
         {forwardingBusy && <div className="list-hint">Пересылаем с повторным шифрованием…</div>}
       </section>
     </div>}
+    {chatThemeOpen && <div className="modal-backdrop" onClick={()=>setChatThemeOpen(false)}><section className="group-modal theme-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">ПЕРСОНАЛИЗАЦИЯ</div><h3>Оформление чата</h3></div><button className="icon-button" onClick={()=>setChatThemeOpen(false)} aria-label="Закрыть">×</button></div><p className="theme-description">Выбери оформление переписки. Настройка сохраняется на этом устройстве.</p><div className="theme-presets">{[{id:'violet',name:'Nexura',wall:'#100d19',bubble:'#49366a',mine:'#49366a'},{id:'midnight',name:'Полночь',wall:'#0b1420',bubble:'#1d3447',mine:'#285879'},{id:'ocean',name:'Океан',wall:'#0b1920',bubble:'#173b42',mine:'#176b70'},{id:'rose',name:'Розовый',wall:'#1b1019',bubble:'#422338',mine:'#713b5b'},{id:'light',name:'Светлый',wall:'#e9e7ef',bubble:'#ffffff',mine:'#ded3f8'}].map(theme=><button type="button" key={theme.id} className={'theme-preset '+((chatTheme.id||'violet')===theme.id?'active':'')} onClick={()=>applyChatTheme(theme)}><span className="theme-preview" style={{background:theme.wall}}><i style={{background:theme.bubble}}/><i style={{background:theme.mine}}/></span><b>{theme.name}</b></button>)}</div><div className="theme-modal-foot"><span>Изменения применяются сразу</span><button className="primary-btn" onClick={()=>{applyChatTheme({});setChatThemeOpen(false)}}>Сбросить</button></div></section></div>}
     {settingsOpen && <div className="modal-backdrop" onClick={()=>setSettingsOpen(false)}>
       <section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}>
         <div className="modal-head"><div><div className="eyebrow">ТВОЙ АККАУНТ</div><h3>Профиль</h3></div><button className="icon-button" onClick={()=>setSettingsOpen(false)} aria-label="Закрыть">×</button></div>
         <form className="profile-form" onSubmit={saveProfileSettings}>
-          <div className="profile-avatar-picker"><Avatar value={profileDraft.avatar_url} name={profileDraft.display_name}/><div><b>Аватар</b><span>Выбери значок для своего профиля</span></div></div>
+          <div className="profile-preview-card"><Avatar value={profileDraft.avatar_url} name={profileDraft.display_name}/><div><b>{profileDraft.display_name || 'Твоё имя'}</b><span>{profile?.username ? '@'+profile.username : session.user.email}</span><small>{profileDraft.bio || 'Добавь пару слов о себе'}</small></div><ShieldCheck size={17}/></div><div className="profile-avatar-picker"><div><b>Фото и аватар</b><span>Выбери значок, который увидят собеседники</span></div></div>
           <div className="emoji-picker" aria-label="Выбор аватара">
             {['🙂','😎','🤝','🦊','🐼','🐱','🐸','🐻','🌙','⭐','🔥','💜'].map(emoji=><button type="button" key={emoji} className={profileDraft.avatar_url===emoji?'active':''} onClick={()=>setProfileDraft(value=>({...value,avatar_url:emoji}))}>{emoji}</button>)}
           </div>
