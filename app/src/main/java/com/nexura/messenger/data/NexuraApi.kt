@@ -964,14 +964,17 @@ class NexuraApi(private val store: SessionStore) {
         val envelope = E2eeGroupMessageEnvelope(
             chatId, uid, ownDeviceId, own.getString("curve25519"), recipients
         ).encode()
-        val cloudContent = encryptCloudHistory(chatId, messageId, plaintext)
+        // Cloud history is an additional recovery layer, never a dependency for E2EE delivery.
+        // If the server-side archive key is not configured or temporarily unavailable,
+        // keep the original end-to-end encrypted send path working.
+        val cloudContent = runCatching { encryptCloudHistory(chatId, messageId, plaintext) }.getOrNull()
         val payload = JSONObject()
             .put("id", normalizeUuid(messageId))
             .put("conversation_id", chatId)
             .put("sender_id", uid)
             .put("message_type", messageType)
             .put("content", envelope)
-            .put("cloud_content", cloudContent)
+        if (!cloudContent.isNullOrBlank()) payload.put("cloud_content", cloudContent)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         val inserted = JSONArray(call(
             "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
@@ -1233,14 +1236,17 @@ class NexuraApi(private val store: SessionStore) {
         val envelope = E2eeGroupMessageEnvelope(
             chatId, uid, ownDeviceId, ownBundle.getString("curve25519"), recipients
         ).encode()
-        val cloudContent = encryptCloudHistory(chatId, messageId, plaintext)
+        // Cloud history is an additional recovery layer, never a dependency for E2EE delivery.
+        // If the server-side archive key is not configured or temporarily unavailable,
+        // keep the original end-to-end encrypted send path working.
+        val cloudContent = runCatching { encryptCloudHistory(chatId, messageId, plaintext) }.getOrNull()
         val payload = JSONObject()
             .put("id", normalizeUuid(messageId))
             .put("conversation_id", chatId)
             .put("sender_id", uid)
             .put("message_type", messageType)
             .put("content", envelope)
-            .put("cloud_content", cloudContent)
+        if (!cloudContent.isNullOrBlank()) payload.put("cloud_content", cloudContent)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
         val inserted = JSONArray(call(
             "/rest/v1/messages?on_conflict=id", "POST", payload.toString(),
