@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff } from 'lucide-react';
 import './styles.css';
+import { initializeOlm } from './crypto/olm.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY';
@@ -94,6 +95,7 @@ function App() {
   const [notice, setNotice] = useState('');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('chats');
+  const [cryptoRuntimeError, setCryptoRuntimeError] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -134,6 +136,11 @@ function App() {
     } catch (e) { setNotice('Не удалось загрузить чаты: ' + e.message); }
     finally { setLoadingChats(false); }
   }, [session?.user?.id, selected?.id]);
+
+  useEffect(() => {
+    if (!session) { setCryptoRuntimeError(''); return; }
+    initializeOlm().catch(error => setCryptoRuntimeError(error?.message || 'Не удалось загрузить криптомодуль'));
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (!session) { setChats([]); setSelected(null); setProfile(null); return; }
@@ -208,7 +215,7 @@ function App() {
           })}
           <div className="security-note"><LockKeyhole size={15}/><span>Веб-клиент пока не расшифровывает E2EE-сообщения. Они не показываются как обычный текст.</span></div>
         </div>
-        <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Отправка сообщений пока отключена</b><span>Сначала нужно подключить веб-шифрование Nexura. Это не позволит случайно отправить переписку без E2EE.</span></div></div>
+        <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Отправка сообщений пока отключена</b><span>{cryptoRuntimeError ? 'Криптомодуль не загрузился: ' + cryptoRuntimeError : 'Общий модуль Olm загружен, но веб-отправка будет включена только после проверки ключей и совместимости с Android.'}</span></div></div>
         </>
       }
     </main>
