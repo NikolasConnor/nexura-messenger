@@ -1,0 +1,68 @@
+name: Deploy Nexura website and web app to GitHub Pages
+
+on:
+  push:
+    branches:
+      - release/public-apk-site
+    paths:
+      - "website/**"
+      - "web/**"
+      - "crypto-core/**"
+      - "crypto-wasm/**"
+      - ".github/workflows/nexura-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: nexura-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Rust and WebAssembly target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Build shared Olm WebAssembly module
+        run: wasm-pack build crypto-wasm --target web --out-dir ../web/src/crypto/pkg
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build Nexura Web
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build -- --base=/nexura-messenger/app/ --outDir=../website/app
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
