@@ -167,6 +167,8 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [chats, setChats] = useState([]);
   const [selected, setSelected] = useState(null);
+  const selectedChatIdRef = useRef(null);
+  selectedChatIdRef.current = selected?.id || null;
   const [messages, setMessages] = useState([]);
   const [outgoingMediaStatus, setOutgoingMediaStatus] = useState({});
   const messageLoadSeq = useRef(0);
@@ -593,7 +595,7 @@ function App() {
         messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId
       });
       pendingMediaOutboxRef.current.delete(messageId);
-      if (selected?.id === conversationId) setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
+      if (selectedChatIdRef.current === conversationId) setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
       setPendingMedia(null); setReplyTarget(null); loadChats();
     } catch(error) {
