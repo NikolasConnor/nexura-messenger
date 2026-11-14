@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2 } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
@@ -154,6 +154,9 @@ function App() {
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [pendingAction, setPendingAction] = useState(false);
+  const [forwardMessage, setForwardMessage] = useState(null);
+  const [forwardingBusy, setForwardingBusy] = useState(false);
+  const composerInputRef = useRef(null);
   const [sending, setSending] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
@@ -425,6 +428,23 @@ function App() {
     finally { setPendingAction(false); setMessageMenu(null); }
   }
 
+  async function forwardToChat(chat) {
+    if (!forwardMessage || forwardingBusy) return;
+    if (forwardMessage.encrypted) { setNotice('Сначала нужно расшифровать сообщение.'); return; }
+    if (chat.kind !== 'direct' || !chat.peerUserId) { setNotice('Пересылка пока доступна в личные чаты.'); return; }
+    setForwardingBusy(true);
+    try {
+      await sendBrowserDirectMessage(supabase, {
+        userId: session.user.id, conversationId: chat.id, peerUserId: chat.peerUserId,
+        messageId: crypto.randomUUID(), plaintext: String(forwardMessage.content || '')
+      });
+      setChats(previous => previous.map(item => item.id===chat.id ? {...item,updated:new Date().toISOString()} : item).sort((a,b)=>new Date(b.updated||0)-new Date(a.updated||0)));
+      setForwardMessage(null);
+      setNotice('Сообщение переслано');
+    } catch (error) { setNotice('Не удалось переслать сообщение: ' + (error?.message || 'ошибка')); }
+    finally { setForwardingBusy(false); }
+  }
+
   function startEditing(message) {
     if (message.sender_id !== session.user.id || selected?.kind !== 'direct' || message.encrypted) return;
     setEditingMessageId(message.id);
@@ -490,6 +510,13 @@ function App() {
   async function signOut() { await supabase.auth.signOut(); }
   function openChat(chat) { setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
+
+  useEffect(() => {
+    const field = composerInputRef.current;
+    if (!field) return;
+    field.style.height = 'auto';
+    field.style.height = Math.min(field.scrollHeight, 144) + 'px';
+  }, [draft]);
 
   useEffect(() => {
     const pane = messagesPaneRef.current;
@@ -566,6 +593,7 @@ function App() {
                     {messageMenu===m.id && <div className="message-context-menu" role="menu">
                       <button role="menuitem" onClick={()=>{setReplyTarget(m);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
                       <button role="menuitem" onClick={()=>copyMessage(m)}><Copy size={15}/>Копировать</button>
+                      {!m.encrypted && <button role="menuitem" onClick={()=>{setForwardMessage(m);setMessageMenu(null);}}><Forward size={15}/>Переслать</button>}
                       {mine && selected.kind==='direct' && !m.encrypted && <button role="menuitem" onClick={()=>startEditing(m)}><Pencil size={15}/>Изменить</button>}
                       {mine && <button role="menuitem" className="danger-action" onClick={()=>removeOwnMessage(m)} disabled={pendingAction}><Trash2 size={15}/>Удалить</button>}
                     </div>}
@@ -587,6 +615,15 @@ function App() {
         </>
       }
     </main>
+    {forwardMessage && <div className="modal-backdrop" onClick={()=>!forwardingBusy&&setForwardMessage(null)}>
+      <section className="group-modal forward-modal" onClick={event=>event.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">ПЕРЕСЫЛКА</div><h3>Выбери чат</h3></div><button className="icon-button" onClick={()=>setForwardMessage(null)} disabled={forwardingBusy} aria-label="Закрыть">×</button></div>
+        <div className="forward-preview">{String(forwardMessage.content||'').slice(0,180)}</div>
+        <div className="forward-chat-list">{chats.filter(chat=>chat.kind==='direct'&&chat.id!==selected?.id).map(chat=><button key={chat.id} className="chat-item" onClick={()=>forwardToChat(chat)} disabled={forwardingBusy}><Avatar value={chat.avatar} name={chat.title}/><div className="chat-meta"><b>{chat.title}</b><span>Личная переписка</span></div><Forward size={16}/></button>)}
+        {chats.filter(chat=>chat.kind==='direct'&&chat.id!==selected?.id).length===0 && <div className="empty-list">Нет других личных чатов для пересылки.</div>}</div>
+        {forwardingBusy && <div className="list-hint">Пересылаем с повторным шифрованием…</div>}
+      </section>
+    </div>}
     {settingsOpen && <div className="modal-backdrop" onClick={()=>setSettingsOpen(false)}>
       <section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}>
         <div className="modal-head"><div><div className="eyebrow">ТВОЙ АККАУНТ</div><h3>Профиль</h3></div><button className="icon-button" onClick={()=>setSettingsOpen(false)} aria-label="Закрыть">×</button></div>
