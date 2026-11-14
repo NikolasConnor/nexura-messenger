@@ -43,6 +43,27 @@ async function isMember(baseUrl: string, apiKey: string, authorization: string, 
   const rows = await response.json();
   return Array.isArray(rows) && rows.length === 1;
 }
+async function visibleMessageIds(
+  baseUrl: string,
+  apiKey: string,
+  authorization: string,
+  conversationId: string,
+  ids: string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const query = new URLSearchParams({
+    select: "id",
+    conversation_id: `eq.${conversationId}`,
+    deleted_at: "is.null",
+    id: `in.(${ids.join(",")})`,
+  });
+  const response = await fetch(`${baseUrl}/rest/v1/messages?${query}`, {
+    headers: { apikey: apiKey, Authorization: authorization },
+  });
+  if (!response.ok) throw new Error("Unable to verify message visibility");
+  const rows = await response.json();
+  return new Set(Array.isArray(rows) ? rows.map((row: any) => row.id).filter((id: unknown) => typeof id === "string") : []);
+}
 async function loadAesKey(): Promise<CryptoKey | null> {
   const encoded = Deno.env.get("NEXURA_CLOUD_HISTORY_KEY_V1");
   if (!encoded) return null;
@@ -113,12 +134,15 @@ Deno.serve(async (req: Request) => {
     if (action === "archive") {
       const items = body?.items;
       if (!Array.isArray(items) || items.length < 1 || items.length > 100) return json({ error: "A batch of 1 to 100 archives is required" }, 400);
+      const archiveIds = items.map((item: any) => item?.id).filter((id: unknown) => typeof id === "string" && UUID.test(id));
+      const visibleIds = await visibleMessageIds(baseUrl, apiKey, authorization, conversationId, archiveIds);
       const archiveRows = [];
       for (const item of items) {
         if (typeof item?.id !== "string" || !UUID.test(item.id) || typeof item?.plaintext !== "string" ||
             encoder.encode(item.plaintext).length < 1 || encoder.encode(item.plaintext).length > 100000) {
           return json({ error: "Invalid legacy archive item" }, 400);
         }
+        if (!visibleIds.has(item.id)) return json({ error: "Message is not available to this account" }, 403);
         archiveRows.push({
           user_id: user.id,
           conversation_id: conversationId,
@@ -143,6 +167,8 @@ Deno.serve(async (req: Request) => {
     if (action === "decrypt") {
       const items = body?.items;
       if (!Array.isArray(items) || items.length < 1 || items.length > 100) return json({ error: "A batch of 1 to 100 messages is required" }, 400);
+      const decryptIds = items.map((item: any) => item?.id).filter((id: unknown) => typeof id === "string" && UUID.test(id));
+      const visibleIds = await visibleMessageIds(baseUrl, apiKey, authorization, conversationId, decryptIds);
       const output = [];
       for (const item of items) {
         if (typeof item?.id !== "string" || !UUID.test(item.id) || typeof item?.cloud_content !== "string") {
@@ -150,6 +176,10 @@ Deno.serve(async (req: Request) => {
         }
         const scope = item.scope === "user" ? "user" : item.scope === "shared" || item.scope == null ? "shared" : "invalid";
         if (scope === "invalid") return json({ error: "Invalid archive scope" }, 400);
+        if (!visibleIds.has(item.id)) {
+          output.push({ id: item.id, error: "not_available" });
+          continue;
+        }
         try {
           output.push({
             id: item.id,
