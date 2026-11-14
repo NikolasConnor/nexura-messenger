@@ -146,7 +146,7 @@ function App() {
   const [groupMembers, setGroupMembers] = useState([]);
   const [groupBusy, setGroupBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [profileDraft, setProfileDraft] = useState({ display_name: '', avatar_url: '🙂', bio: '' });
+  const [profileDraft, setProfileDraft] = useState({ display_name: '', avatar_url: '🙂', bio: '', age: '' });
   const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
@@ -233,7 +233,7 @@ function App() {
   useEffect(() => {
     if (!session) { setChats([]); setSelected(null); setProfile(null); return; }
     loadChats();
-    supabase.from('profiles').select('id,display_name,username,avatar_url,bio').eq('id', session.user.id).maybeSingle()
+    supabase.from('profiles').select('id,display_name,username,avatar_url,bio,age').eq('id', session.user.id).maybeSingle()
       .then(({data}) => setProfile(data));
   }, [session?.user?.id]);
 
@@ -276,7 +276,7 @@ function App() {
       if (event.type === 'keydown' && event.key === 'Escape') {
         setMessageMenu(null); setReactionPickerFor(null); return;
       }
-      if (event.type === 'pointerdown' && !event.target.closest('.message-tools')) {
+      if (event.type === 'pointerdown' && !event.target.closest('.message-tools, .message-context-menu-floating')) {
         setMessageMenu(null); setReactionPickerFor(null);
       }
     };
@@ -508,7 +508,8 @@ function App() {
     setProfileDraft({
       display_name: profile?.display_name || session.user.email?.split('@')[0] || '',
       avatar_url: profile?.avatar_url || '🙂',
-      bio: profile?.bio || ''
+      bio: profile?.bio || '',
+      age: profile?.age == null ? '' : String(profile.age)
     });
     setSettingsOpen(true);
   }
@@ -642,16 +643,17 @@ function App() {
         {forwardingBusy && <div className="list-hint">Пересылаем с повторным шифрованием…</div>}
       </section>
     </div>}
-    {chatThemeOpen && <div className="modal-backdrop" onClick={()=>setChatThemeOpen(false)}><section className="group-modal theme-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">ПЕРСОНАЛИЗАЦИЯ</div><h3>Оформление чата</h3></div><button className="icon-button" onClick={()=>setChatThemeOpen(false)} aria-label="Закрыть">×</button></div><p className="theme-description">Выбери оформление переписки. Настройка сохраняется на этом устройстве.</p><div className="theme-presets">{[{id:'violet',name:'Nexura',wall:'#100d19',bubble:'#49366a',mine:'#49366a'},{id:'midnight',name:'Полночь',wall:'#0b1420',bubble:'#1d3447',mine:'#285879'},{id:'ocean',name:'Океан',wall:'#0b1920',bubble:'#173b42',mine:'#176b70'},{id:'rose',name:'Розовый',wall:'#1b1019',bubble:'#422338',mine:'#713b5b'},{id:'light',name:'Светлый',wall:'#e9e7ef',bubble:'#ffffff',mine:'#ded3f8'}].map(theme=><button type="button" key={theme.id} className={'theme-preset '+((chatTheme.id||'violet')===theme.id?'active':'')} onClick={()=>applyChatTheme(theme)}><span className="theme-preview" style={{background:theme.wall}}><i style={{background:theme.bubble}}/><i style={{background:theme.mine}}/></span><b>{theme.name}</b></button>)}</div><div className="theme-modal-foot"><span>Изменения применяются сразу</span><button className="primary-btn" onClick={()=>{applyChatTheme({});setChatThemeOpen(false)}}>Сбросить</button></div></section></div>}
+    {chatThemeOpen && <div className="modal-backdrop" onClick={()=>setChatThemeOpen(false)}><section className="group-modal theme-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">ПЕРСОНАЛИЗАЦИЯ</div><h3>Оформление чата</h3></div><button className="icon-button" onClick={()=>setChatThemeOpen(false)} aria-label="Закрыть">×</button></div><p className="theme-description">Выбери оформление переписки. Настройка сохраняется на этом устройстве.</p><div className="theme-presets">{[{id:'violet',name:'Nexura',wall:'#100d19',bubble:'#49366a',mine:'#49366a'},{id:'midnight',name:'Полночь',wall:'#0b1420',bubble:'#1d3447',mine:'#285879'},{id:'ocean',name:'Океан',wall:'#0b1920',bubble:'#173b42',mine:'#176b70'},{id:'rose',name:'Розовый',wall:'#1b1019',bubble:'#422338',mine:'#713b5b'},{id:'graphite',name:'Графит',wall:'#111318',bubble:'#292d35',mine:'#3f4a60'}].map(theme=><button type="button" key={theme.id} className={'theme-preset '+((chatTheme.id||'violet')===theme.id?'active':'')} onClick={()=>applyChatTheme(theme)}><span className="theme-preview" style={{background:theme.wall}}><i style={{background:theme.bubble}}/><i style={{background:theme.mine}}/></span><b>{theme.name}</b></button>)}</div><div className="theme-modal-foot"><span>Изменения применяются сразу</span><button className="primary-btn" onClick={()=>{applyChatTheme({});setChatThemeOpen(false)}}>Сбросить</button></div></section></div>}
     {settingsOpen && <div className="modal-backdrop" onClick={()=>setSettingsOpen(false)}>
       <section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}>
         <div className="modal-head"><div><div className="eyebrow">ТВОЙ АККАУНТ</div><h3>Профиль</h3></div><button className="icon-button" onClick={()=>setSettingsOpen(false)} aria-label="Закрыть">×</button></div>
         <form className="profile-form" onSubmit={saveProfileSettings}>
-          <div className="profile-preview-card"><Avatar value={profileDraft.avatar_url} name={profileDraft.display_name}/><div><b>{profileDraft.display_name || 'Твоё имя'}</b><span>{profile?.username ? '@'+profile.username : session.user.email}</span><small>{profileDraft.bio || 'Добавь пару слов о себе'}</small></div><ShieldCheck size={17}/></div><div className="profile-avatar-picker"><div><b>Фото и аватар</b><span>Выбери значок, который увидят собеседники</span></div></div>
+          <div className="profile-preview-card"><Avatar value={profileDraft.avatar_url} name={profileDraft.display_name}/><div><b>{profileDraft.display_name || 'Твоё имя'}</b><span>{profile?.username ? '@'+profile.username : session.user.email}</span><small>{[profileDraft.age ? profileDraft.age+' лет' : '', profileDraft.bio].filter(Boolean).join(' · ') || 'Добавь пару слов о себе'}</small></div><ShieldCheck size={17}/></div><div className="profile-avatar-picker"><div><b>Фото и аватар</b><span>Выбери значок, который увидят собеседники</span></div></div>
           <div className="emoji-picker" aria-label="Выбор аватара">
             {['🙂','😎','🤝','🦊','🐼','🐱','🐸','🐻','🌙','⭐','🔥','💜'].map(emoji=><button type="button" key={emoji} className={profileDraft.avatar_url===emoji?'active':''} onClick={()=>setProfileDraft(value=>({...value,avatar_url:emoji}))}>{emoji}</button>)}
           </div>
           <label className="modal-label">Имя<input value={profileDraft.display_name} onChange={event=>setProfileDraft(value=>({...value,display_name:event.target.value}))} placeholder="Как тебя называть" maxLength={40} required/></label>
+          <label className="modal-label">Возраст<input type="number" min="1" max="120" value={profileDraft.age} onChange={event=>setProfileDraft(value=>({...value,age:event.target.value}))} placeholder="Необязательно"/></label>
           <label className="modal-label">О себе<textarea value={profileDraft.bio} onChange={event=>setProfileDraft(value=>({...value,bio:event.target.value}))} placeholder="Пара слов о себе" maxLength={160} rows={3}/></label>
           <div className="profile-form-foot"><span>{profileDraft.bio.length}/160</span><button className="primary-btn" type="submit" disabled={profileBusy}>{profileBusy?'Сохраняем…':'Сохранить профиль'}</button></div>
         </form>
