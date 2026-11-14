@@ -2122,7 +2122,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Text("Фон переписки", color = MainText, fontWeight = FontWeight.SemiBold)
                                     OutlinedButton(onClick = { chatWallpaperPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
-                                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null)
+                                        Icon(Icons.Default.Image, contentDescription = null)
                                         Spacer(Modifier.width(8.dp))
                                         Text(if (chatWallpaperImage != null) "Изменить свои обои" else "Выбрать фото из галереи")
                                     }
