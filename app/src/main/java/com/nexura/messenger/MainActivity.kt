@@ -450,6 +450,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             mediaKind = mediaKind, mediaCaption = caption, mediaFileName = displayName, mediaMimeType = mimeType
         )
         messages = (messages + optimistic).distinctBy { it.id }.sortedBy { it.createdAt }
+        val optimisticSnapshot = messages.toList()
+        scope.launch(Dispatchers.IO) { runCatching { localCache.saveMessages(store.userId.orEmpty(), chat.id, optimisticSnapshot) } }
         messageDelivery[messageId] = "sending"
         failedMediaRetries.remove(messageId)
         draft = ""
@@ -474,7 +476,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 messageDelivery[messageId] = "sent"
                 failedMediaRetries.remove(messageId)
                 if (selected?.id == chat.id) {
-                    runCatching { messages = api.messages(chat.id, e2eeClient) }
+                    runCatching {
+                        messages = api.messages(chat.id, e2eeClient)
+                        withContext(Dispatchers.IO) { localCache.saveMessages(store.userId.orEmpty(), chat.id, messages) }
+                    }
                 }
                 notice = "Медиа отправлено"
             } catch (e: Exception) {
