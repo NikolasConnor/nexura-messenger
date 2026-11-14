@@ -572,6 +572,7 @@ function App() {
     const file = fileOverride;
     if (!file || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
     setSending(true); setNotice('');
+    const conversationId = selected.id;
     const messageId = existingMessageId || crypto.randomUUID();
     const createdAt = new Date().toISOString();
     if (!existingMessageId) {
@@ -586,13 +587,13 @@ function App() {
     setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sending'}));
     const replyToId = existingMessageId ? (pendingMediaOutboxRef.current.get(existingMessageId)?.reply_to_id || null) : (replyTarget?.id || null);
     try {
-      const metadata = await encryptAndUploadMedia(supabase, { file, userId:session.user.id, conversationId:selected.id, messageId });
+      const metadata = await encryptAndUploadMedia(supabase, { file, userId:session.user.id, conversationId, messageId });
       const sent = await sendBrowserDirectMessage(supabase, {
-        userId:session.user.id, conversationId:selected.id, peerUserId:selected.peerUserId,
+        userId:session.user.id, conversationId, peerUserId:selected.peerUserId,
         messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId
       });
       pendingMediaOutboxRef.current.delete(messageId);
-      setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
+      if (selected?.id === conversationId) setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
       setPendingMedia(null); setReplyTarget(null); loadChats();
     } catch(error) {
