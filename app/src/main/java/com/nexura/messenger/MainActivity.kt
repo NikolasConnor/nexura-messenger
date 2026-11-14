@@ -3356,38 +3356,48 @@ private fun AudioMessagePlayer(
     mimeType: String?
 ) {
     val context = LocalContext.current
-    var player by remember(uri) { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember(uri) { mutableStateOf(false) }
     var loading by remember(uri) { mutableStateOf(false) }
-    var prepared by remember(uri) { mutableStateOf(false) }
     var durationMs by remember(uri) { mutableLongStateOf(0L) }
     var positionMs by remember(uri) { mutableLongStateOf(0L) }
-    val activePlayer = rememberUpdatedState(player)
+    var dragging by remember(uri) { mutableStateOf(false) }
 
-    LaunchedEffect(player, playing, prepared) {
-        while (playing && prepared) {
-            val current = player ?: break
-            if (!runCatching { current.isPlaying }.getOrDefault(false)) break
-            positionMs = runCatching { current.currentPosition.toLong() }.getOrDefault(positionMs)
+    LaunchedEffect(uri) {
+        while (true) {
+            val active = AudioPlaybackService.activeUri == uri.toString()
+            loading = active && AudioPlaybackService.loading
+            playing = active && AudioPlaybackService.playing
+            if (active) {
+                durationMs = AudioPlaybackService.durationMs
+                if (!dragging) positionMs = AudioPlaybackService.positionMs
+            } else {
+                durationMs = 0L
+                positionMs = 0L
+            }
             delay(250)
         }
     }
 
-    DisposableEffect(uri) {
-        onDispose {
-            runCatching { activePlayer.value?.stop() }
-            runCatching { activePlayer.value?.release() }
+    fun sendAudioAction(action: String, position: Long? = null) {
+        val intent = Intent(context, AudioPlaybackService::class.java).setAction(action)
+        if (position != null) intent.putExtra(AudioPlaybackService.EXTRA_POSITION, position)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "Не удалось управлять аудио", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun formatTime(value: Long): String {
-        val seconds = (value.coerceAtLeast(0L) / 1000L)
+        val seconds = value.coerceAtLeast(0L) / 1000L
         return String.format(Locale.getDefault(), "%d:%02d", seconds / 60L, seconds % 60L)
     }
 
     val title = fileName?.takeIf { it.isNotBlank() && it != "voice.m4a" }
         ?: if (mimeType?.startsWith("audio/") == true) "Аудиофайл" else "Голосовое сообщение"
     val subtitle = caption?.takeIf { it.isNotBlank() } ?: mimeType?.uppercase(Locale.getDefault()) ?: "ЗАЩИЩЁННОЕ АУДИО"
+    val active = AudioPlaybackService.activeUri == uri.toString()
 
     Column(
         Modifier.widthIn(min = 245.dp, max = 300.dp)
@@ -3399,56 +3409,21 @@ private fun AudioMessagePlayer(
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = {
-                    if (playing) {
-                        runCatching { player?.pause() }
-                        playing = false
-                    } else if (prepared && player != null) {
-                        runCatching {
-                            if (positionMs >= durationMs && durationMs > 0L) {
-                                player?.seekTo(0)
-                                positionMs = 0L
+                    when {
+                        active && playing -> sendAudioAction(AudioPlaybackService.ACTION_PAUSE)
+                        active -> sendAudioAction(AudioPlaybackService.ACTION_RESUME)
+                        else -> {
+                            val intent = Intent(context, AudioPlaybackService::class.java)
+                                .setAction(AudioPlaybackService.ACTION_PLAY)
+                                .putExtra(AudioPlaybackService.EXTRA_URI, uri.toString())
+                                .putExtra(AudioPlaybackService.EXTRA_TITLE, title)
+                                .putExtra(AudioPlaybackService.EXTRA_SUBTITLE, subtitle)
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                                else context.startService(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Не удалось открыть аудиофайл", Toast.LENGTH_SHORT).show()
                             }
-                            player?.start()
-                            playing = true
-                        }.onFailure {
-                            Toast.makeText(context, "Не удалось продолжить аудио", Toast.LENGTH_SHORT).show()
-                        }
-                    } else if (!loading) {
-                        loading = true
-                        try {
-                            val next = MediaPlayer()
-                            player = next
-                            next.setOnPreparedListener { mp ->
-                                durationMs = mp.duration.toLong().coerceAtLeast(0L)
-                                positionMs = 0L
-                                prepared = true
-                                loading = false
-                                mp.start()
-                                playing = true
-                            }
-                            next.setOnCompletionListener { mp ->
-                                playing = false
-                                positionMs = 0L
-                                runCatching { mp.seekTo(0) }
-                            }
-                            next.setOnErrorListener { mp, _, _ ->
-                                loading = false
-                                prepared = false
-                                playing = false
-                                runCatching { mp.release() }
-                                player = null
-                                Toast.makeText(context, "Не удалось воспроизвести аудио", Toast.LENGTH_SHORT).show()
-                                true
-                            }
-                            next.setDataSource(context, uri)
-                            next.prepareAsync()
-                        } catch (_: Exception) {
-                            loading = false
-                            prepared = false
-                            playing = false
-                            runCatching { player?.release() }
-                            player = null
-                            Toast.makeText(context, "Не удалось открыть аудиофайл", Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -3464,40 +3439,20 @@ private fun AudioMessagePlayer(
                 )
             }
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text(
-                    title,
-                    color = MainText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
-                )
-                Text(
-                    subtitle,
-                    color = SecondaryText,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    modifier = Modifier.padding(top = 3.dp)
-                )
+                Text(title, color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(subtitle, color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
             }
-            Icon(
-                Icons.Default.GraphicEq,
-                contentDescription = "Аудио",
-                tint = Accent,
-                modifier = Modifier.padding(start = 6.dp).size(22.dp)
-            )
+            Icon(Icons.Default.GraphicEq, contentDescription = "Аудио", tint = Accent, modifier = Modifier.padding(start = 6.dp).size(22.dp))
         }
         Slider(
-            value = if (durationMs > 0L) positionMs.coerceIn(0L, durationMs).toFloat() else 0f,
-            onValueChange = { positionMs = it.toLong() },
+            value = if (active && durationMs > 0L) positionMs.coerceIn(0L, durationMs).toFloat() else 0f,
+            onValueChange = { dragging = true; positionMs = it.toLong() },
             onValueChangeFinished = {
-                if (prepared && durationMs > 0L) {
-                    val target = positionMs.coerceIn(0L, durationMs).toInt()
-                    runCatching { player?.seekTo(target) }
-                    if (playing) runCatching { player?.start() }
-                }
+                if (active && durationMs > 0L) sendAudioAction(AudioPlaybackService.ACTION_SEEK, positionMs.coerceIn(0L, durationMs))
+                dragging = false
             },
             valueRange = 0f..(durationMs.coerceAtLeast(1L).toFloat()),
-            enabled = prepared && durationMs > 0L,
+            enabled = active && durationMs > 0L,
             modifier = Modifier.fillMaxWidth().height(25.dp),
             colors = SliderDefaults.colors(
                 thumbColor = Accent,
@@ -3506,16 +3461,8 @@ private fun AudioMessagePlayer(
             )
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(
-                if (loading) "Загрузка…" else formatTime(positionMs),
-                color = SecondaryText,
-                fontSize = 10.sp
-            )
-            Text(
-                if (durationMs > 0L) formatTime(durationMs) else "--:--",
-                color = SecondaryText,
-                fontSize = 10.sp
-            )
+            Text(if (loading) "Загрузка…" else formatTime(positionMs), color = SecondaryText, fontSize = 10.sp)
+            Text(if (durationMs > 0L) formatTime(durationMs) else "--:--", color = SecondaryText, fontSize = 10.sp)
         }
     }
 }
