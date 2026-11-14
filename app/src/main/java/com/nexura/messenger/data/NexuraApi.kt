@@ -64,16 +64,41 @@ class NexuraApi(private val store: SessionStore) {
             return builder.build()
         }
 
-        var response = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
+        // GET requests are safe to retry. Never automatically replay POST/PATCH/DELETE:
+        // a timeout can happen after the server has already committed a write.
+        val maxAttempts = when {
+            method != "GET" -> 1
+            store.limitedAccessMode -> 3
+            else -> 2
+        }
+        var response: okhttp3.Response? = null
+        var lastNetworkError: IOException? = null
+        for (attempt in 1..maxAttempts) {
+            try {
+                val result = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
+                if (method == "GET" && result.code in 500..599 && attempt < maxAttempts) {
+                    result.close()
+                    kotlinx.coroutines.delay(350L * attempt)
+                    continue
+                }
+                response = result
+                break
+            } catch (e: IOException) {
+                lastNetworkError = e
+                if (attempt == maxAttempts) throw e
+                kotlinx.coroutines.delay(350L * attempt)
+            }
+        }
+        var completedResponse = response ?: throw (lastNetworkError ?: IOException("Нет ответа от сервера"))
         // Refresh an expired access token once, then retry the original request.
-        if (response.code == 401 && auth && !store.refreshToken.isNullOrBlank()) {
-            response.close()
+        if (completedResponse.code == 401 && auth && !store.refreshToken.isNullOrBlank()) {
+            completedResponse.close()
             refreshSession()
             val freshToken = store.accessToken
                 ?: throw IOException("Сессия истекла. Войдите в Nexura ещё раз.")
-            response = client.newCall(buildRequest(freshToken)).execute()
+            completedResponse = client.newCall(buildRequest(freshToken)).execute()
         }
-        response.use {
+        completedResponse.use {
             val responseText = it.body?.string().orEmpty()
             if (!it.isSuccessful) {
                 val message = try {

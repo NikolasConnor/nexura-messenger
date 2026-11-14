@@ -263,8 +263,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    // Monitor the existing Supabase endpoint. This detects reachability problems;
-    // it does not bypass carrier restrictions or change the backend destination.
+    // Monitor the existing Supabase endpoint. Limited mode reduces background traffic
+    // and enables extra retries for safe GET requests; it does not change the server route.
     LaunchedEffect(signedIn, limitedModeEnabled) {
         if (signedIn) {
             delay(5000)
@@ -278,17 +278,24 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     connectionFailures += 1
                     if (connectionFailures >= 2 && !limitedModeEnabled) limitedModePrompt = true
                 }
-                delay(20000)
+                delay(if (limitedModeEnabled) 45000L else 20000L)
             }
         }
     }
 
-    // Keep the open conversation fresh without requiring the user to tap Refresh.
-    // The list is refreshed less often to avoid unnecessary database traffic.
-    LaunchedEffect(signedIn, selected?.id) {
+    // Keep chats refreshed, but reduce polling substantially in limited-access mode.
+    // An open conversation remains on screen during outages; it is not cleared on errors.
+    LaunchedEffect(signedIn, selected?.id, limitedModeEnabled) {
         if (signedIn) {
             while (true) {
-                delay(if (selected != null) 5000L else 20000L)
+                delay(
+                    when {
+                        limitedModeEnabled && selected != null -> 30000L
+                        limitedModeEnabled -> 60000L
+                        selected != null -> 5000L
+                        else -> 20000L
+                    }
+                )
                 try {
                     val currentChat = selected
                     if (currentChat != null) {
@@ -457,11 +464,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Switch(checked = limitedModeEnabled, onCheckedChange = { setLimitedMode(it) })
                                 }
                                 Text(
-                                    "Nexura автоматически проверяет соединение и предложит включить этот режим при повторных сбоях. Переключатель сохраняется на устройстве.",
+                                    if (limitedModeEnabled)
+                                        "Включены дополнительные повторы безопасных запросов чтения. Фоновое обновление чатов замедлено, чтобы экономить мобильный трафик."
+                                    else
+                                        "При повторных сбоях Nexura предложит включить режим. Настройка сохраняется на устройстве.",
                                     color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)
                                 )
                                 Text(
-                                    "Важно: режим повторяет проверки доступности текущего сервера. Он не маскирует трафик и не гарантирует обход ограничений операторов.",
+                                    "Режим помогает переживать кратковременные обрывы, но не обходит блокировки оператора. Для доступа в белых списках требуется официальное разрешение для серверов Nexura.",
                                     color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp)
                                 )
                             }
@@ -516,8 +526,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             )
                                             Text(
                                                 when {
-                                                    limitedModeEnabled && connectionReachable -> "Сервер отвечает. Режим включён."
-                                                    limitedModeEnabled -> "Проверяем доступность сервера. Повторим проверку автоматически."
+                                                    limitedModeEnabled && connectionReachable -> "Сервер доступен. Повторы чтения включены, фоновые запросы реже."
+                                                    limitedModeEnabled -> "Сервер пока недоступен. Повторим проверку автоматически."
                                                     else -> "Nexura не может связаться с сервером. Можно включить режим диагностики."
                                                 },
                                                 color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)
