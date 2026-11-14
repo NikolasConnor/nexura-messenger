@@ -2070,7 +2070,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             containerColor = Surface1,
                             title = { Text("Оформление чата", color = MainText, fontWeight = FontWeight.Bold) },
                             text = {
-                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Text("Фон переписки", color = MainText, fontWeight = FontWeight.SemiBold)
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         wallpaperOptions.chunked(3).forEach { themes ->
