@@ -1,5 +1,6 @@
 package com.nexura.messenger.data
 
+import com.nexura.messenger.BuildConfig
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,21 +37,35 @@ class NexuraApi(private val store: SessionStore) {
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
 
-    suspend fun checkConnection(): Boolean = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("${BASE_URL}/auth/v1/health")
-            .header("apikey", PUBLIC_KEY)
-            .header("Accept", "application/json")
-            .get()
-            .build()
-        client.newCall(request).execute().use { it.isSuccessful }
-    }
+    /** Optional, operator-approved compatible Supabase endpoint supplied at build time. */
+    private val backupBaseUrl: String = BuildConfig.NEXURA_BACKUP_BASE_URL.trim().trimEnd('/')
 
+    private fun readEndpoints(): List<String> = listOf(BASE_URL, backupBaseUrl)
+        .filter { it.isNotBlank() }
+        .distinct()
+
+    suspend fun checkConnection(): Boolean = withContext(Dispatchers.IO) {
+        for (baseUrl in readEndpoints()) {
+            try {
+                val request = Request.Builder()
+                    .url("$baseUrl/auth/v1/health")
+                    .header("apikey", PUBLIC_KEY)
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                val reachable = client.newCall(request).execute().use { it.isSuccessful }
+                if (reachable) return@withContext true
+            } catch (_: IOException) {
+                // Try the next configured, authorized endpoint.
+            }
+        }
+        false
+    }
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
-        fun buildRequest(token: String?): Request {
-            val builder = Request.Builder().url("$BASE_URL$path")
+        fun buildRequest(baseUrl: String, token: String?): Request {
+            val builder = Request.Builder().url("$baseUrl$path")
                 .header("apikey", PUBLIC_KEY)
                 .header("Accept", "application/json")
                 .header("Authorization", "Bearer ${token ?: PUBLIC_KEY}")
@@ -71,22 +86,33 @@ class NexuraApi(private val store: SessionStore) {
             store.limitedAccessMode -> 3
             else -> 2
         }
+        // Writes are deliberately pinned to the primary endpoint: replaying a write
+        // against another server can duplicate or split data after an ambiguous timeout.
+        // Only idempotent GETs may fail over to a configured compatible replica.
+        val endpoints = if (method == "GET") readEndpoints() else listOf(BASE_URL)
         var response: okhttp3.Response? = null
+        var responseBaseUrl = BASE_URL
         var lastNetworkError: IOException? = null
-        for (attempt in 1..maxAttempts) {
-            try {
-                val result = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
-                if (method == "GET" && result.code in 500..599 && attempt < maxAttempts) {
-                    result.close()
-                    kotlinx.coroutines.delay(350L * attempt)
-                    continue
+        endpointLoop@ for (baseUrl in endpoints) {
+            for (attempt in 1..maxAttempts) {
+                try {
+                    val result = client.newCall(buildRequest(baseUrl, if (auth) store.accessToken else null)).execute()
+                    if (method == "GET" && result.code in 500..599 && (attempt < maxAttempts || baseUrl != endpoints.last())) {
+                        result.close()
+                        if (attempt < maxAttempts) kotlinx.coroutines.delay(350L * attempt)
+                        continue
+                    }
+                    response = result
+                    responseBaseUrl = baseUrl
+                    break@endpointLoop
+                } catch (e: IOException) {
+                    lastNetworkError = e
+                    if (attempt < maxAttempts) {
+                        kotlinx.coroutines.delay(350L * attempt)
+                    } else if (baseUrl == endpoints.last()) {
+                        throw e
+                    }
                 }
-                response = result
-                break
-            } catch (e: IOException) {
-                lastNetworkError = e
-                if (attempt == maxAttempts) throw e
-                kotlinx.coroutines.delay(350L * attempt)
             }
         }
         var completedResponse = response ?: throw (lastNetworkError ?: IOException("Нет ответа от сервера"))
@@ -96,7 +122,7 @@ class NexuraApi(private val store: SessionStore) {
             refreshSession()
             val freshToken = store.accessToken
                 ?: throw IOException("Сессия истекла. Войдите в Nexura ещё раз.")
-            completedResponse = client.newCall(buildRequest(freshToken)).execute()
+            completedResponse = client.newCall(buildRequest(responseBaseUrl, freshToken)).execute()
         }
         completedResponse.use {
             val responseText = it.body?.string().orEmpty()
