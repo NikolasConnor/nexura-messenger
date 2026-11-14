@@ -183,6 +183,8 @@ export async function sendBrowserDirectMessage(supabase, {
 
   const recipients = [];
   const stateWrites = [];
+  let skippedPeerDevicesWithoutKeys = 0;
+  let skippedOwnDevicesWithoutKeys = 0;
   const bytes = new TextEncoder().encode(plaintext);
   for (const device of targets) {
     if (device.protocol !== 'olm-v1' || device.bundle_version !== 1) throw new Error('Версия E2EE-устройства не поддерживается');
@@ -196,9 +198,17 @@ export async function sendBrowserDirectMessage(supabase, {
       kind = 'normal'; ciphertext = result.olm_envelope; nextSession = result.session_pickle;
     } else {
       let preKey;
-      try { preKey = await consumePreKey(supabase, chatId, uid, device.user_id, device); }
-      catch (error) {
-        if (device.user_id === uid && /no available one-time key|одноразов.*ключ/i.test(error?.message || '')) continue;
+      try {
+        preKey = await consumePreKey(supabase, chatId, uid, device.user_id, device);
+      } catch (error) {
+        // Accounts can have several historical active devices. One device with an
+        // exhausted pre-key pool must not block delivery to another device that
+        // still has a valid key. Never fall back to plaintext or reuse a key.
+        if (/no available one-time key|одноразов.*ключ/i.test(error?.message || '')) {
+          if (device.user_id === peerId) skippedPeerDevicesWithoutKeys++;
+          else skippedOwnDevicesWithoutKeys++;
+          continue;
+        }
         throw error;
       }
       const { start_outbound_session } = await import('./pkg/nexura_crypto_wasm.js');
@@ -208,7 +218,12 @@ export async function sendBrowserDirectMessage(supabase, {
     recipients.push({ user_id: device.user_id, device_id: device.device_id, kind, ciphertext });
     stateWrites.push([key, nextSession]);
   }
-  if (!recipients.some(r => r.user_id === peerId)) throw new Error('Не удалось подготовить устройство собеседника');
+  if (!recipients.some(r => r.user_id === peerId)) {
+    if (skippedPeerDevicesWithoutKeys > 0) {
+      throw new Error('На устройствах собеседника закончились одноразовые ключи. Ни одно его устройство сейчас не может начать защищённую сессию. Собеседнику нужно открыть Nexura в браузере и дождаться обновления защиты.');
+    }
+    throw new Error('Не удалось подготовить устройство собеседника');
+  }
   const envelope = JSON.stringify({
     protocol: PROTOCOL, conversation_id: chatId, sender_user_id: uid,
     sender_device_id: ownBundle.device_id, sender_curve25519: ownBundle.curve25519,
