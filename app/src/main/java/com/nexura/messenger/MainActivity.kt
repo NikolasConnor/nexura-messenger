@@ -3571,12 +3571,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     val targetId = pinnedMessageId ?: return@clickable
                                     scope.launch {
                                         try {
+                                            chatSearchQuery = ""
                                             val target = api.messages(chat.id, e2eeClient, targetMessageId = targetId).firstOrNull()
                                                 ?: throw IOException("Закреплённое сообщение больше недоступно")
-                                            val before = api.messages(chat.id, e2eeClient, beforeCreatedAt = target.createdAt, pageSize = 30)
-                                            val after = api.messages(chat.id, e2eeClient, afterCreatedAt = target.createdAt, pageSize = 30)
-                                            messages = (messages + before + after + target).distinctBy { it.id }
+                                            // Load the closest page on each side of the pinned row.
+                                            val before = api.messages(
+                                                chat.id, e2eeClient,
+                                                beforeCreatedAt = target.createdAt,
+                                                beforeMessageId = target.id,
+                                                pageSize = 30
+                                            )
+                                            val after = api.messages(
+                                                chat.id, e2eeClient,
+                                                afterCreatedAt = target.createdAt,
+                                                afterMessageId = target.id,
+                                                pageSize = 30,
+                                                ascending = true
+                                            )
+                                            messages = (before + target + after).distinctBy { it.id }
                                                 .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                            hasMoreMessages = before.size >= 30
                                             scrollToMessageId = target.id
                                         } catch (e: Exception) { error = e.message ?: "Не удалось перейти к закреплённому сообщению" }
                                     }
@@ -3658,13 +3672,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (suppressNextAutoScroll) {
                                         suppressNextAutoScroll = false
                                     } else if (visibleMessages.isNotEmpty()) {
-                                        val targetIndex = scrollToMessageId?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
-                                        // Avoid expensive fling animation on every sync, especially on low-memory phones.
-                                        if (lowRamDevice) {
-                                            messageListState.scrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
-                                        } else {
-                                            messageListState.animateScrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
-                                        }
+                                        val requestedTarget = scrollToMessageId
+                                        val targetIndex = requestedTarget?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
+                                        // Never fall back to the newest message during an explicit jump.
+                                        if (requestedTarget != null && targetIndex < 0) return@LaunchedEffect
+                                        val destination = if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex
+                                        if (lowRamDevice) messageListState.scrollToItem(destination)
+                                        else messageListState.animateScrollToItem(destination)
                                         if (targetIndex >= 0) scrollToMessageId = null
                                         initialScrollCompleted = true
                                     }
@@ -3709,13 +3723,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             },
                                         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
                                     ) {
+                                        Column(Modifier.widthIn(max = 320.dp).graphicsLayer { translationX = swipeTranslation }) {
                                         Column(
-                                            Modifier.widthIn(max = 320.dp).graphicsLayer { translationX = swipeTranslation }
-                                                .clip(RoundedCornerShape(
-                                                    topStart = 20.dp, topEnd = 20.dp,
-                                                    bottomStart = if (mine) 20.dp else 6.dp,
-                                                    bottomEnd = if (mine) 6.dp else 20.dp
-                                                )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                            Modifier.clip(RoundedCornerShape(
+                                                topStart = 20.dp, topEnd = 20.dp,
+                                                bottomStart = if (mine) 20.dp else 6.dp,
+                                                bottomEnd = if (mine) 6.dp else 20.dp
+                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
@@ -4062,17 +4076,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }}
                                                 }
                                             }
-                                            val reactionsForMessage = messageReactions[msg.id].orEmpty()
-                                            AnimatedVisibility(
-                                                visible = reactionsForMessage.isNotEmpty(),
-                                                enter = fadeIn() + expandVertically(),
-                                                exit = fadeOut() + shrinkVertically()
+                                        }
+                                        val reactionsForMessage = messageReactions[msg.id].orEmpty()
+                                        AnimatedVisibility(
+                                            visible = reactionsForMessage.isNotEmpty(),
+                                            enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.92f),
+                                            exit = fadeOut() + shrinkVertically()
+                                        ) {
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(top = 4.dp, start = 5.dp, end = 5.dp),
+                                                horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Row(
-                                                    Modifier.fillMaxWidth().padding(top = 7.dp),
-                                                    horizontalArrangement = Arrangement.Start,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
                                                     reactionsForMessage.forEach { reaction ->
                                                         AnimatedReactionChip(
                                                             emoji = reaction.emoji,
