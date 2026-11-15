@@ -1528,7 +1528,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             onValueChange = { usernameDraft = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) },
                             modifier = Modifier.fillMaxWidth().padding(top = 22.dp),
                             singleLine = true,
-                            prefix = { Text("@", color = Accent, fontWeight = FontWeight.Bold) },
+                            leadingIcon = { Text("@", color = Accent, fontWeight = FontWeight.Bold) },
                             placeholder = { Text("username") },
                             shape = RoundedCornerShape(16.dp),
                             colors = authFieldColors()
@@ -1580,7 +1580,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("Имя в Nexura", color = SecondaryText, fontSize = 12.sp)
                                 OutlinedTextField(value = profileName, onValueChange = { profileName = it.take(40) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, placeholder = { Text("Ваше имя") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
                                 Text("Уникальный username", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-                                OutlinedTextField(value = profileUsername, onValueChange = { profileUsername = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, prefix = { Text("@", color = Accent) }, placeholder = { Text("username") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                OutlinedTextField(value = profileUsername, onValueChange = { profileUsername = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, leadingIcon = { Text("@", color = Accent) }, placeholder = { Text("username") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
                                 Text("Аватар", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp, bottom = 7.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙").forEach { emoji ->
