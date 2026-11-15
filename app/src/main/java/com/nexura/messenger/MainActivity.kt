@@ -33,6 +33,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.app.NotificationManagerCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -1553,6 +1554,29 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                         }
                                     )
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val systemNotificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            if (systemNotificationsEnabled) "Уведомления Android разрешены" else "Уведомления заблокированы Android",
+                                            color = if (systemNotificationsEnabled) Success else Danger,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text("Проверьте разрешение системы и настройки канала.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    TextButton(onClick = {
+                                        val settingsIntent = if (Build.VERSION.SDK_INT >= 26) {
+                                            Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                        } else {
+                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                                .setData(Uri.parse("package:${context.packageName}"))
+                                        }
+                                        context.startActivity(settingsIntent)
+                                    }) { Text("Открыть") }
                                 }
                                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
