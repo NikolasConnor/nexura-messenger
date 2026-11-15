@@ -278,6 +278,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var savingProfile by remember { mutableStateOf(false) }
     var showOnlineStatus by remember { mutableStateOf(true) }
     var readReceiptsEnabled by remember { mutableStateOf(true) }
+    var notificationPrefs by remember { mutableStateOf(NotificationPreferences()) }
+    var savingNotificationPrefs by remember { mutableStateOf(false) }
+    var currentChatMuted by remember { mutableStateOf(false) }
+    var showMuteChatDialog by remember { mutableStateOf(false) }
+    var savingChatMute by remember { mutableStateOf(false) }
     var blockedUsers by remember { mutableStateOf(emptyList<UserItem>()) }
     var ownE2eeDevices by remember { mutableStateOf(emptyList<E2eeRemoteDevice>()) }
     var deviceToRevoke by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
@@ -285,6 +290,29 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chatPresence by remember { mutableStateOf<UserPresence?>(null) }
     var confirmBlockProfile by remember { mutableStateOf<UserProfile?>(null) }
     var savingPrivacy by remember { mutableStateOf(false) }
+    val changeCurrentChatMute: (Long?) -> Unit = { durationMs ->
+        val chatId = selected?.id
+        if (chatId != null) {
+            val mutedUntil = when (durationMs) {
+                null -> null
+                Long.MAX_VALUE -> "9999-12-31T23:59:59.999Z"
+                else -> java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+                    .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                    .format(java.util.Date(System.currentTimeMillis() + durationMs))
+            }
+            savingChatMute = true
+            scope.launch {
+                try {
+                    api.setConversationMutedUntil(chatId, mutedUntil)
+                    currentChatMuted = durationMs != null
+                    showMuteChatDialog = false
+                    notice = if (durationMs == null) "Уведомления этого чата включены." else "Уведомления этого чата отключены."
+                } catch (e: Exception) {
+                    error = e.message ?: "Не удалось изменить уведомления чата"
+                } finally { savingChatMute = false }
+            }
+        }
+    }
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
     var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
@@ -355,6 +383,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         if (!client.hasRecoveryKey()) return@LaunchedEffect
         delay(1_500L)
         runCatching { api.syncE2eeBackupIfEnabled(client) }
+    }
+
+    LaunchedEffect(signedIn, selected?.id) {
+        val chatId = selected?.id
+        if (chatId == null) {
+            currentChatMuted = false
+        } else if (signedIn) {
+            currentChatMuted = runCatching { api.isConversationMuted(chatId) }.getOrDefault(false)
+        }
     }
 
     LaunchedEffect(selected?.id, store.userId) {
@@ -1039,6 +1076,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val initialPrivacy = api.privacySettings()
                 showOnlineStatus = initialPrivacy.showOnlineStatus
                 readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
+                notificationPrefs = api.notificationPreferences()
+                context.getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE).edit()
+                    .putBoolean("sound_enabled", notificationPrefs.soundEnabled)
+                    .putBoolean("vibration_enabled", notificationPrefs.vibrationEnabled)
+                    .apply()
                 val latestChats = api.chats()
                 chats = latestChats
                 withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
@@ -1483,6 +1525,88 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
+                            }
+                        }
+                        Text("УВЕДОМЛЕНИЯ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Push-уведомления", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text("Сообщения приходят, даже когда Nexura закрыта.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(
+                                        checked = notificationPrefs.pushEnabled,
+                                        enabled = !savingNotificationPrefs,
+                                        onCheckedChange = { enabled ->
+                                            val previous = notificationPrefs
+                                            notificationPrefs = previous.copy(pushEnabled = enabled)
+                                            savingNotificationPrefs = true
+                                            scope.launch {
+                                                try {
+                                                    notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                                                    notice = if (enabled) "Push-уведомления включены." else "Push-уведомления выключены."
+                                                } catch (e: Exception) {
+                                                    notificationPrefs = previous
+                                                    error = e.message ?: "Не удалось сохранить уведомления"
+                                                } finally { savingNotificationPrefs = false }
+                                            }
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Звук", color = MainText, fontWeight = FontWeight.Medium)
+                                        Text("Звуковой сигнал для новых сообщений.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(
+                                        checked = notificationPrefs.soundEnabled,
+                                        enabled = !savingNotificationPrefs,
+                                        onCheckedChange = { enabled ->
+                                            val previous = notificationPrefs
+                                            notificationPrefs = previous.copy(soundEnabled = enabled)
+                                            savingNotificationPrefs = true
+                                            scope.launch {
+                                                try {
+                                                    notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                                                    context.getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE).edit().putBoolean("sound_enabled", enabled).apply()
+                                                    notice = "Настройка звука сохранена."
+                                                } catch (e: Exception) {
+                                                    notificationPrefs = previous
+                                                    error = e.message ?: "Не удалось сохранить звук"
+                                                } finally { savingNotificationPrefs = false }
+                                            }
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Вибрация", color = MainText, fontWeight = FontWeight.Medium)
+                                        Text("Вибрация при получении сообщения.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(
+                                        checked = notificationPrefs.vibrationEnabled,
+                                        enabled = !savingNotificationPrefs,
+                                        onCheckedChange = { enabled ->
+                                            val previous = notificationPrefs
+                                            notificationPrefs = previous.copy(vibrationEnabled = enabled)
+                                            savingNotificationPrefs = true
+                                            scope.launch {
+                                                try {
+                                                    notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                                                    context.getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE).edit().putBoolean("vibration_enabled", enabled).apply()
+                                                    notice = "Настройка вибрации сохранена."
+                                                } catch (e: Exception) {
+                                                    notificationPrefs = previous
+                                                    error = e.message ?: "Не удалось сохранить вибрацию"
+                                                } finally { savingNotificationPrefs = false }
+                                            }
+                                        }
+                                    )
+                                }
+                                Text("Отдельный чат можно заглушить из меню этого чата.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
                             }
                         }
                         Text("СЕТЬ И ТРАФИК", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -2569,6 +2693,25 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             dismissButton = { TextButton(onClick = { memberToRemove = null }, enabled = !groupManagementBusy) { Text("Отмена") } }
                         )
                     }
+                    if (showMuteChatDialog) {
+                        AlertDialog(
+                            onDismissRequest = { if (!savingChatMute) showMuteChatDialog = false },
+                            containerColor = Surface1,
+                            title = { Text("Отключить уведомления", color = MainText, fontWeight = FontWeight.Bold) },
+                            text = { Text("Выбери, как долго не получать push из этого чата. Остальные чаты продолжат присылать уведомления.", color = SecondaryText) },
+                            confirmButton = {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(60L * 60L * 1000L) }) { Text("На 1 час") }
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(8L * 60L * 60L * 1000L) }) { Text("На 8 часов") }
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(48L * 60L * 60L * 1000L) }) { Text("На 2 дня") }
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(Long.MAX_VALUE) }) { Text("Навсегда") }
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showMuteChatDialog = false }, enabled = !savingChatMute) { Text("Отмена") }
+                            }
+                        )
+                    }
                     if (showChatModeDialog) {
                         AlertDialog(
                             onDismissRequest = { if (!changingChatMode) showChatModeDialog = false },
@@ -3127,7 +3270,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 }
                             }) {
-                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
+                                Text(chat.title + if (currentChatMuted) "  🔕" else "", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
                                 val presence = chatPresence?.takeIf { it.isVisible }
                                 Text(
                                     when {
@@ -3151,6 +3294,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     onDismissRequest = { showChatOptionsMenu = false },
                                     modifier = Modifier.background(Surface1)
                                 ) {
+                                    if (chat.title != "⭐ Избранное") {
+                                        DropdownMenuItem(
+                                            text = { Text(if (currentChatMuted) "Включить уведомления" else "Отключить уведомления") },
+                                            leadingIcon = { Icon(Icons.Default.Notifications, null, tint = if (currentChatMuted) Success else SecondaryText) },
+                                            onClick = {
+                                                showChatOptionsMenu = false
+                                                if (currentChatMuted) changeCurrentChatMute(null) else showMuteChatDialog = true
+                                            }
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = { Text(if (chat.chatMode == "secret") "Переключить на облачный чат" else "Переключить на секретный чат") },
                                         leadingIcon = { Icon(if (chat.chatMode == "secret") Icons.Default.ChatBubbleOutline else Icons.Default.Lock, null) },
