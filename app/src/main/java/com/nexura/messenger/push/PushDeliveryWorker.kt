@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.nexura.messenger.data.NexuraApi
+import com.nexura.messenger.data.NexuraHttpException
 import com.nexura.messenger.data.SessionStore
 import java.util.concurrent.TimeUnit
 
@@ -37,6 +38,8 @@ class PushDeliveryWorker(
             val result = api.dispatchChatPush(conversationId, messageId)
             val failed = result.optInt("retryable_failed", result.optInt("failed", 0))
             if (failed > 0) Result.retry() else Result.success()
+        } catch (e: NexuraHttpException) {
+            if (e.statusCode in 400..499) Result.success() else Result.retry()
         } catch (_: Exception) {
             Result.retry()
         }
