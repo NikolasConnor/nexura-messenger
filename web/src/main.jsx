@@ -833,7 +833,7 @@ function App() {
           {visibleChats.map(chat=><button key={chat.id} className={'chat-item '+(selected?.id===chat.id?'selected':'')} onClick={()=>openChat(chat)}>
             <Avatar value={chat.avatar} name={chat.title}/>
             <div className="chat-meta"><b>{chat.title}</b><span>{chat.kind==='group'?'Группа':'Личная переписка'}</span></div>
-            <div className="chat-trailing">{chat.updated && <time>{timeLabel(chat.updated)}</time>}{chat.unread>0&&<i>{chat.unread}</i>}</div>
+            <div className="chat-trailing">{chat.mutedUntil && Date.parse(chat.mutedUntil)>Date.now()&&<BellOff size={13} className="muted-chat-indicator" aria-label="Уведомления отключены"/>}{chat.updated && <time>{timeLabel(chat.updated)}</time>}{chat.unread>0&&<i>{chat.unread}</i>}</div>
           </button>)}
         </> : <>
           {contactQuery.trim().length<2 && <div className="empty-list"><Users size={24}/><b>Найди собеседника</b><span>Введи минимум два символа имени или имени пользователя.</span></div>}
