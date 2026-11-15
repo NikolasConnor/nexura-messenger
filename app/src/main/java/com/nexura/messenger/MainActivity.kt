@@ -3681,7 +3681,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         val destination = if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex
                                         if (lowRamDevice) messageListState.scrollToItem(destination)
                                         else messageListState.animateScrollToItem(destination)
-                                        if (targetIndex >= 0) scrollToMessageId = null
+                                        if (targetIndex >= 0) {
+                                            // Clearing the request changes this effect's key. Suppress
+                                            // that follow-up pass so it does not jump back to newest.
+                                            suppressNextAutoScroll = true
+                                            scrollToMessageId = null
+                                        }
                                         initialScrollCompleted = true
                                     }
                                 }
