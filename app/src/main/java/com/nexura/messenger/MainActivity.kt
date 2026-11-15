@@ -3131,6 +3131,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 val presence = chatPresence?.takeIf { it.isVisible }
                                 Text(
                                     when {
+                                        chat.title == "⭐ Избранное" -> "Личное пространство · видно только вам"
                                         chat.kind == "group" -> "Групповой чат"
                                         presence?.isOnline == true -> "● В сети"
                                         presence?.lastSeenAt != null -> "Был(а) в ${messageTimeLabel(presence.lastSeenAt)}"
@@ -3650,6 +3651,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             leadingIcon = { Text("↩", color = Accent, fontSize = 18.sp) },
                                                             onClick = { replyTarget = msg; openMessageMenu = null }
                                                         )
+                                                        if (msg.encrypted && !msg.securityWarning && msg.messageType in setOf("text", "media") && chat.title != "⭐ Избранное") {
+                                                            DropdownMenuItem(
+                                                                text = { Text("В Избранное") },
+                                                                leadingIcon = { Icon(Icons.Default.Star, null, tint = Accent) },
+                                                                onClick = {
+                                                                    val savedChat = chats.firstOrNull { it.title == "⭐ Избранное" }
+                                                                    openMessageMenu = null
+                                                                    if (savedChat == null) {
+                                                                        error = "Чат «Избранное» ещё не создан. Обновите список чатов."
+                                                                    } else {
+                                                                        forwardingTarget = msg
+                                                                        forwardingSelectedChatIds = setOf(savedChat.id)
+                                                                        forwardingSearch = ""
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
                                                         if (msg.encrypted && !msg.securityWarning && msg.messageType in setOf("text", "media") && chats.any { it.id != chat.id }) {
                                                             DropdownMenuItem(
                                                                 text = { Text("Переслать") },
