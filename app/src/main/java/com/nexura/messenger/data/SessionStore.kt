@@ -8,6 +8,7 @@ import org.json.JSONObject
 
 class SessionStore(context: Context) {
     private val appContext = context.applicationContext
+    val applicationContext: Context get() = appContext
     val mediaCacheDir: java.io.File
         get() {
             val dir = java.io.File(appContext.cacheDir, "nexura-media-cache")
