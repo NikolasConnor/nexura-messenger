@@ -1538,7 +1538,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 selected == null -> {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (lowDataMode) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp)
+                                    .clip(RoundedCornerShape(14.dp)).background(Surface1)
+                                    .clickable { settingsOpen = true }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("◉", color = Success, fontSize = 16.sp)
+                                Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                                    Text("Режим слабого интернета включён", color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("Экономия трафика · очередь сообщений активна", color = SecondaryText, fontSize = 10.sp)
+                                }
+                                Text("Изменить", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth().padding(top = if (lowDataMode) 10.dp else 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(23.dp))
