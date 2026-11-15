@@ -676,7 +676,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 else -> true
             }
         }
-        .sortedWith(compareByDescending<ChatItem> { favoriteChatIds.contains(it.id) }.thenByDescending { it.updated.orEmpty() })
+        .sortedWith(compareByDescending<ChatItem> { it.title == "⭐ Избранное" }.thenByDescending { favoriteChatIds.contains(it.id) }.thenByDescending { it.updated.orEmpty() })
 
     fun loadChats() {
         scope.launch {
@@ -2212,7 +2212,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
-                                                Text(chatPreviews[chat.id] ?: if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp).weight(1f), maxLines = 1)
+                                                Text(chatPreviews[chat.id] ?: if (chat.title == "⭐ Избранное") "Личные заметки и сохранённые сообщения" else if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp).weight(1f), maxLines = 1)
                                                 if (chat.unreadCount > 0) {
                                                     Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
                                                         Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -3235,7 +3235,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                         }
                                     )
-                                    if (chat.kind == "group") {
+                                    if (chat.kind == "group" && chat.title != "⭐ Избранное") {
                                         DropdownMenuItem(
                                             text = { Text("Участники и настройки группы") },
                                             leadingIcon = { Icon(Icons.Default.GroupAdd, null, tint = Accent) },
