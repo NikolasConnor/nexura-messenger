@@ -9,6 +9,11 @@ import android.widget.Toast
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import java.util.Calendar
+import java.util.concurrent.TimeUnit
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
@@ -833,9 +838,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (chosen.timeInMillis <= System.currentTimeMillis() + 10_000L) {
                     error = "Выберите время хотя бы на 10 секунд позже"
                 } else {
-                    store.saveScheduledText(SessionStore.ScheduledText(
+                    val scheduled = SessionStore.ScheduledText(
                         UUID.randomUUID().toString(), chat.id, text, replyTarget?.id, chosen.timeInMillis
-                    ))
+                    )
+                    store.saveScheduledText(scheduled)
+                    val request = OneTimeWorkRequestBuilder<ScheduledMessageWorker>()
+                        .setInputData(workDataOf(ScheduledMessageWorker.KEY_SCHEDULED_ID to scheduled.id))
+                        .setInitialDelay((scheduled.sendAtMillis - System.currentTimeMillis()).coerceAtLeast(0L), TimeUnit.MILLISECONDS)
+                        .build()
+                    WorkManager.getInstance(context).enqueueUniqueWork(
+                        "nexura-scheduled-${scheduled.id}", ExistingWorkPolicy.KEEP, request
+                    )
                     draft = ""; chatDrafts[chat.id] = ""; replyTarget = null
                     notice = "Сообщение запланировано на " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(chosen.time)
                 }
@@ -891,31 +904,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             val targetChat = chats.firstOrNull { it.id.equals(targetChatId, ignoreCase = true) }
             if (targetChat != null && selected?.id != targetChat.id) {
                 openChat(targetChat)
-            }
-        }
-    }
-
-    LaunchedEffect(signedIn) {
-        if (signedIn) {
-            while (true) {
-                val due = withContext(Dispatchers.IO) {
-                    store.scheduledTexts().filter { it.sendAtMillis <= System.currentTimeMillis() }
-                }
-                due.forEach { item ->
-                    val chat = chats.firstOrNull { it.id == item.chatId }
-                    if (chat != null && messageDelivery[item.id] != "sending" && messageDelivery[item.id] != "sent") {
-                        if (selected?.id == chat.id && messages.none { it.id == item.id }) {
-                            messages = (messages + MessageItem(item.id, store.userId.orEmpty(), item.text,
-                                java.time.Instant.now().toString(), "text", item.replyToId, encrypted = true))
-                                .sortedBy { it.createdAt }
-                        }
-                        dispatchSecureMessage(chat, item.id, item.text, item.replyToId)
-                    }
-                    if (messageDelivery[item.id] == "sent") {
-                        withContext(Dispatchers.IO) { store.removeScheduledText(item.id) }
-                    }
-                }
-                delay(5_000L)
             }
         }
     }
