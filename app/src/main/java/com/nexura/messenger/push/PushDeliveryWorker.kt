@@ -25,6 +25,8 @@ class PushDeliveryWorker(
     override suspend fun doWork(): Result {
         val conversationId = inputData.getString(KEY_CONVERSATION_ID)
             ?: return Result.failure()
+        val messageId = inputData.getString(KEY_MESSAGE_ID)
+            ?: return Result.failure()
         val store = SessionStore(applicationContext)
         if (store.accessToken.isNullOrBlank() && store.refreshToken.isNullOrBlank()) {
             return Result.success()
@@ -32,7 +34,7 @@ class PushDeliveryWorker(
         return try {
             val api = NexuraApi(store, applicationContext)
             api.restoreSession()
-            val result = api.dispatchChatPush(conversationId)
+            val result = api.dispatchChatPush(conversationId, messageId)
             val failed = result.optInt("retryable_failed", result.optInt("failed", 0))
             if (failed > 0) Result.retry() else Result.success()
         } catch (_: Exception) {
@@ -42,13 +44,14 @@ class PushDeliveryWorker(
 
     companion object {
         private const val KEY_CONVERSATION_ID = "conversation_id"
+        private const val KEY_MESSAGE_ID = "message_id"
 
-        fun enqueue(context: Context, conversationId: String) {
+        fun enqueue(context: Context, conversationId: String, messageId: String) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
             val request = OneTimeWorkRequestBuilder<PushDeliveryWorker>()
-                .setInputData(workDataOf(KEY_CONVERSATION_ID to conversationId))
+                .setInputData(workDataOf(KEY_CONVERSATION_ID to conversationId, KEY_MESSAGE_ID to messageId))
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .addTag("nexura-push-delivery")
