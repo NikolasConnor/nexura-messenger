@@ -901,13 +901,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val pinned = metadata[1] as String?
                 val manage = metadata[2] as Boolean
                 val receipt = metadata[3] as String?
-                val savedIds = runCatching { api.savedMessageRefs(chat.id).map { it.messageId }.toSet() }.getOrDefault(emptySet())
                 if (selected?.id == chat.id) {
                     messageReactions = reactions
                     pinnedMessageId = pinned
                     canManagePins = manage
                     peerReadReceiptAt = receipt
-                    savedMessageIds = savedIds
                     chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
                 }
             } catch (e: Exception) {
