@@ -344,6 +344,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
     LaunchedEffect(signedIn, selected?.id) {
+        val chatId = selected?.id
+        if (signedIn && chatId != null) {
+            while (true) {
+                delay(if (lowDataMode) 60_000L else 15_000L)
+                runCatching {
+                    val latestReactions = api.messageReactions(chatId)
+                    val latestPin = api.pinnedMessage(chatId)
+                    if (selected?.id == chatId) {
+                        messageReactions = latestReactions
+                        pinnedMessageId = latestPin
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(signedIn, selected?.id) {
         peerTyping = false
         val chatId = selected?.id
         if (signedIn && chatId != null) {
