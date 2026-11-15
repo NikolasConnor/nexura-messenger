@@ -1035,7 +1035,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         runCatching { syncE2eeBackupIfEnabled(e2ee) }
-        if (inserted.length() == 1) notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId, messageId)
     }
 
     private suspend fun decryptGroupEnvelope(
@@ -1175,7 +1175,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             saved.getJSONObject(0).optString("cloud_content") != cloudContent) {
             throw IOException("Сервер не подтвердил сохранение облачного сообщения")
         }
-        if (inserted.length() == 1) notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId, messageId)
     }
 
     suspend fun sendEncryptedDirectMessage(
@@ -1344,7 +1344,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         runCatching { syncE2eeBackupIfEnabled(e2ee) }
-        if (inserted.length() == 1) notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId, messageId)
     }
 
 
@@ -1442,16 +1442,19 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         )
     }
 
-    suspend fun dispatchChatPush(conversationId: String): JSONObject = JSONObject(call(
+    suspend fun dispatchChatPush(conversationId: String, messageId: String): JSONObject = JSONObject(call(
         "/functions/v1/send-chat-push",
         "POST",
-        JSONObject().put("conversation_id", normalizeUuid(conversationId)).toString()
+        JSONObject()
+            .put("conversation_id", normalizeUuid(conversationId))
+            .put("message_id", normalizeUuid(messageId))
+            .toString()
     ))
 
     // Persist delivery attempts in WorkManager so a process death or temporary network
     // loss after message persistence does not silently discard the push request.
-    private fun notifyChatPush(chatId: String) {
-        appContext?.let { com.nexura.messenger.push.PushDeliveryWorker.enqueue(it, chatId) }
+    private fun notifyChatPush(chatId: String, messageId: String) {
+        appContext?.let { com.nexura.messenger.push.PushDeliveryWorker.enqueue(it, chatId, messageId) }
     }
 
     @Deprecated("Use sendEncryptedDirectMessage; plaintext transport is disabled in this branch.")
