@@ -1,7 +1,7 @@
 name: Nexura v0.2.0 — NEW test APK
 on:
   push:
-    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management ]
+    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins ]
     paths:
       - "app/**"
       - "crypto-core/**"
