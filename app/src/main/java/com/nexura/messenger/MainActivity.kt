@@ -2,6 +2,7 @@ package com.nexura.messenger
 
 import android.Manifest
 import android.content.Intent
+import android.content.Context
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
@@ -572,7 +573,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 when {
                                                     limitedModeEnabled -> "Работа при слабом сигнале"
                                                     !connectionReachable -> "Проблемы с подключением"
-                                                    slowNetworkDetected -> "Медленная мобильная сеть"\n                                                    else -> "Соединение нестабильно"
+                                                    slowNetworkDetected -> "Медленная мобильная сеть"
+                                                    else -> "Соединение нестабильно"
                                                 },
                                                 color = MainText, fontWeight = FontWeight.SemiBold
                                             )
