@@ -1676,6 +1676,14 @@ class NexuraApi(private val store: SessionStore) {
         return rows.getJSONObject(0).optString("member_role") in setOf("owner", "admin")
     }
 
+    suspend fun canPinMessages(chatId: String): Boolean {
+        val uid = store.userId ?: return false
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(chatId)}&user_id=eq.${normalizeUuid(uid)}&limit=1"
+        ))
+        return rows.length() == 1
+    }
+
     suspend fun pinnedMessage(chatId: String): String? {
         val rows = JSONArray(call(
             "/rest/v1/conversation_pins?select=message_id&conversation_id=eq.${normalizeUuid(chatId)}&limit=1"
