@@ -91,6 +91,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -3248,7 +3249,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         if (msg.messageType == "media" && msg.encrypted && !msg.securityWarning) {
                                                             DropdownMenuItem(
                                                                 text = { Text("Скачать на устройство") },
-                                                                leadingIcon = { Icon(Icons.Default.ArrowForward, null, tint = Accent) },
+                                                                leadingIcon = { Icon(Icons.Default.Download, null, tint = Accent) },
                                                                 onClick = {
                                                                     openMessageMenu = null
                                                                     try {
