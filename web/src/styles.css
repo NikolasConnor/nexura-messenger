@@ -633,3 +633,25 @@ body{overscroll-behavior:none}
 .pending-chat-media .pending-image-preview{display:block;width:min(220px,42vw);max-height:180px;object-fit:cover;border-radius:9px}
 .pending-chat-media .pending-video-preview{display:block;width:min(230px,45vw);max-height:170px;border-radius:9px}
 .pending-chat-media .pending-file-icon{font-size:24px;flex:0 0 auto}
+
+.notification-modal,.mute-modal{max-width:540px}
+.notification-status{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:#ffffff06;margin:4px 0 12px}
+.notification-status-icon{width:40px;height:40px;display:grid;place-items:center;border-radius:12px;background:#a78bfa20;color:#c4b5fd;flex:0 0 auto}
+.notification-status>div:nth-child(2){display:grid;gap:4px;flex:1;min-width:0}
+.notification-status b,.notification-setting-row b{font-size:13px}
+.notification-status span,.notification-setting-row span{font-size:11px;color:var(--muted);line-height:1.45}
+.notification-setting-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 3px;border-bottom:1px solid var(--line)}
+.notification-setting-row>div{display:grid;gap:5px;min-width:0}
+.notification-setting-row b{display:flex;align-items:center;gap:7px}
+.notification-setting-row input[type=checkbox]{appearance:none;width:42px;height:24px;border-radius:20px;background:#514b60;border:1px solid #ffffff20;position:relative;flex:0 0 auto;cursor:pointer;transition:background .18s}
+.notification-setting-row input[type=checkbox]:after{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;left:2px;top:2px;transition:transform .18s}
+.notification-setting-row input[type=checkbox]:checked{background:#8b6de0}
+.notification-setting-row input[type=checkbox]:checked:after{transform:translateX(18px)}
+.notification-setting-row input[type=checkbox]:disabled{opacity:.55;cursor:wait}
+.notification-footnote{font-size:11px;line-height:1.55;color:var(--muted);margin:15px 2px 0}
+.mute-options{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:16px}
+.mute-options button,.secondary-btn{border:1px solid var(--line);border-radius:11px;background:#ffffff08;padding:12px 14px;color:var(--text,#f7f4ff);font-size:13px;font-weight:600}
+.mute-options button:hover,.secondary-btn:hover{background:#a78bfa20;border-color:#a78bfa55}
+.mute-options button:disabled,.secondary-btn:disabled{opacity:.55;cursor:wait}
+.notification-status .secondary-btn{padding:9px 12px;white-space:nowrap}
+@media(max-width:520px){.notification-status{align-items:flex-start;flex-wrap:wrap}.notification-status .secondary-btn{margin-left:52px}.mute-options{grid-template-columns:1fr}}
