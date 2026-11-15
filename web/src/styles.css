@@ -655,3 +655,5 @@ body{overscroll-behavior:none}
 .mute-options button:disabled,.secondary-btn:disabled{opacity:.55;cursor:wait}
 .notification-status .secondary-btn{padding:9px 12px;white-space:nowrap}
 @media(max-width:520px){.notification-status{align-items:flex-start;flex-wrap:wrap}.notification-status .secondary-btn{margin-left:52px}.mute-options{grid-template-columns:1fr}}
+
+.muted-chat-indicator{color:#b8a5e8;flex:0 0 auto;opacity:.9}
