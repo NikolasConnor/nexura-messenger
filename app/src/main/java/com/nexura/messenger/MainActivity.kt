@@ -3427,7 +3427,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             ) {
                                 if (peerTyping) {
                                     Text("Печатает…", color = Accent, fontSize = 11.sp,
-                                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, bottom = 5.dp))
+                                        modifier = Modifier.padding(start = 4.dp, end = 3.dp, bottom = 5.dp))
                                 }
                                 IconButton(
                                     onClick = { mediaPicker.launch(arrayOf("*/*")) },
