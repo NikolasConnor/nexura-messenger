@@ -2327,7 +2327,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             item { FilterChip(selected = chatListFilter == "all", onClick = { chatListFilter = "all" }, label = { Text("Все чаты") }) }
                             item { FilterChip(selected = chatListFilter == "unread", onClick = { chatListFilter = "unread" }, label = { Text("Непрочитанные") }) }
                             item { FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранные чаты") }) }
-                            item { FilterChip(selected = false, onClick = { loadSavedMessages() }, label = { Text("Избранные сообщения") }) }
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         if (visibleChats.isEmpty()) {
