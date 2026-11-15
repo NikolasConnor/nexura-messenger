@@ -2322,7 +2322,8 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
     }
 
     suspend fun listUsers(query: String = "", offset: Int = 0, pageSize: Int = 50): List<UserItem> {
-        val cleanQuery = query.trim()
+        val cleanQuery = query.trim().removePrefix("@")
+        if (cleanQuery.length == 1) return emptyList()
         val filter = if (cleanQuery.isBlank()) "" else {
             val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8").replace("+", "%20")
             "&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)"
