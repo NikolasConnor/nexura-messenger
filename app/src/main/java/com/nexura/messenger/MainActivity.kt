@@ -391,7 +391,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         if (chatId == null) {
             currentChatMuted = false
         } else if (signedIn) {
-            currentChatMuted = runCatching { api.isConversationMuted(chatId) }.getOrDefault(false)
+            while (true) {
+                currentChatMuted = runCatching { api.isConversationMuted(chatId) }.getOrDefault(false)
+                delay(60_000L)
+            }
         }
     }
 
@@ -1077,7 +1080,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val initialPrivacy = api.privacySettings()
                 showOnlineStatus = initialPrivacy.showOnlineStatus
                 readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
-                notificationPrefs = api.notificationPreferences()
+                notificationPrefs = try { api.notificationPreferences() } catch (_: Exception) { NotificationPreferences() }
                 context.getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE).edit()
                     .putBoolean("sound_enabled", notificationPrefs.soundEnabled)
                     .putBoolean("vibration_enabled", notificationPrefs.vibrationEnabled)
