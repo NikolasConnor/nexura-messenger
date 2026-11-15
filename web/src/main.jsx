@@ -282,6 +282,12 @@ function App() {
   }, [session?.user?.id]);
 
   useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register(import.meta.env.BASE_URL + 'sw.js', { scope: import.meta.env.BASE_URL })
+      .catch(error => setNotice('Не удалось включить системные уведомления браузера: ' + (error?.message || 'ошибка')));
+  }, []);
+
+  useEffect(() => {
     if (!session?.user?.id) return;
     let active = true;
     supabase.from('notification_preferences').select('push_enabled,show_message_preview,sound_enabled,vibration_enabled').eq('user_id', session.user.id).maybeSingle()
@@ -428,10 +434,19 @@ function App() {
           if (context.prefs.push_enabled && !muted && document.visibilityState !== 'visible' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
             const encrypted = isEncrypted(payload.new.content || '');
             const body = context.prefs.show_message_preview && !encrypted ? String(payload.new.content || '').slice(0, 120) : 'Новое сообщение';
-            try {
-              new Notification(chat?.title || 'Nexura', { body, tag: 'nexura-' + payload.new.conversation_id, silent: !context.prefs.sound_enabled, renotify: false });
-              if (context.prefs.vibration_enabled && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([120, 60, 120]);
-            } catch { /* Browser notification APIs may be restricted by the current context. */ }
+            const options = { body, tag: 'nexura-' + payload.new.conversation_id, silent: !context.prefs.sound_enabled, renotify: false, data: { url: window.location.href } };
+            const showNotification = async () => {
+              try {
+                if ('serviceWorker' in navigator) {
+                  const registration = await navigator.serviceWorker.ready;
+                  await registration.showNotification(chat?.title || 'Nexura', options);
+                } else {
+                  new Notification(chat?.title || 'Nexura', options);
+                }
+                if (context.prefs.vibration_enabled && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([120, 60, 120]);
+              } catch { /* Browser notification APIs may be restricted by the current context. */ }
+            };
+            showNotification();
           }
         }
         if (refreshTimer) clearTimeout(refreshTimer);
