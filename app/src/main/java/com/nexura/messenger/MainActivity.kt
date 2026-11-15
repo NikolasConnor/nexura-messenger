@@ -1029,6 +1029,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             error = ""
             try {
                 api.consumeAuthCallback(authCallback)
+                usernameSetupRequired = true
                 signedIn = !store.accessToken.isNullOrBlank()
                 notice = "Добро пожаловать в Nexura!"
             } catch (e: Exception) {
