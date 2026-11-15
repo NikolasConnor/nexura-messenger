@@ -149,7 +149,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         incomingDeepLink = intent?.data
         val store = SessionStore(this)
-        val api = NexuraApi(store)
+        val api = NexuraApi(store, applicationContext)
         setContent { NexuraApp(api, store, incomingDeepLink) }
     }
 
