@@ -2045,13 +2045,17 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
             val emailName = authUser.optString("email").substringBefore("@").takeIf { it.isNotBlank() } ?: "Пользователь"
             val display = metadata.optString("display_name").ifBlank { emailName }
-            val username = metadata.optString("username").trim().removePrefix("@").lowercase(java.util.Locale.US)
-                .takeIf { it.isNotBlank() }
+            val metadataUsername = metadata.optString("username").trim().removePrefix("@").lowercase(java.util.Locale.US)
+                .takeIf { it.matches(Regex("^[a-z][a-z0-9_]{2,23}$")) }
             call("/rest/v1/profiles", "POST",
-                JSONObject().put("id", uid).put("display_name", display).put("username", username ?: JSONObject.NULL)
-                    .put("avatar_url", "🙂").toString(),
+                JSONObject().put("id", uid).put("display_name", display).put("avatar_url", "🙂").toString(),
                 prefer = "return=minimal")
-            return UserProfile(uid, display, username.orEmpty(), "🙂", "", null)
+            var savedUsername = ""
+            if (!metadataUsername.isNullOrBlank()) {
+                runCatching { updateMyUsername(metadataUsername) }
+                    .onSuccess { savedUsername = metadataUsername }
+            }
+            return UserProfile(uid, display, savedUsername, "🙂", "", null)
         }
         val p = raw.getJSONObject(0)
         var username = p.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
