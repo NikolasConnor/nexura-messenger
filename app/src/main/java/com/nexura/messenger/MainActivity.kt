@@ -1052,7 +1052,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    LaunchedEffect(homeTab, contactsSearch) {
+    LaunchedEffect(signedIn, usernameSetupRequired, homeTab, contactsSearch) {
         if (signedIn && homeTab == "contacts" && !usernameSetupRequired) {
             delay(250L)
             contactsLoading = true
