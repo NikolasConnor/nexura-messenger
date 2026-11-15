@@ -2917,7 +2917,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
-                                                    onLongClick = { reactionPickerFor = null; openMessageMenu = msg.id }
+                                                    onLongClick = { openMessageMenu = null; reactionPickerFor = msg.id }
                                                 )
                                                 .padding(horizontal = 15.dp, vertical = 12.dp)
                                         ) {
