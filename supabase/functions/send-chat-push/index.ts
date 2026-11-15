@@ -104,23 +104,27 @@ Deno.serve(async (req: Request) => {
     const messageId = body?.message_id;
     const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (typeof conversationId !== "string" || !uuidPattern.test(conversationId) ||
-        typeof messageId !== "string" || !uuidPattern.test(messageId)) {
-      return Response.json({ error: "Valid conversation_id and message_id UUIDs are required" }, { status: 400, headers: cors });
+        (messageId != null && (typeof messageId !== "string" || !uuidPattern.test(messageId)))) {
+      return Response.json({ error: "A valid conversation_id UUID and optional message_id UUID are required" }, { status: 400, headers: cors });
     }
 
     const headers = { apikey: serviceKey, Authorization: "Bearer " + serviceKey };
-    const messageResponse = await fetch(
-      url + "/rest/v1/messages?select=id,sender_id&conversation_id=eq." +
-        encodeURIComponent(conversationId) + "&id=eq." + encodeURIComponent(messageId) + "&limit=1",
-      { headers }
-    );
-    if (!messageResponse.ok) throw new Error("Unable to verify persisted message");
-    const persistedMessages = await messageResponse.json();
-    if (persistedMessages.length !== 1) {
-      return Response.json({ error: "Message not found" }, { status: 404, headers: cors });
-    }
-    if (persistedMessages[0].sender_id !== user.id) {
-      return Response.json({ error: "Only the message sender can request its notification" }, { status: 403, headers: cors });
+    // New clients pass a stable message ID so retries are idempotent and ownership is checked.
+    // Keep the field optional for older installed Nexura builds that still call this endpoint.
+    if (typeof messageId === "string") {
+      const messageResponse = await fetch(
+        url + "/rest/v1/messages?select=id,sender_id&conversation_id=eq." +
+          encodeURIComponent(conversationId) + "&id=eq." + encodeURIComponent(messageId) + "&limit=1",
+        { headers }
+      );
+      if (!messageResponse.ok) throw new Error("Unable to verify persisted message");
+      const persistedMessages = await messageResponse.json();
+      if (persistedMessages.length !== 1) {
+        return Response.json({ error: "Message not found" }, { status: 404, headers: cors });
+      }
+      if (persistedMessages[0].sender_id !== user.id) {
+        return Response.json({ error: "Only the message sender can request its notification" }, { status: 403, headers: cors });
+      }
     }
     const membersResponse = await fetch(
       url + "/rest/v1/conversation_members?select=user_id,muted_until&conversation_id=eq." + encodeURIComponent(conversationId),
@@ -173,13 +177,13 @@ Deno.serve(async (req: Request) => {
     const title = conversation.kind === "group" && typeof conversation.title === "string" && conversation.title.trim()
       ? conversation.title.trim().slice(0, 80)
       : "Nexura";
-    const data = {
+    const data: Record<string, string> = {
       type: "chat_message",
       title,
       body: "Новое сообщение",
-      conversation_id: conversationId,
-      message_id: messageId
+      conversation_id: conversationId
     };
+    if (typeof messageId === "string") data.message_id = messageId;
 
     const service = JSON.parse(serviceJson);
     const accessToken = await firebaseAccessToken(service);
