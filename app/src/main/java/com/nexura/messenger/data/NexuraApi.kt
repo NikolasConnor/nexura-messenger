@@ -29,9 +29,9 @@ class NexuraApi(private val store: SessionStore) {
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .writeTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(45, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
@@ -248,19 +248,20 @@ class NexuraApi(private val store: SessionStore) {
         } catch (_: Exception) { }
     }
 
-    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null) {
+    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null, messageId: String = UUID.randomUUID().toString()) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val safeChatId = normalizeUuid(chatId)
         val content = text.trim()
         if (content.isEmpty()) throw IOException("Введите текст сообщения")
         if (content.length > 20000) throw IOException("Сообщение слишком длинное. Максимум — 20 000 символов.")
         val payload = JSONObject()
+            .put("id", normalizeUuid(messageId))
             .put("conversation_id", safeChatId)
             .put("sender_id", normalizeUuid(uid))
             .put("message_type", "text")
             .put("content", content)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
-        call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
+        call("/rest/v1/messages", "POST", payload.toString(), prefer = "resolution=ignore-duplicates,return=minimal")
     }
 
     suspend fun sendPushForMessage(chatId: String, preview: String) { notifyChatPush(chatId, preview) }
