@@ -2043,7 +2043,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 }
                                             }
                                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                                TextButton(onClick = { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } }) { Text("♥  Лайк", color = Accent) }
+                                                TextButton(onClick = { scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.toggleStoryLike(item.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) { Text("♥  Лайк", color = Accent) }
                                                 if (item.userId != store.userId) TextButton(onClick = { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } }) { Text("Ответить в личку", color = Accent) }
                                             }
                                         }
