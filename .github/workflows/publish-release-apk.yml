@@ -24,7 +24,7 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag }}
+          ref: main
 
       - name: Check release signing secrets
         env:
