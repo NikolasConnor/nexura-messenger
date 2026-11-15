@@ -32,6 +32,8 @@ data class SocialMediaItem(
     val id: String, val userId: String, val storagePath: String, val mediaType: String,
     val caption: String, val createdAt: String, val expiresAt: String?, val mediaUrl: String
 )
+data class SocialPhotoComment(val id: String, val userId: String, val content: String, val createdAt: String)
+data class SocialReactionState(val count: Int, val likedByMe: Boolean)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
@@ -2119,6 +2121,73 @@ class NexuraApi(private val store: SessionStore) {
         val table = if (story) "user_stories" else "profile_photos"
         call("/rest/v1/$table?id=eq.${normalizeUuid(item.id)}", "DELETE", prefer = "return=minimal")
         call("/storage/v1/object/nexura-social-media/${item.storagePath}", "DELETE", prefer = "return=minimal")
+    }
+
+    suspend fun profilePhotoReaction(photoId: String): SocialReactionState {
+        val id = normalizeUuid(photoId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call("/rest/v1/profile_photo_likes?select=user_id&photo_id=eq.$id"))
+        var liked = false
+        for (i in 0 until rows.length()) if (rows.optJSONObject(i)?.optString("user_id") == uid) liked = true
+        return SocialReactionState(rows.length(), liked)
+    }
+
+    suspend fun toggleProfilePhotoLike(photoId: String): SocialReactionState {
+        val id = normalizeUuid(photoId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val existing = JSONArray(call("/rest/v1/profile_photo_likes?select=id&photo_id=eq.$id&user_id=eq.$uid&limit=1"))
+        if (existing.length() > 0) {
+            val likeId = existing.getJSONObject(0).optString("id")
+            call("/rest/v1/profile_photo_likes?id=eq.${normalizeUuid(likeId)}", "DELETE", prefer = "return=minimal")
+        } else {
+            call("/rest/v1/profile_photo_likes", "POST",
+                JSONObject().put("photo_id", id).put("user_id", uid).toString(), prefer = "return=minimal")
+        }
+        return profilePhotoReaction(id)
+    }
+
+    suspend fun profilePhotoComments(photoId: String): List<SocialPhotoComment> {
+        val id = normalizeUuid(photoId)
+        val rows = JSONArray(call("/rest/v1/profile_photo_comments?select=id,user_id,content,created_at&photo_id=eq.$id&order=created_at.asc&limit=200"))
+        return (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            SocialPhotoComment(row.optString("id"), row.optString("user_id"), row.optString("content"),
+                row.optString("created_at"))
+        }
+    }
+
+    suspend fun addProfilePhotoComment(photoId: String, content: String): SocialPhotoComment {
+        val id = normalizeUuid(photoId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val clean = content.trim()
+        if (clean.isBlank() || clean.length > 1000) throw IOException("Комментарий должен содержать от 1 до 1000 символов")
+        val row = JSONObject().put("photo_id", id).put("user_id", uid).put("content", clean)
+        val saved = JSONArray(call("/rest/v1/profile_photo_comments", "POST", row.toString(), prefer = "return=representation"))
+            .optJSONObject(0) ?: throw IOException("Комментарий не сохранился")
+        return SocialPhotoComment(saved.optString("id"), uid, clean, saved.optString("created_at"))
+    }
+
+    suspend fun storyReaction(storyId: String): SocialReactionState {
+        val id = normalizeUuid(storyId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call("/rest/v1/user_story_likes?select=user_id&story_id=eq.$id"))
+        var liked = false
+        for (i in 0 until rows.length()) if (rows.optJSONObject(i)?.optString("user_id") == uid) liked = true
+        return SocialReactionState(rows.length(), liked)
+    }
+
+    suspend fun toggleStoryLike(storyId: String): SocialReactionState {
+        val id = normalizeUuid(storyId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val existing = JSONArray(call("/rest/v1/user_story_likes?select=id&story_id=eq.$id&user_id=eq.$uid&limit=1"))
+        if (existing.length() > 0) {
+            val likeId = existing.getJSONObject(0).optString("id")
+            call("/rest/v1/user_story_likes?id=eq.${normalizeUuid(likeId)}", "DELETE", prefer = "return=minimal")
+        } else {
+            call("/rest/v1/user_story_likes", "POST",
+                JSONObject().put("story_id", id).put("user_id", uid).toString(), prefer = "return=minimal")
+        }
+        return storyReaction(id)
     }
 
     suspend fun matchContacts(phoneNumbers: List<String>): List<ContactMatch> {
