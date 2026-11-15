@@ -33,7 +33,7 @@ class PushDeliveryWorker(
             val api = NexuraApi(store, applicationContext)
             api.restoreSession()
             val result = api.dispatchChatPush(conversationId)
-            val failed = result.optInt("failed", 0)
+            val failed = result.optInt("retryable_failed", result.optInt("failed", 0))
             if (failed > 0) Result.retry() else Result.success()
         } catch (_: Exception) {
             Result.retry()
