@@ -75,6 +75,51 @@ class SessionStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
+
+    data class ScheduledText(val id: String, val chatId: String, val text: String, val replyToId: String?, val sendAtMillis: Long)
+
+    @Synchronized
+    fun saveScheduledText(item: ScheduledText) {
+        val all = readScheduledTexts().filterNot { it.id == item.id } + item
+        val array = JSONArray()
+        all.forEach { value ->
+            array.put(JSONObject().put("id", value.id).put("chat_id", value.chatId)
+                .put("text", value.text).put("reply_to_id", value.replyToId ?: JSONObject.NULL)
+                .put("send_at", value.sendAtMillis))
+        }
+        prefs.edit().putString("scheduled_texts", array.toString()).apply()
+    }
+
+    @Synchronized
+    fun scheduledTexts(): List<ScheduledText> = readScheduledTexts()
+
+    @Synchronized
+    fun removeScheduledText(id: String) {
+        val array = JSONArray()
+        readScheduledTexts().filterNot { it.id == id }.forEach { value ->
+            array.put(JSONObject().put("id", value.id).put("chat_id", value.chatId)
+                .put("text", value.text).put("reply_to_id", value.replyToId ?: JSONObject.NULL)
+                .put("send_at", value.sendAtMillis))
+        }
+        prefs.edit().putString("scheduled_texts", array.toString()).apply()
+    }
+
+    private fun readScheduledTexts(): List<ScheduledText> {
+        val raw = prefs.getString("scheduled_texts", null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            (0 until array.length()).mapNotNull { index ->
+                val value = array.optJSONObject(index) ?: return@mapNotNull null
+                val id = value.optString("id")
+                val chatId = value.optString("chat_id")
+                val text = value.optString("text")
+                val sendAt = value.optLong("send_at", 0L)
+                if (id.isBlank() || chatId.isBlank() || text.isBlank() || sendAt <= 0L) null
+                else ScheduledText(id, chatId, text, value.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }, sendAt)
+            }.sortedBy { it.sendAtMillis }
+        }.getOrDefault(emptyList())
+    }
+
     fun clear() { prefs.edit().clear().apply() }
 }
 
