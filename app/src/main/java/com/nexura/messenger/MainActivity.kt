@@ -3670,10 +3670,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                 }
                                 LaunchedEffect(chat.id, visibleMessages.size, chatSearchQuery, scrollToMessageId) {
-                                    if (suppressNextAutoScroll) {
+                                    val requestedTarget = scrollToMessageId
+                                    if (suppressNextAutoScroll && requestedTarget == null) {
                                         suppressNextAutoScroll = false
                                     } else if (visibleMessages.isNotEmpty()) {
-                                        val requestedTarget = scrollToMessageId
+                                        if (suppressNextAutoScroll) suppressNextAutoScroll = false
                                         val targetIndex = requestedTarget?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
                                         // Never fall back to the newest message during an explicit jump.
                                         if (requestedTarget != null && targetIndex < 0) return@LaunchedEffect
