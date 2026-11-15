@@ -2052,9 +2052,11 @@ class NexuraApi(private val store: SessionStore) {
         val path = uploadSocialObject(bytes, mimeType, "photos")
         try {
             val row = JSONObject().put("user_id", uid).put("storage_path", path).put("caption", caption.trim().take(500))
-            call("/rest/v1/profile_photos", "POST", row.toString(), prefer = "return=representation")
+            val inserted = JSONArray(call("/rest/v1/profile_photos", "POST", row.toString(), prefer = "return=representation"))
+            val saved = inserted.optJSONObject(0) ?: throw IOException("Фото не сохранилось")
             val url = socialSignedUrl(path)
-            return SocialMediaItem(UUID.randomUUID().toString(), uid, path, "image", caption.trim(), java.time.Instant.now().toString(), null, url)
+            return SocialMediaItem(saved.optString("id"), uid, path, "image", saved.optString("caption"),
+                saved.optString("created_at"), null, url)
         } catch (e: Exception) {
             runCatching { call("/storage/v1/object/nexura-social-media/$path", "DELETE", auth = true) }
             throw e
