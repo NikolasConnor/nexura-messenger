@@ -690,8 +690,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val chatById = chats.associateBy { it.id }
                 val loaded = mutableMapOf<String, MessageItem>()
                 refs.groupBy { it.conversationId }.forEach { (conversationId, groupRefs) ->
-                    val found = api.messages(conversationId, e2eeClient, targetMessageIds = groupRefs.map { it.messageId })
-                    found.forEach { loaded[it.id] = it }
+                    groupRefs.chunked(100).forEach { chunk ->
+                        val found = api.messages(
+                            conversationId, e2eeClient,
+                            pageSize = chunk.size.coerceAtLeast(1),
+                            targetMessageIds = chunk.map { it.messageId }
+                        )
+                        found.forEach { loaded[it.id] = it }
+                    }
                 }
                 savedMessageRows = refs.mapNotNull { ref ->
                     val chat = chatById[ref.conversationId] ?: return@mapNotNull null
