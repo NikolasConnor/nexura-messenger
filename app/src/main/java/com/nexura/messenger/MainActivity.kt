@@ -310,6 +310,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupUsers by remember { mutableStateOf(emptyList<UserItem>()) }
     var selectedGroupUsers by remember { mutableStateOf(emptySet<String>()) }
     var creatingGroup by remember { mutableStateOf(false) }
+    var groupManagementOpen by remember { mutableStateOf(false) }
+    var groupManagementBusy by remember { mutableStateOf(false) }
+    var groupManagerCanEdit by remember { mutableStateOf(false) }
+    var groupMembers by remember { mutableStateOf(emptyList<GroupMemberItem>()) }
+    var groupNameDraft by remember { mutableStateOf("") }
+    var groupSearchDraft by remember { mutableStateOf("") }
+    var groupSearchResults by remember { mutableStateOf(emptyList<UserItem>()) }
+    var savedMessagesOpen by remember { mutableStateOf(false) }
+    var savedMessagesLoading by remember { mutableStateOf(false) }
+    var savedMessageRows by remember { mutableStateOf(emptyList<Triple<ChatItem, MessageItem, String>>()) }
+    var savedMessageIds by remember { mutableStateOf(emptySet<String>()) }
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var forwardingTarget by remember { mutableStateOf<MessageItem?>(null) }
@@ -670,6 +681,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
         .sortedWith(compareByDescending<ChatItem> { favoriteChatIds.contains(it.id) }.thenByDescending { it.updated.orEmpty() })
 
+    fun loadSavedMessages() {
+        savedMessagesOpen = true
+        savedMessagesLoading = true
+        scope.launch {
+            try {
+                val refs = api.savedMessageRefs()
+                val chatById = chats.associateBy { it.id }
+                val loaded = mutableMapOf<String, MessageItem>()
+                refs.groupBy { it.conversationId }.forEach { (conversationId, groupRefs) ->
+                    val found = api.messages(conversationId, e2eeClient, targetMessageIds = groupRefs.map { it.messageId })
+                    found.forEach { loaded[it.id] = it }
+                }
+                savedMessageRows = refs.mapNotNull { ref ->
+                    val chat = chatById[ref.conversationId] ?: return@mapNotNull null
+                    val message = loaded[ref.messageId] ?: return@mapNotNull null
+                    Triple(chat, message, ref.savedAt)
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось загрузить избранные сообщения"
+                savedMessageRows = emptyList()
+            } finally { savedMessagesLoading = false }
+        }
+    }
+
     fun loadChats() {
         scope.launch {
             busy = true
@@ -779,7 +814,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
 
-    fun openChat(chat: ChatItem) {
+    fun openChat(chat: ChatItem, jumpToMessageId: String? = null) {
         selected?.let { previous -> chatDrafts[previous.id] = draft }
         selected = chat
         peerReadReceiptAt = null
@@ -832,6 +867,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val loadedMessages = withContext(Dispatchers.IO) {
                     api.messages(activeChat.id, e2eeClient, pageSize = 20)
                 }
+                val jumpMessages = if (!jumpToMessageId.isNullOrBlank()) withContext(Dispatchers.IO) {
+                    val target = api.messages(activeChat.id, e2eeClient, targetMessageId = jumpToMessageId).firstOrNull()
+                    if (target == null) emptyList() else {
+                        val before = api.messages(activeChat.id, e2eeClient, beforeCreatedAt = target.createdAt, pageSize = 30)
+                        val after = api.messages(activeChat.id, e2eeClient, afterCreatedAt = target.createdAt, pageSize = 30)
+                        (before + after + target).distinctBy { it.id }
+                    }
+                } else emptyList()
                 val pendingForChat = withContext(Dispatchers.IO) {
                     e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == activeChat.id }
                 }
@@ -844,8 +887,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     )
                 }
                 // Prefer freshly decrypted server rows, while retaining older cached pages.
-                messages = (loadedMessages + cachedMessages + pendingItems).distinctBy { it.id }
+                messages = (loadedMessages + cachedMessages + pendingItems + jumpMessages).distinctBy { it.id }
                     .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                if (jumpMessages.isNotEmpty()) scrollToMessageId = jumpToMessageId
                 withContext(Dispatchers.IO) {
                     localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
                 }
@@ -879,11 +923,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val pinned = metadata[1] as String?
                 val manage = metadata[2] as Boolean
                 val receipt = metadata[3] as String?
+                val savedIds = runCatching { api.savedMessageRefs(chat.id).map { it.messageId }.toSet() }.getOrDefault(emptySet())
                 if (selected?.id == chat.id) {
                     messageReactions = reactions
                     pinnedMessageId = pinned
                     canManagePins = manage
                     peerReadReceiptAt = receipt
+                    savedMessageIds = savedIds
                     chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
                 }
             } catch (e: Exception) {
@@ -2152,7 +2198,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         ) {
                             item { FilterChip(selected = chatListFilter == "all", onClick = { chatListFilter = "all" }, label = { Text("Все чаты") }) }
                             item { FilterChip(selected = chatListFilter == "unread", onClick = { chatListFilter = "unread" }, label = { Text("Непрочитанные") }) }
-                            item { FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранное") }) }
+                            item { FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранные чаты") }) }
+                            item { FilterChip(selected = false, onClick = { loadSavedMessages() }, label = { Text("Избранные сообщения") }) }
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         if (visibleChats.isEmpty()) {
@@ -2212,6 +2259,48 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                        }
+                        if (savedMessagesOpen) {
+                            AlertDialog(
+                                onDismissRequest = { savedMessagesOpen = false },
+                                containerColor = Surface1,
+                                title = { Text("Избранные сообщения", color = MainText, fontWeight = FontWeight.Bold) },
+                                text = {
+                                    Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                                        when {
+                                            savedMessagesLoading -> Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.Center) {
+                                                CircularProgressIndicator(color = Accent, modifier = Modifier.size(22.dp))
+                                            }
+                                            savedMessageRows.isEmpty() -> Text("Здесь будут сообщения, которые вы сохраните из переписок.", color = SecondaryText, fontSize = 13.sp)
+                                            else -> savedMessageRows.forEach { (savedChat, savedMessage, savedAt) ->
+                                                Row(
+                                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface2)
+                                                        .clickable {
+                                                            savedMessagesOpen = false
+                                                            openChat(savedChat, savedMessage.id)
+                                                        }.padding(10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(Modifier.weight(1f)) {
+                                                        Text(savedChat.title, color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                        Text(savedMessage.content.take(180).ifBlank { "Вложение" }, color = MainText, fontSize = 13.sp, maxLines = 3)
+                                                        Text(messageTimeLabel(savedMessage.createdAt), color = SecondaryText, fontSize = 10.sp)
+                                                    }
+                                                    IconButton(onClick = {
+                                                        scope.launch {
+                                                            runCatching { api.setMessageSaved(savedChat.id, savedMessage.id, false) }
+                                                                .onSuccess { savedMessageRows = savedMessageRows.filterNot { it.second.id == savedMessage.id } }
+                                                                .onFailure { error = it.message ?: "Не удалось удалить из избранного" }
+                                                        }
+                                                    }) { Icon(Icons.Default.Star, "Убрать из избранного", tint = Accent) }
+                                                }
+                                                Spacer(Modifier.height(7.dp))
+                                            }
+                                        }
+                                    }
+                                },
+                                confirmButton = { TextButton(onClick = { savedMessagesOpen = false }) { Text("Закрыть") } }
+                            )
                         }
                         AudioMiniPlayer()
                         NexuraBottomBar(
@@ -2397,6 +2486,140 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
+                    if (groupManagementOpen && chat.kind == "group") {
+                        AlertDialog(
+                            onDismissRequest = { if (!groupManagementBusy) groupManagementOpen = false },
+                            containerColor = Surface1,
+                            title = { Text("Управление группой", color = MainText, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    if (groupManagerCanEdit) {
+                                        Text("Название группы", color = SecondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        OutlinedTextField(
+                                            value = groupNameDraft,
+                                            onValueChange = { groupNameDraft = it.take(60) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(14.dp),
+                                            colors = authFieldColors()
+                                        )
+                                        Button(
+                                            enabled = !groupManagementBusy && groupNameDraft.trim().length in 2..60 && groupNameDraft.trim() != chat.title,
+                                            onClick = {
+                                                scope.launch {
+                                                    groupManagementBusy = true
+                                                    try {
+                                                        api.renameGroup(chat.id, groupNameDraft)
+                                                        val updated = chat.copy(title = groupNameDraft.trim())
+                                                        selected = updated
+                                                        chats = chats.map { if (it.id == chat.id) updated else it }
+                                                        notice = "Название группы обновлено"
+                                                    } catch (e: Exception) { error = e.message ?: "Не удалось изменить название группы" }
+                                                    finally { groupManagementBusy = false }
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text("Сохранить название") }
+                                        HorizontalDivider(color = Surface2)
+                                        Text("Добавить участников", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            OutlinedTextField(
+                                                value = groupSearchDraft,
+                                                onValueChange = { groupSearchDraft = it; groupSearchResults = emptyList() },
+                                                modifier = Modifier.weight(1f),
+                                                singleLine = true,
+                                                placeholder = { Text("Имя или username") },
+                                                shape = RoundedCornerShape(14.dp),
+                                                colors = authFieldColors()
+                                            )
+                                            IconButton(
+                                                enabled = groupSearchDraft.trim().length >= 2 && !groupManagementBusy,
+                                                onClick = {
+                                                    scope.launch {
+                                                        groupManagementBusy = true
+                                                        try { groupSearchResults = api.findUsers(groupSearchDraft).filter { user -> groupMembers.none { it.userId == user.id } } }
+                                                        catch (e: Exception) { error = e.message ?: "Не удалось найти пользователей" }
+                                                        finally { groupManagementBusy = false }
+                                                    }
+                                                }
+                                            ) { Icon(Icons.Default.Search, "Найти", tint = Accent) }
+                                        }
+                                        groupSearchResults.forEach { person ->
+                                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Avatar(person.displayName, person.avatar)
+                                                Text(person.displayName, color = MainText, modifier = Modifier.weight(1f).padding(start = 9.dp), fontSize = 13.sp)
+                                                TextButton(
+                                                    enabled = !groupManagementBusy && groupMembers.size < 50,
+                                                    onClick = {
+                                                        scope.launch {
+                                                            groupManagementBusy = true
+                                                            try {
+                                                                api.addGroupMember(chat.id, person.id)
+                                                                groupMembers = api.groupMembers(chat.id)
+                                                                groupSearchResults = groupSearchResults.filterNot { it.id == person.id }
+                                                                notice = "Участник добавлен"
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось добавить участника" }
+                                                            finally { groupManagementBusy = false }
+                                                        }
+                                                    }
+                                                ) { Text("Добавить") }
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider(color = Surface2)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Участники", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                        Text("${groupMembers.size}/50", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    if (groupManagementBusy && groupMembers.isEmpty()) {
+                                        CircularProgressIndicator(color = Accent, modifier = Modifier.size(22.dp))
+                                    } else groupMembers.forEach { member ->
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Avatar(member.displayName, member.avatar)
+                                            Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                                                Text(member.displayName + if (member.userId == store.userId) " (вы)" else "", color = MainText, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                Text(
+                                                    when (member.role) { "owner" -> "Владелец"; "admin" -> "Администратор"; else -> "Участник" },
+                                                    color = if (member.role == "admin" || member.role == "owner") Accent else SecondaryText,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                            if (groupManagerCanEdit && member.role != "owner") {
+                                                TextButton(
+                                                    enabled = !groupManagementBusy,
+                                                    onClick = {
+                                                        scope.launch {
+                                                            groupManagementBusy = true
+                                                            try {
+                                                                api.setGroupMemberRole(chat.id, member.userId, if (member.role == "admin") "member" else "admin")
+                                                                groupMembers = api.groupMembers(chat.id)
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось изменить роль" }
+                                                            finally { groupManagementBusy = false }
+                                                        }
+                                                    }
+                                                ) { Text(if (member.role == "admin") "Снять админа" else "Админ") }
+                                                TextButton(
+                                                    enabled = !groupManagementBusy,
+                                                    onClick = {
+                                                        scope.launch {
+                                                            groupManagementBusy = true
+                                                            try {
+                                                                api.removeGroupMember(chat.id, member.userId)
+                                                                groupMembers = api.groupMembers(chat.id)
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось удалить участника" }
+                                                            finally { groupManagementBusy = false }
+                                                        }
+                                                    }
+                                                ) { Text("Удалить", color = Danger) }
+                                            }
+                                        }
+                                    }
+                                    if (groupManagementBusy) Text("Сохраняем изменения…", color = SecondaryText, fontSize = 11.sp)
+                                }
+                            },
+                            confirmButton = { TextButton(onClick = { groupManagementOpen = false }) { Text("Готово") } }
+                        )
+                    }
                     if (showChatModeDialog) {
                         AlertDialog(
                             onDismissRequest = { if (!changingChatMode) showChatModeDialog = false },
@@ -3063,6 +3286,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                         }
                                     )
+                                    if (chat.kind == "group") {
+                                        DropdownMenuItem(
+                                            text = { Text("Участники и настройки группы") },
+                                            leadingIcon = { Icon(Icons.Default.GroupAdd, null, tint = Accent) },
+                                            onClick = {
+                                                showChatOptionsMenu = false
+                                                groupNameDraft = chat.title
+                                                groupSearchDraft = ""
+                                                groupSearchResults = emptyList()
+                                                groupManagementOpen = true
+                                                scope.launch {
+                                                    groupManagementBusy = true
+                                                    try {
+                                                        groupMembers = api.groupMembers(chat.id)
+                                                        groupManagerCanEdit = api.canManageConversation(chat.id)
+                                                    } catch (e: Exception) { error = e.message ?: "Не удалось загрузить участников группы" }
+                                                    finally { groupManagementBusy = false }
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -3099,7 +3343,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text("📌", fontSize = 16.sp)
                                 Column(Modifier.weight(1f).padding(start = 8.dp)) {
                                     Text("Закреплённое сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                    Text(pinned?.content?.take(90) ?: "Откройте чат, чтобы загрузить сообщение", color = MainText, fontSize = 12.sp, maxLines = 1)
+                                    Column(Modifier.weight(1f).padding(start = 8.dp).clickable(enabled = pinnedMessageId != null) {
+                                        val targetId = pinnedMessageId ?: return@clickable
+                                        scope.launch {
+                                            try {
+                                                val target = api.messages(chat.id, e2eeClient, targetMessageId = targetId).firstOrNull()
+                                                    ?: throw IOException("Закреплённое сообщение больше недоступно")
+                                                val before = api.messages(chat.id, e2eeClient, beforeCreatedAt = target.createdAt, pageSize = 30)
+                                                val after = api.messages(chat.id, e2eeClient, afterCreatedAt = target.createdAt, pageSize = 30)
+                                                messages = (messages + before + after + target).distinctBy { it.id }
+                                                    .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                                scrollToMessageId = target.id
+                                            } catch (e: Exception) { error = e.message ?: "Не удалось перейти к закреплённому сообщению" }
+                                        }
+                                    }) {
+                                        Text("Закреплённое сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(pinned?.content?.take(90) ?: "Нажмите, чтобы перейти к сообщению", color = MainText, fontSize = 12.sp, maxLines = 1)
+                                    }
                                 }
                                 if (canManagePins) {
                                     TextButton(onClick = {
@@ -3481,6 +3741,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 }
                                                             )
                                                         }
+                                                        DropdownMenuItem(
+                                                            text = { Text(if (msg.id in savedMessageIds) "Убрать из избранного" else "Сохранить в избранное") },
+                                                            leadingIcon = { Icon(if (msg.id in savedMessageIds) Icons.Default.Star else Icons.Default.StarBorder, null, tint = Accent) },
+                                                            onClick = {
+                                                                openMessageMenu = null
+                                                                val save = msg.id !in savedMessageIds
+                                                                scope.launch {
+                                                                    try {
+                                                                        api.setMessageSaved(chat.id, msg.id, save)
+                                                                        savedMessageIds = if (save) savedMessageIds + msg.id else savedMessageIds - msg.id
+                                                                        notice = if (save) "Сообщение добавлено в избранное" else "Сообщение удалено из избранного"
+                                                                    } catch (e: Exception) { error = e.message ?: "Не удалось изменить избранное" }
+                                                                }
+                                                            }
+                                                        )
                                                         HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
                                                         Text(
                                                             "РЕАКЦИЯ",
