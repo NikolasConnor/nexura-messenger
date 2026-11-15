@@ -34,6 +34,8 @@ data class SocialMediaItem(
 )
 data class SocialPhotoComment(val id: String, val userId: String, val content: String, val createdAt: String)
 data class SocialReactionState(val count: Int, val likedByMe: Boolean)
+data class SavedMessageRef(val conversationId: String, val messageId: String, val savedAt: String)
+data class GroupMemberItem(val userId: String, val displayName: String, val username: String, val avatar: String, val role: String)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
@@ -507,7 +509,9 @@ class NexuraApi(private val store: SessionStore) {
         beforeCreatedAt: String? = null,
         beforeMessageId: String? = null,
         afterMessageId: String? = null,
-        pageSize: Int = 30
+        pageSize: Int = 30,
+        targetMessageId: String? = null,
+        targetMessageIds: List<String>? = null
     ): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val afterTimestamp = afterCreatedAt?.let { java.net.URLEncoder.encode(it, "UTF-8") }
@@ -526,9 +530,14 @@ class NexuraApi(private val store: SessionStore) {
         }
         val limit = if (mediaOnly) 1000 else if (afterCreatedAt != null) 100 else pageSize.coerceIn(1, 100)
         val mediaFilter = if (mediaOnly) "&message_type=in.(media,image,file)" else ""
+        val targetFilter = when {
+            !targetMessageId.isNullOrBlank() -> "&id=eq.${normalizeUuid(targetMessageId)}"
+            !targetMessageIds.isNullOrEmpty() -> "&id=in.(${targetMessageIds.map { normalizeUuid(it) }.distinct().joinToString(",")})"
+            else -> ""
+        }
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at" +
-                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc,id.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc,id.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter$targetFilter"
         ))
         // Decrypt the server-managed archive in one bounded request. Rows from
         // before cloud-history rollout keep their original Olm-only fallback.
@@ -2237,6 +2246,109 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Сервер вернул некорректный ID чата.")
         }
         return uuid
+    }
+
+
+    suspend fun savedMessageRefs(conversationId: String? = null): List<SavedMessageRef> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val filter = conversationId?.let { "&conversation_id=eq.${normalizeUuid(it)}" } ?: ""
+        val rows = JSONArray(call(
+            "/rest/v1/saved_messages?select=conversation_id,message_id,saved_at&user_id=eq.$uid$filter&order=saved_at.desc&limit=300"
+        ))
+        return (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            val conversation = row.optString("conversation_id")
+            val message = row.optString("message_id")
+            if (conversation.isBlank() || message.isBlank()) null
+            else SavedMessageRef(conversation, message, row.optString("saved_at"))
+        }
+    }
+
+    suspend fun setMessageSaved(conversationId: String, messageId: String, saved: Boolean) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val conversation = normalizeUuid(conversationId)
+        val message = normalizeUuid(messageId)
+        if (saved) {
+            call(
+                "/rest/v1/saved_messages?on_conflict=user_id,message_id",
+                "POST",
+                JSONObject().put("user_id", uid).put("conversation_id", conversation)
+                    .put("message_id", message).toString(),
+                prefer = "resolution=merge-duplicates,return=minimal"
+            )
+        } else {
+            call(
+                "/rest/v1/saved_messages?user_id=eq.$uid&message_id=eq.$message",
+                "DELETE",
+                prefer = "return=minimal"
+            )
+        }
+    }
+
+    suspend fun groupMembers(conversationId: String): List<GroupMemberItem> {
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id,member_role,joined_at,profiles(display_name,username,avatar_url)" +
+                "&conversation_id=eq.${normalizeUuid(conversationId)}&order=joined_at.asc"
+        ))
+        return (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            val profile = row.optJSONObject("profiles") ?: JSONObject()
+            val userId = row.optString("user_id")
+            if (userId.isBlank()) return@mapNotNull null
+            val username = profile.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            val name = profile.optString("display_name").takeIf { it.isNotBlank() && it != "null" }
+                ?: username.takeIf { it.isNotBlank() } ?: "Пользователь"
+            GroupMemberItem(
+                userId, name, username,
+                profile.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂",
+                row.optString("member_role", "member")
+            )
+        }
+    }
+
+    suspend fun renameGroup(conversationId: String, title: String) {
+        val clean = title.trim()
+        if (clean.length !in 2..60) throw IOException("Название группы должно содержать от 2 до 60 символов")
+        call(
+            "/rest/v1/conversations?id=eq.${normalizeUuid(conversationId)}",
+            "PATCH",
+            JSONObject().put("title", clean).toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun addGroupMember(conversationId: String, userId: String) {
+        val conversation = normalizeUuid(conversationId)
+        val user = normalizeUuid(userId)
+        val existing = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.$conversation&user_id=eq.$user&limit=1"
+        ))
+        if (existing.length() > 0) return
+        call(
+            "/rest/v1/conversation_members",
+            "POST",
+            JSONObject().put("conversation_id", conversation).put("user_id", user)
+                .put("member_role", "member").toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun setGroupMemberRole(conversationId: String, userId: String, role: String) {
+        if (role !in setOf("admin", "member")) throw IOException("Недопустимая роль участника")
+        call(
+            "/rest/v1/conversation_members?conversation_id=eq.${normalizeUuid(conversationId)}&user_id=eq.${normalizeUuid(userId)}",
+            "PATCH",
+            JSONObject().put("member_role", role).toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun removeGroupMember(conversationId: String, userId: String) {
+        call(
+            "/rest/v1/conversation_members?conversation_id=eq.${normalizeUuid(conversationId)}&user_id=eq.${normalizeUuid(userId)}",
+            "DELETE",
+            prefer = "return=minimal"
+        )
     }
 
     suspend fun createGroup(title: String, memberIds: List<String>): String {
