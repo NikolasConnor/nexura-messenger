@@ -287,6 +287,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var savingPrivacy by remember { mutableStateOf(false) }
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
@@ -318,6 +319,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
+    LaunchedEffect(viewedProfile?.id) {
+        val profileId = viewedProfile?.id ?: run { viewedProfilePhotos = emptyList(); return@LaunchedEffect }
+        try { viewedProfilePhotos = api.profilePhotos(profileId) }
+        catch (_: Exception) { viewedProfilePhotos = emptyList() }
+    }
+
     LaunchedEffect(selected?.id, messages) {
         val chatId = selected?.id ?: return@LaunchedEffect
         messages.lastOrNull()?.let { latest ->
@@ -2751,6 +2758,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                     if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
                                     Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                                    if (viewedProfilePhotos.isNotEmpty()) {
+                                        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Фотографии профиля", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                            Text(viewedProfilePhotos.size.toString(), color = SecondaryText, fontSize = 12.sp)
+                                        }
+                                        viewedProfilePhotos.chunked(3).forEach { group ->
+                                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                group.forEach { photo ->
+                                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                                                }
+                                                repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
+                                            }
+                                        }
+                                    }
+
                                     OutlinedButton(onClick = { confirmBlockProfile = profile }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) {
                                         Icon(Icons.Default.Block, null, modifier = Modifier.size(17.dp))
