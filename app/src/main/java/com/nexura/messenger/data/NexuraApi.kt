@@ -34,7 +34,6 @@ data class SocialMediaItem(
 )
 data class SocialPhotoComment(val id: String, val userId: String, val content: String, val createdAt: String)
 data class SocialReactionState(val count: Int, val likedByMe: Boolean)
-data class SavedMessageRef(val conversationId: String, val messageId: String, val savedAt: String)
 data class GroupMemberItem(val userId: String, val displayName: String, val username: String, val avatar: String, val role: String)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
@@ -2248,42 +2247,6 @@ class NexuraApi(private val store: SessionStore) {
         return uuid
     }
 
-
-    suspend fun savedMessageRefs(conversationId: String? = null): List<SavedMessageRef> {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        val filter = conversationId?.let { "&conversation_id=eq.${normalizeUuid(it)}" } ?: ""
-        val rows = JSONArray(call(
-            "/rest/v1/saved_messages?select=conversation_id,message_id,saved_at&user_id=eq.$uid$filter&order=saved_at.desc&limit=300"
-        ))
-        return (0 until rows.length()).mapNotNull { i ->
-            val row = rows.optJSONObject(i) ?: return@mapNotNull null
-            val conversation = row.optString("conversation_id")
-            val message = row.optString("message_id")
-            if (conversation.isBlank() || message.isBlank()) null
-            else SavedMessageRef(conversation, message, row.optString("saved_at"))
-        }
-    }
-
-    suspend fun setMessageSaved(conversationId: String, messageId: String, saved: Boolean) {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        val conversation = normalizeUuid(conversationId)
-        val message = normalizeUuid(messageId)
-        if (saved) {
-            call(
-                "/rest/v1/saved_messages?on_conflict=user_id,message_id",
-                "POST",
-                JSONObject().put("user_id", uid).put("conversation_id", conversation)
-                    .put("message_id", message).toString(),
-                prefer = "resolution=merge-duplicates,return=minimal"
-            )
-        } else {
-            call(
-                "/rest/v1/saved_messages?user_id=eq.$uid&message_id=eq.$message",
-                "DELETE",
-                prefer = "return=minimal"
-            )
-        }
-    }
 
     suspend fun groupMembers(conversationId: String): List<GroupMemberItem> {
         val rows = JSONArray(call(
