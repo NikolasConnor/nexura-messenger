@@ -28,6 +28,10 @@ import kotlinx.coroutines.sync.withLock
 
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null, val chatMode: String = "cloud")
 data class MessageReaction(val emoji: String, val count: Int, val selectedByMe: Boolean)
+data class SocialMediaItem(
+    val id: String, val userId: String, val storagePath: String, val mediaType: String,
+    val caption: String, val createdAt: String, val expiresAt: String?, val mediaUrl: String
+)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
@@ -2018,6 +2022,101 @@ class NexuraApi(private val store: SessionStore) {
             if (!it.isSuccessful) throw IOException("Не удалось загрузить фото профиля (HTTP ${it.code})")
         }
         return "$BASE_URL/storage/v1/object/public/nexura-avatars/$path"
+    }
+
+
+    private suspend fun uploadSocialObject(bytes: ByteArray, mimeType: String, folder: String): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (bytes.isEmpty() || bytes.size > 50 * 1024 * 1024) throw IOException("Файл должен быть не больше 50 МБ")
+        val ext = when (mimeType.substringAfter('/').lowercase()) {
+            "jpeg", "jpg" -> "jpg"; "png" -> "png"; "webp" -> "webp"; "heic" -> "heic"
+            "mp4" -> "mp4"; "webm" -> "webm"; "quicktime" -> "mov"
+            else -> throw IOException("Этот формат фото или видео не поддерживается")
+        }
+        val path = "$uid/$folder/${UUID.randomUUID()}.$ext"
+        val request = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-social-media/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: throw IOException("Сессия истекла")}")
+            .header("Content-Type", mimeType).header("x-upsert", "false")
+            .post(bytes.toRequestBody(mimeType.toMediaType())).build()
+        withContext(Dispatchers.IO) { client.newCall(request).execute() }.use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить файл (HTTP ${it.code})")
+        }
+        return path
+    }
+
+    private suspend fun socialSignedUrl(path: String): String = signedAttachmentUrl(path, "nexura-social-media")
+
+    suspend fun publishProfilePhoto(bytes: ByteArray, mimeType: String, caption: String = ""): SocialMediaItem {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val path = uploadSocialObject(bytes, mimeType, "photos")
+        try {
+            val row = JSONObject().put("user_id", uid).put("storage_path", path).put("caption", caption.trim().take(500))
+            call("/rest/v1/profile_photos", "POST", row.toString(), prefer = "return=representation")
+            val url = socialSignedUrl(path)
+            return SocialMediaItem(UUID.randomUUID().toString(), uid, path, "image", caption.trim(), java.time.Instant.now().toString(), null, url)
+        } catch (e: Exception) {
+            runCatching { call("/storage/v1/object/nexura-social-media/$path", "DELETE", auth = true) }
+            throw e
+        }
+    }
+
+    suspend fun publishStory(bytes: ByteArray, mimeType: String, caption: String = ""): SocialMediaItem {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val mediaType = if (mimeType.startsWith("video/")) "video" else if (mimeType.startsWith("image/")) "image" else throw IOException("История должна быть фото или видео")
+        val path = uploadSocialObject(bytes, mimeType, "stories")
+        try {
+            val created = java.time.Instant.now()
+            val expires = created.plusSeconds(24 * 60 * 60)
+            val row = JSONObject().put("user_id", uid).put("storage_path", path).put("media_type", mediaType)
+                .put("caption", caption.trim().take(500)).put("created_at", created.toString()).put("expires_at", expires.toString())
+            val inserted = JSONArray(call("/rest/v1/user_stories", "POST", row.toString(), prefer = "return=representation"))
+            val saved = inserted.optJSONObject(0) ?: throw IOException("История не сохранилась")
+            return SocialMediaItem(saved.optString("id"), uid, path, mediaType, saved.optString("caption"),
+                saved.optString("created_at"), saved.optString("expires_at"), socialSignedUrl(path))
+        } catch (e: Exception) {
+            runCatching { call("/storage/v1/object/nexura-social-media/$path", "DELETE", auth = true) }
+            throw e
+        }
+    }
+
+    private suspend fun parseSocialRows(rows: JSONArray, stories: Boolean): List<SocialMediaItem> {
+        val result = mutableListOf<SocialMediaItem>()
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val path = row.optString("storage_path")
+            if (path.isBlank()) continue
+            result += SocialMediaItem(row.optString("id"), row.optString("user_id"), path,
+                if (stories) row.optString("media_type") else "image", row.optString("caption"),
+                row.optString("created_at"), row.optString("expires_at").takeIf { it.isNotBlank() && it != "null" },
+                socialSignedUrl(path))
+        }
+        return result
+    }
+
+    suspend fun activeStories(): List<SocialMediaItem> {
+        val rows = JSONArray(call("/rest/v1/user_stories?select=id,user_id,storage_path,media_type,caption,created_at,expires_at&expires_at=gt.${java.net.URLEncoder.encode(java.time.Instant.now().toString(), "UTF-8")}&order=created_at.desc&limit=200"))
+        return parseSocialRows(rows, true)
+    }
+
+    suspend fun myStoryArchive(): List<SocialMediaItem> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call("/rest/v1/user_stories?select=id,user_id,storage_path,media_type,caption,created_at,expires_at&user_id=eq.$uid&expires_at=lte.${java.net.URLEncoder.encode(java.time.Instant.now().toString(), "UTF-8")}&order=created_at.desc&limit=200"))
+        return parseSocialRows(rows, true)
+    }
+
+    suspend fun profilePhotos(userId: String): List<SocialMediaItem> {
+        val id = normalizeUuid(userId)
+        val rows = JSONArray(call("/rest/v1/profile_photos?select=id,user_id,storage_path,caption,created_at&user_id=eq.$id&order=created_at.desc&limit=100"))
+        return parseSocialRows(rows, false)
+    }
+
+    suspend fun deleteSocialMedia(item: SocialMediaItem, story: Boolean) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (item.userId != uid) throw IOException("Можно удалять только свои публикации")
+        val table = if (story) "user_stories" else "profile_photos"
+        call("/rest/v1/$table?id=eq.${normalizeUuid(item.id)}", "DELETE", prefer = "return=minimal")
+        call("/storage/v1/object/nexura-social-media/${item.storagePath}", "DELETE", prefer = "return=minimal")
     }
 
     suspend fun matchContacts(phoneNumbers: List<String>): List<ContactMatch> {
