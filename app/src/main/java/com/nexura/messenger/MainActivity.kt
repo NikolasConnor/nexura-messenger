@@ -2014,7 +2014,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (socialArchive.isEmpty()) Text("Истории старше 24 часов появятся здесь. Архив виден только вам.", color = SecondaryText, fontSize = 12.sp)
                                     socialArchive.forEach { item ->
                                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            AsyncImage(model = item.mediaUrl, contentDescription = "История из архива", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                            AsyncImage(model = item.mediaUrl, contentDescription = "История из архива", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = item.mediaType }, contentScale = ContentScale.Crop)
                                             Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                                 Text(item.caption.ifBlank { "История" }, color = MainText, fontWeight = FontWeight.SemiBold)
                                                 Text("Архив · только вам", color = SecondaryText, fontSize = 11.sp)
