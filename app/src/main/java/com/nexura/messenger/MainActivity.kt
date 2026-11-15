@@ -6,6 +6,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import java.util.Calendar
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
@@ -82,6 +85,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -242,6 +246,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val conversationSyncMutex = remember { Mutex() }
     var sendingImage by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var peerTyping by remember { mutableStateOf(false) }
+    var pendingDownloadFile by remember { mutableStateOf<File?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
@@ -329,6 +335,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             chatWallpaperId = "midnight"
             chatWallpaperImage = null
             chatBubbleColor = Color(0xFF6945C7)
+        }
+    }
+
+    LaunchedEffect(signedIn, selected?.id) {
+        peerTyping = false
+        val chatId = selected?.id
+        if (signedIn && chatId != null) {
+            while (true) {
+                peerTyping = runCatching { api.isPeerTyping(chatId) }.getOrDefault(false)
+                delay(if (lowDataMode) 8_000L else 2_500L)
+            }
+        }
+    }
+    LaunchedEffect(signedIn, selected?.id, draft) {
+        val chatId = selected?.id ?: return@LaunchedEffect
+        if (!signedIn) return@LaunchedEffect
+        if (draft.isBlank()) runCatching { api.setTypingStatus(chatId, false) }
+        else {
+            delay(650L)
+            runCatching { api.setTypingStatus(chatId, true) }
         }
     }
 
@@ -526,6 +552,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         sendPickedMedia(uri)
+    }
+    val downloadMediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { destination ->
+        val source = pendingDownloadFile
+        pendingDownloadFile = null
+        if (destination != null && source != null && source.exists()) {
+            scope.launch(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(destination)?.use { output ->
+                        source.inputStream().use { input -> input.copyTo(output) }
+                    } ?: throw IOException("Не удалось открыть файл для сохранения")
+                }.onSuccess {
+                    withContext(Dispatchers.Main) { notice = "Файл сохранён в выбранную папку" }
+                }.onFailure {
+                    withContext(Dispatchers.Main) { error = it.message ?: "Не удалось сохранить файл" }
+                }
+            }
+        }
     }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         profilePhotoUri = uri
@@ -776,6 +819,32 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
 
+    fun scheduleDraft(chat: ChatItem) {
+        val text = draft.trim()
+        if (text.isBlank()) { notice = "Сначала напишите текст сообщения"; return }
+        val now = Calendar.getInstance()
+        DatePickerDialog(context, { _, year, month, day ->
+            val chosen = Calendar.getInstance().apply {
+                set(Calendar.YEAR, year); set(Calendar.MONTH, month); set(Calendar.DAY_OF_MONTH, day)
+                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }
+            TimePickerDialog(context, { _, hour, minute ->
+                chosen.set(Calendar.HOUR_OF_DAY, hour); chosen.set(Calendar.MINUTE, minute)
+                if (chosen.timeInMillis <= System.currentTimeMillis() + 10_000L) {
+                    error = "Выберите время хотя бы на 10 секунд позже"
+                } else {
+                    store.saveScheduledText(SessionStore.ScheduledText(
+                        UUID.randomUUID().toString(), chat.id, text, replyTarget?.id, chosen.timeInMillis
+                    ))
+                    draft = ""; chatDrafts[chat.id] = ""; replyTarget = null
+                    notice = "Сообщение запланировано на " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(chosen.time)
+                }
+            }, now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), android.text.format.DateFormat.is24HourFormat(context)).show()
+        }, now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH)).apply {
+            datePicker.minDate = System.currentTimeMillis()
+        }.show()
+    }
+
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
         if (text.isBlank()) return
         if (chat.chatMode != "cloud" && chat.chatMode != "secret") {
@@ -822,6 +891,31 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             val targetChat = chats.firstOrNull { it.id.equals(targetChatId, ignoreCase = true) }
             if (targetChat != null && selected?.id != targetChat.id) {
                 openChat(targetChat)
+            }
+        }
+    }
+
+    LaunchedEffect(signedIn) {
+        if (signedIn) {
+            while (true) {
+                val due = withContext(Dispatchers.IO) {
+                    store.scheduledTexts().filter { it.sendAtMillis <= System.currentTimeMillis() }
+                }
+                due.forEach { item ->
+                    val chat = chats.firstOrNull { it.id == item.chatId }
+                    if (chat != null && messageDelivery[item.id] != "sending" && messageDelivery[item.id] != "sent") {
+                        if (selected?.id == chat.id && messages.none { it.id == item.id }) {
+                            messages = (messages + MessageItem(item.id, store.userId.orEmpty(), item.text,
+                                java.time.Instant.now().toString(), "text", item.replyToId, encrypted = true))
+                                .sortedBy { it.createdAt }
+                        }
+                        dispatchSecureMessage(chat, item.id, item.text, item.replyToId)
+                    }
+                    if (messageDelivery[item.id] == "sent") {
+                        withContext(Dispatchers.IO) { store.removeScheduledText(item.id) }
+                    }
+                }
+                delay(5_000L)
             }
         }
     }
@@ -3146,6 +3240,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 openMessageMenu = null
                                                             }
                                                         )
+                                                        if (msg.messageType == "media" && msg.encrypted && !msg.securityWarning) {
+                                                            DropdownMenuItem(
+                                                                text = { Text("Скачать на устройство") },
+                                                                leadingIcon = { Icon(Icons.Default.ArrowForward, null, tint = Accent) },
+                                                                onClick = {
+                                                                    openMessageMenu = null
+                                                                    try {
+                                                                        val localUri = Uri.parse(msg.content)
+                                                                        val localFile = File(localUri.path ?: throw IOException("Файл медиа недоступен"))
+                                                                        if (!localFile.exists()) throw IOException("Файл ещё не загружен. Обновите чат и повторите.")
+                                                                        pendingDownloadFile = localFile
+                                                                        downloadMediaLauncher.launch(msg.mediaFileName?.takeIf { it.isNotBlank() } ?: "Nexura_media")
+                                                                    } catch (e: Exception) { error = e.message ?: "Не удалось подготовить файл" }
+                                                                }
+                                                            )
+                                                        }
                                                         HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
                                                         Text(
                                                             "РЕАКЦИЯ",
@@ -3315,6 +3425,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.Bottom
                             ) {
+                                if (peerTyping) {
+                                    Text("Печатает…", color = Accent, fontSize = 11.sp,
+                                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, bottom = 5.dp))
+                                }
                                 IconButton(
                                     onClick = { mediaPicker.launch(arrayOf("*/*")) },
                                     enabled = !sendingImage && !recordingVoice,
@@ -3362,7 +3476,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
                                     })
                                 )
-                                Spacer(Modifier.width(7.dp))
+                                Spacer(Modifier.width(2.dp))
+                                IconButton(
+                                    onClick = { scheduleDraft(chat) },
+                                    enabled = draft.isNotBlank() && !sendingImage && !recordingVoice,
+                                    modifier = Modifier.size(40.dp).align(Alignment.Bottom)
+                                ) { Icon(Icons.Default.Schedule, "Отложить отправку", tint = if (draft.isNotBlank()) Accent else SecondaryText) }
+                                Spacer(Modifier.width(3.dp))
                                 val hasOutgoingContent = draft.isNotBlank() || pendingMediaUri != null
                                 val sendButtonScale by animateFloatAsState(
                                     targetValue = if (hasOutgoingContent || recordingVoice) 1.06f else 1f,
