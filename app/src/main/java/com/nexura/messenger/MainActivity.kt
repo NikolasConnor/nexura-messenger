@@ -189,6 +189,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
+    var registerUsername by remember { mutableStateOf("") }
+    var usernameDraft by remember { mutableStateOf("") }
+    var usernameSetupRequired by remember { mutableStateOf(signedIn) }
+    var savingUsername by remember { mutableStateOf(false) }
     var register by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf("") }
     var phoneCode by remember { mutableStateOf("") }
@@ -221,6 +225,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chatSearchOpen by remember { mutableStateOf(false) }
     var chatSearchQuery by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
+    var contactsUsers by remember { mutableStateOf(emptyList<UserItem>()) }
+    var contactsSearch by remember { mutableStateOf("") }
+    var contactsLoading by remember { mutableStateOf(false) }
+    var contactsOffset by remember { mutableIntStateOf(0) }
+    var contactsHasMore by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var openingDirectUserId by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -273,6 +282,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceFile by remember { mutableStateOf<File?>(null) }
     var profileName by remember { mutableStateOf("") }
+    var profileUsername by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
     var profileBio by remember { mutableStateOf("") }
     var profileAge by remember { mutableStateOf("") }
@@ -1041,6 +1051,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    LaunchedEffect(homeTab, contactsSearch) {
+        if (signedIn && homeTab == "contacts" && !usernameSetupRequired) {
+            delay(250L)
+            contactsLoading = true
+            try {
+                val page = api.listUsers(contactsSearch, 0, 50)
+                contactsUsers = page
+                contactsOffset = page.size
+                contactsHasMore = page.size == 50
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось загрузить пользователей"
+            } finally { contactsLoading = false }
+        }
+    }
+
     LaunchedEffect(signedIn) {
         if (signedIn) {
             launch {
@@ -1077,7 +1102,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 } else null
                 if (localE2eeClient != null) e2eeClient = localE2eeClient
 
-                api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                val ownProfile = api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                profileName = ownProfile.displayName
+                profileUsername = ownProfile.username
+                usernameDraft = ownProfile.username
+                usernameSetupRequired = ownProfile.username.isBlank()
                 val initialPrivacy = api.privacySettings()
                 showOnlineStatus = initialPrivacy.showOnlineStatus
                 readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
@@ -1400,7 +1429,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             if (smsSent) AuthField(phoneCode, { phoneCode = it.filter(Char::isDigit).take(8) }, "Код из SMS", "Введите код")
                             Text("Используйте международный формат номера", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                         } else {
-                            if (register) AuthField(displayName, { displayName = it }, "Ваше имя", "Как к вам обращаться")
+                            if (register) {
+                                AuthField(displayName, { displayName = it }, "Ваше имя", "Как к вам обращаться")
+                                AuthField(registerUsername, { registerUsername = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) }, "Уникальный username", "например, nikolas_01")
+                                Text("Будет вашим адресом для поиска: @username. Только латиница, цифры и _.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
+                            }
                             AuthField(email, { email = it }, "Email", "name@example.com", keyboard = ImeAction.Next)
                             OutlinedTextField(
                                 value = password, onValueChange = { password = it },
@@ -1426,11 +1459,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 notice = "Код отправлен на $phone"
                                             } else {
                                                 api.verifyPhoneCode(phone, phoneCode)
+                                                usernameSetupRequired = true
                                                 signedIn = true
                                             }
                                         } else {
-                                            if (register) api.signUp(email.trim(), password, displayName.trim())
+                                            if (register) api.signUp(email.trim(), password, displayName.trim(), registerUsername)
                                             else api.signIn(email.trim(), password)
+                                            usernameSetupRequired = true
                                             // Successful auth methods have already validated and persisted
                                             // the session on Dispatchers.IO; do not decrypt preferences on UI.
                                             signedIn = true
@@ -1440,7 +1475,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             },
                             enabled = !busy && if (phoneMode) phone.startsWith("+") && phone.count { it.isDigit() } in 8..15 && (!smsSent || phoneCode.length in 4..8)
-                                else email.contains("@") && password.length >= 6 && (!register || displayName.isNotBlank()),
+                                else email.contains("@") && password.length >= 6 && (!register || (displayName.isNotBlank() && registerUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$")))),
                             modifier = Modifier.fillMaxWidth().padding(top = 18.dp).height(52.dp),
                             shape = RoundedCornerShape(16.dp)
                         ) { Text(if (busy) "Подождите…" else if (phoneMode) if (smsSent) "Подтвердить код" else "Получить SMS-код" else if (register) "Создать аккаунт" else "Войти", fontWeight = FontWeight.SemiBold) }
@@ -1475,6 +1510,50 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Text("Защищённое пространство для ваших разговоров", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 18.dp))
                     }
                 }
+                signedIn && usernameSetupRequired -> {
+                    Column(
+                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF17102A), Bg)))
+                            .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 36.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(24.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+                            Text("@", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text("Создайте username", color = MainText, fontSize = 27.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 22.dp))
+                        Text("Это уникальное имя будет видно другим пользователям и поможет находить вас в Nexura. Продолжить без него нельзя.", color = SecondaryText, fontSize = 14.sp, modifier = Modifier.padding(top = 9.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        OutlinedTextField(
+                            value = usernameDraft,
+                            onValueChange = { usernameDraft = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) },
+                            modifier = Modifier.fillMaxWidth().padding(top = 22.dp),
+                            singleLine = true,
+                            prefix = { Text("@", color = Accent, fontWeight = FontWeight.Bold) },
+                            placeholder = { Text("username") },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = authFieldColors()
+                        )
+                        Text("3–24 символа · латиница, цифры и _ · первая буква — латинская", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
+                        if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    savingUsername = true; error = ""
+                                    try {
+                                        api.updateMyUsername(usernameDraft)
+                                        profileUsername = usernameDraft.trim().removePrefix("@").lowercase(java.util.Locale.US)
+                                        usernameDraft = profileUsername
+                                        usernameSetupRequired = false
+                                        notice = "Username @${profileUsername} сохранён."
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось сохранить username" }
+                                    finally { savingUsername = false }
+                                }
+                            },
+                            enabled = !savingUsername && usernameDraft.matches(Regex("^[a-z][a-z0-9_]{2,23}$")),
+                            modifier = Modifier.fillMaxWidth().padding(top = 20.dp).height(52.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) { Text(if (savingUsername) "Проверяем и сохраняем…" else "Продолжить") }
+                    }
+                }
                 selected == null && settingsOpen -> {
                     Column(Modifier.fillMaxSize()) {
                         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
@@ -1499,6 +1578,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("Имя в Nexura", color = SecondaryText, fontSize = 12.sp)
                                 OutlinedTextField(value = profileName, onValueChange = { profileName = it.take(40) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, placeholder = { Text("Ваше имя") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                Text("Уникальный username", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                OutlinedTextField(value = profileUsername, onValueChange = { profileUsername = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, prefix = { Text("@", color = Accent) }, placeholder = { Text("username") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
                                 Text("Аватар", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp, bottom = 7.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙").forEach { emoji ->
@@ -1523,6 +1604,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         val age = profileAge.toIntOrNull()
                                         if (profileAge.isNotBlank() && age == null) throw IOException("Проверьте возраст")
                                         api.updateMyProfile(profileName, profileAvatar, profileBio, age)
+                                        if (profileUsername != usernameDraft) {
+                                            api.updateMyUsername(profileUsername)
+                                            usernameDraft = profileUsername
+                                        }
                                         notice = "Профиль сохранён."
                                     } catch (e: Exception) { error = e.message ?: "Не удалось сохранить профиль" }
                                     finally { savingProfile = false }
@@ -1904,7 +1989,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
@@ -2396,7 +2481,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 settingsOpen = true
                                 error = ""; notice = ""
                                 scope.launch {
-                                    try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } }
+                                    try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" } }
                                     catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" }
                                 }
                             }
