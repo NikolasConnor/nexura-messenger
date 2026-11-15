@@ -31,6 +31,9 @@ class NexuraMessagingService : FirebaseMessagingService() {
         val conversationId = payload["conversation_id"]?.takeIf {
             it.matches(Regex("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
         }
+        val messageId = payload["message_id"]?.takeIf {
+            it.matches(Regex("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
+        }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannels(manager)
         // Match Telegram-style behavior: suppress only the chat currently open on screen.
@@ -42,7 +45,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
             if (appVisible && activeConversation == conversationId) return
         }
 
-        val notificationId = conversationId?.hashCode()
+        val notificationId = messageId?.hashCode() ?: conversationId?.hashCode()
             ?: (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
         val notificationPrefs = getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE)
         val soundEnabled = notificationPrefs.getBoolean("sound_enabled", true)
@@ -85,11 +88,11 @@ class NexuraMessagingService : FirebaseMessagingService() {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setOnlyAlertOnce(false)
+            .setOnlyAlertOnce(true)
             .setDefaults((if (soundEnabled) NotificationCompat.DEFAULT_SOUND else 0) or (if (vibrationEnabled) NotificationCompat.DEFAULT_VIBRATE else 0))
 
         try {
-            NotificationManagerCompat.from(this).notify(notificationId, builder.build())
+            NotificationManagerCompat.from(this).notify(conversationId ?: "nexura", notificationId, builder.build())
         } catch (_: SecurityException) {
             // Notifications may be disabled by the user or OS.
         }
