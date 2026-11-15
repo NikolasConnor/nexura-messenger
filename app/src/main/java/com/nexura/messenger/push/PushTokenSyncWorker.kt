@@ -31,7 +31,7 @@ class PushTokenSyncWorker(
         }
 
         return try {
-            val api = NexuraApi(store)
+            val api = NexuraApi(store, applicationContext)
             api.restoreSession()
             val token = FirebaseMessaging.getInstance().token.await()
             if (token.isBlank()) return Result.retry()
