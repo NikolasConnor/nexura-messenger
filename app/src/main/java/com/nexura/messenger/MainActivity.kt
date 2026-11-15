@@ -287,6 +287,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var savingPrivacy by remember { mutableStateOf(false) }
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var socialArchiveOpen by remember { mutableStateOf(false) }
+    var socialBusy by remember { mutableStateOf(false) }
+    var socialCaption by remember { mutableStateOf("") }
+
     var loadingProfile by remember { mutableStateOf(false) }
     var createGroupOpen by remember { mutableStateOf(false) }
     var groupTitle by remember { mutableStateOf("") }
@@ -591,6 +598,35 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     withContext(Dispatchers.Main) { error = it.message ?: "Не удалось сохранить файл" }
                 }
             }
+        }
+    }
+
+    val storyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            socialBusy = true
+            try {
+                val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать файл") }
+                val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                api.publishStory(bytes, mime, socialCaption)
+                socialCaption = ""
+                socialStories = api.activeStories()
+                notice = "История опубликована на 24 часа"
+            } catch (e: Exception) { error = e.message ?: "Не удалось опубликовать историю" }
+            finally { socialBusy = false }
+        }
+    }
+    val profilePhotoPublisher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            socialBusy = true
+            try {
+                val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
+                val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                api.publishProfilePhoto(bytes, mime, socialCaption)
+                socialCaption = ""
+                socialPhotos = api.profilePhotos(store.userId.orEmpty())
+                notice = "Фотография добавлена в профиль"
+            } catch (e: Exception) { error = e.message ?: "Не удалось добавить фотографию" }
+            finally { socialBusy = false }
         }
     }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -1586,7 +1622,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                             NexuraBottomBar(
                                 selected = homeTab,
-                                profileSelected = true,
+                                profileSelected = settingsOpen,
                                 onSelect = { tab -> homeTab = tab; settingsOpen = false; createGroupOpen = false },
                                 onProfile = { }
                             )
@@ -1932,6 +1968,67 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                     }
                                 } else Spacer(Modifier.weight(1f))
+                            }
+                        }
+
+                        if (homeTab == "social") {
+                            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Сообщество", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                                        Text("Истории и фотографии пользователей", color = SecondaryText, fontSize = 12.sp)
+                                    }
+                                    TextButton(onClick = {
+                                        socialArchiveOpen = !socialArchiveOpen
+                                        scope.launch { socialBusy = true; try {
+                                            if (socialArchiveOpen) socialArchive = api.myStoryArchive()
+                                            else socialStories = api.activeStories()
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось загрузить истории" } finally { socialBusy = false } }
+                                    }) { Text(if (socialArchiveOpen) "К историям" else "Архив", color = Accent) }
+                                }
+                                OutlinedTextField(value = socialCaption, onValueChange = { socialCaption = it.take(500) },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp), placeholder = { Text("Подпись к публикации") },
+                                    shape = RoundedCornerShape(14.dp), colors = authFieldColors(), maxLines = 2)
+                                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = { storyPicker.launch(arrayOf("image/*", "video/*")) }, enabled = !socialBusy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("＋ История") }
+                                    OutlinedButton(onClick = { profilePhotoPublisher.launch(arrayOf("image/*")) }, enabled = !socialBusy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("＋ Фото в профиль") }
+                                }
+                                if (socialBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Accent)
+                                if (socialArchiveOpen) {
+                                    Text("Архив историй · только вы", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
+                                    if (socialArchive.isEmpty()) Text("Истории старше 24 часов появятся здесь. Архив виден только вам.", color = SecondaryText, fontSize = 12.sp)
+                                    socialArchive.forEach { item ->
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            AsyncImage(model = item.mediaUrl, contentDescription = "История из архива", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                                Text(item.caption.ifBlank { "История" }, color = MainText, fontWeight = FontWeight.SemiBold)
+                                                Text("Архив · только вам", color = SecondaryText, fontSize = 11.sp)
+                                            }
+                                            TextButton(onClick = { scope.launch { try { api.deleteSocialMedia(item, true); socialArchive = socialArchive.filterNot { it.id == item.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить историю" } } }) { Text("Удалить", color = Danger) }
+                                        }
+                                    }
+                                } else {
+                                    Text("Активные истории", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
+                                    if (socialStories.isEmpty()) Text("Пока нет историй. Опубликуйте первую!", color = SecondaryText, fontSize = 12.sp)
+                                    socialStories.forEach { item ->
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            AsyncImage(model = item.mediaUrl, contentDescription = "История", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                                Text(if (item.userId == store.userId) "Ваша история" else "История пользователя", color = MainText, fontWeight = FontWeight.SemiBold)
+                                                Text(item.caption.ifBlank { if (item.mediaType == "video") "Видео" else "Фото" }, color = SecondaryText, fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                                Text("Фотографии в профиле", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
+                                if (socialPhotos.isEmpty()) Text("Ваши фотографии будут храниться в профиле, пока вы сами их не удалите.", color = SecondaryText, fontSize = 12.sp)
+                                socialPhotos.forEach { item ->
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        AsyncImage(model = item.mediaUrl, contentDescription = "Фото профиля", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                        Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(item.caption.ifBlank { "Фотография" }, color = MainText, fontWeight = FontWeight.SemiBold) }
+                                        TextButton(onClick = { scope.launch { try { api.deleteSocialMedia(item, false); socialPhotos = socialPhotos.filterNot { it.id == item.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить фото" } } }) { Text("Удалить", color = Danger) }
+                                    }
+                                }
                             }
                         }
                         if (homeTab == "search") {
