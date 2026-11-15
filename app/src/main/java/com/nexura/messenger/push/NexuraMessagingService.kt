@@ -86,7 +86,7 @@ class NexuraMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOnlyAlertOnce(false)
-            .setDefaults(0)
+            .setDefaults((if (soundEnabled) NotificationCompat.DEFAULT_SOUND else 0) or (if (vibrationEnabled) NotificationCompat.DEFAULT_VIBRATE else 0))
 
         try {
             NotificationManagerCompat.from(this).notify(notificationId, builder.build())
