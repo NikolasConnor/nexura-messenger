@@ -48,6 +48,8 @@ class ScheduledMessageWorker(
             }
             store.removeScheduledText(item.id)
             Result.success()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             Result.retry()
         }
