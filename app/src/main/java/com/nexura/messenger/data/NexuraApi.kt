@@ -1,6 +1,7 @@
 package com.nexura.messenger.data
 
 import android.net.Uri
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -38,6 +39,11 @@ data class GroupMemberItem(val userId: String, val displayName: String, val user
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
 data class UserItem(val id: String, val displayName: String, val avatar: String)
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
+data class NotificationPreferences(
+    val pushEnabled: Boolean = true,
+    val soundEnabled: Boolean = true,
+    val vibrationEnabled: Boolean = true
+)
 data class UserPresence(val isVisible: Boolean, val isOnline: Boolean, val lastSeenAt: String?)
 data class ContactMatch(val phone: String, val userId: String, val displayName: String, val avatar: String)
 data class MessageItem(
@@ -73,7 +79,7 @@ data class TurnIceServerConfig(
     val credential: String?
 )
 
-class NexuraApi(private val store: SessionStore) {
+class NexuraApi(private val store: SessionStore, private val appContext: Context? = null) {
     companion object {
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
         const val PUBLIC_KEY = "sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY"
@@ -1377,16 +1383,74 @@ class NexuraApi(private val store: SessionStore) {
         )
     }
 
-    // Push notifications must never contain message text, sender names, or media details.
+    suspend fun notificationPreferences(): NotificationPreferences {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call(
+            "/rest/v1/notification_preferences?select=push_enabled,sound_enabled,vibration_enabled&user_id=eq.$uid&limit=1"
+        ))
+        if (rows.length() == 0) return saveNotificationPreferences(NotificationPreferences())
+        val row = rows.getJSONObject(0)
+        return NotificationPreferences(
+            pushEnabled = row.optBoolean("push_enabled", true),
+            soundEnabled = row.optBoolean("sound_enabled", true),
+            vibrationEnabled = row.optBoolean("vibration_enabled", true)
+        )
+    }
+
+    suspend fun saveNotificationPreferences(value: NotificationPreferences): NotificationPreferences {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val payload = JSONObject()
+            .put("user_id", uid)
+            .put("push_enabled", value.pushEnabled)
+            .put("sound_enabled", value.soundEnabled)
+            .put("vibration_enabled", value.vibrationEnabled)
+            .put("updated_at", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date()))
+        val rows = JSONArray(call(
+            "/rest/v1/notification_preferences?on_conflict=user_id",
+            "POST",
+            payload.toString(),
+            prefer = "resolution=merge-duplicates,return=representation"
+        ))
+        val row = if (rows.length() > 0) rows.getJSONObject(0) else payload
+        return NotificationPreferences(
+            pushEnabled = row.optBoolean("push_enabled", value.pushEnabled),
+            soundEnabled = row.optBoolean("sound_enabled", value.soundEnabled),
+            vibrationEnabled = row.optBoolean("vibration_enabled", value.vibrationEnabled)
+        )
+    }
+
+    suspend fun isConversationMuted(conversationId: String): Boolean {
+        val id = normalizeUuid(conversationId)
+        val now = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=muted_until&conversation_id=eq.$id&user_id=eq.undefined&muted_until=gt.${Uri.encode(now)}&limit=1"
+        ))
+        return rows.length() > 0
+    }
+
+    suspend fun setConversationMutedUntil(conversationId: String, mutedUntil: String?) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val payload = JSONObject().put("muted_until", mutedUntil ?: JSONObject.NULL)
+        call(
+            "/rest/v1/conversation_members?conversation_id=eq.${normalizeUuid(conversationId)}&user_id=eq.$uid",
+            "PATCH",
+            payload.toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun dispatchChatPush(conversationId: String): JSONObject = JSONObject(call(
+        "/functions/v1/send-chat-push",
+        "POST",
+        JSONObject().put("conversation_id", normalizeUuid(conversationId)).toString()
+    ))
+
+    // Persist delivery attempts in WorkManager so a process death or temporary network
+    // loss after message persistence does not silently discard the push request.
     private fun notifyChatPush(chatId: String) {
-        // Push is secondary to message persistence. Do not hold the sender UI
-        // while the Edge Function starts or waits on FCM delivery.
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                call("/functions/v1/send-chat-push", "POST",
-                    JSONObject().put("conversation_id", normalizeUuid(chatId)).toString())
-            } catch (_: Exception) { }
-        }
+        appContext?.let { com.nexura.messenger.push.PushDeliveryWorker.enqueue(it, chatId) }
     }
 
     @Deprecated("Use sendEncryptedDirectMessage; plaintext transport is disabled in this branch.")
