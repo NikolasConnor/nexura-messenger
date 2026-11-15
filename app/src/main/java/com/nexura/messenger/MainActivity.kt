@@ -1623,7 +1623,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             NexuraBottomBar(
                                 selected = homeTab,
                                 profileSelected = settingsOpen,
-                                onSelect = { tab -> homeTab = tab; settingsOpen = false; createGroupOpen = false },
+                                onSelect = { tab ->
+                                    homeTab = tab; settingsOpen = false; createGroupOpen = false
+                                    if (tab == "social") scope.launch {
+                                        socialBusy = true
+                                        try { socialStories = api.activeStories(); socialPhotos = api.profilePhotos(store.userId.orEmpty()) }
+                                        catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщество" }
+                                        finally { socialBusy = false }
+                                    }
+                                },
                                 onProfile = { }
                             )
                         }
@@ -1697,7 +1705,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Column(Modifier.padding(start = 11.dp)) {
                                     Text("Nexura", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
-                                    Text("Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
+                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
                                 }
                             }
                             Surface(shape = CircleShape, color = Surface1) {
@@ -3894,6 +3902,7 @@ private fun NexuraBottomBar(
             val items = listOf(
                 Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline),
                 Triple("contacts", "Контакты", Icons.Default.GroupAdd),
+                Triple("social", "Истории", Icons.Default.Image),
                 Triple("search", "Поиск", Icons.Default.Search)
             )
             items.forEach { (key, label, icon) ->
