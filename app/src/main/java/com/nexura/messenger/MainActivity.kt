@@ -2,14 +2,11 @@ package com.nexura.messenger
 
 import android.Manifest
 import android.content.Intent
-import android.content.Context
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
 import android.os.Build
 import android.net.Uri
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -115,11 +112,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
     var searching by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
-    var limitedModeEnabled by remember { mutableStateOf(store.limitedAccessMode) }
-    var connectionReachable by remember { mutableStateOf(true) }
-    var connectionFailures by remember { mutableStateOf(0) }
-    var limitedModePrompt by remember { mutableStateOf(false) }
-    var slowNetworkDetected by remember { mutableStateOf(false) }
     var homeTab by remember { mutableStateOf("chats") }
     var deviceContacts by remember { mutableStateOf(emptyList<DeviceContact>()) }
     var syncingContacts by remember { mutableStateOf(false) }
@@ -142,33 +134,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editDraft by remember { mutableStateOf("") }
-
-    fun setLimitedMode(enabled: Boolean) {
-        limitedModeEnabled = enabled
-        store.limitedAccessMode = enabled
-        if (enabled) limitedModePrompt = false
-    }
-
-    fun queueAndSendText(chatId: String, text: String, replyId: String?) {
-        val localId = java.util.UUID.randomUUID().toString()
-        val pending = PendingTextMessage(localId, chatId, text, replyId)
-        store.enqueuePendingMessage(pending)
-        messages = messages + MessageItem(localId, store.userId.orEmpty(), text,
-            java.time.Instant.now().toString(), "text", replyId, null, "pending")
-        draft = ""
-        replyTarget = null
-        error = ""
-        scope.launch {
-            try {
-                api.sendMessage(chatId, text, replyId, localId)
-                store.removePendingMessage(localId)
-                messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "sent") else it }
-                try { api.sendPushForMessage(chatId, text) } catch (_: Exception) { }
-            } catch (_: Exception) {
-                error = "Сообщение сохранено и отправится автоматически, когда появится связь."
-            }
-        }
-    }
 
     fun syncContacts() {
         scope.launch {
@@ -288,72 +253,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
-    // Monitor the existing Supabase endpoint. Limited mode reduces background traffic
-    // and enables extra retries for safe GET requests; it does not change the server route.
-    LaunchedEffect(signedIn, limitedModeEnabled) {
-        if (signedIn) {
-            delay(5000)
-            while (true) {
-                val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                val capabilities = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
-                val weakCellular = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true &&
-                    capabilities.linkDownstreamBandwidthKbps in 1..250
-                slowNetworkDetected = weakCellular
-                if (weakCellular && !limitedModeEnabled) limitedModePrompt = true
-                val reachable = try { api.checkConnection() } catch (_: Exception) { false }
-                connectionReachable = reachable
-                if (reachable) {
-                    connectionFailures = 0
-                    if (!weakCellular) limitedModePrompt = false
-                } else {
-                    connectionFailures += 1
-                    if (connectionFailures >= 2 && !limitedModeEnabled) limitedModePrompt = true
-                }
-                delay(if (limitedModeEnabled) 20000L else 20000L)
-            }
-        }
-    }
-
-    // Retry queued text messages with the same server ID. This makes a timeout safe:
-    // if Supabase committed the first attempt, the retry is ignored as a duplicate.
-    LaunchedEffect(signedIn, limitedModeEnabled) {
+    // Keep the open conversation fresh without requiring the user to tap Refresh.
+    // The list is refreshed less often to avoid unnecessary database traffic.
+    LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
             while (true) {
-                delay(if (limitedModeEnabled) 8000L else 15000L)
-                for (pending in store.getPendingMessages()) {
-                    try {
-                        api.sendMessage(pending.chatId, pending.text, pending.replyToId, pending.id)
-                        store.removePendingMessage(pending.id)
-                        if (selected?.id == pending.chatId) {
-                            messages = messages.map { if (it.id == pending.id) it.copy(deliveryStatus = "sent") else it }
-                        }
-                        try { api.sendPushForMessage(pending.chatId, pending.text) } catch (_: Exception) { }
-                    } catch (_: Exception) {
-                        // Keep the encrypted local queue entry for the next attempt.
-                    }
-                }
-            }
-        }
-    }
-
-    // Keep chats refreshed, but reduce polling substantially in limited-access mode.
-    // An open conversation remains on screen during outages; it is not cleared on errors.
-    LaunchedEffect(signedIn, selected?.id, limitedModeEnabled) {
-        if (signedIn) {
-            while (true) {
-                delay(
-                    when {
-                        limitedModeEnabled && selected != null -> 8000L
-                        limitedModeEnabled -> 30000L
-                        selected != null -> 5000L
-                        else -> 20000L
-                    }
-                )
+                delay(if (selected != null) 5000L else 20000L)
                 try {
                     val currentChat = selected
                     if (currentChat != null) {
                         val latest = api.messages(currentChat.id)
-                        if (selected?.id == currentChat.id) messages = latest + messages.filter { it.deliveryStatus == "pending" && latest.none { serverMessage -> serverMessage.id == it.id } }
+                        if (selected?.id == currentChat.id) messages = latest
                     } else {
                         chats = api.chats()
                     }
@@ -478,7 +388,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                 }
                 selected == null && settingsOpen -> {
-                    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { settingsOpen = false; error = ""; notice = "" }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
                             Text("Настройки", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -502,34 +412,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
                             }
                         }
-                        Text("ПОДКЛЮЧЕНИЕ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 18.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
-                            Column(Modifier.padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Работа при слабом сигнале", color = MainText, fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            if (connectionReachable) "Сервер Nexura доступен" else "Сервер пока не отвечает",
-                                            color = if (connectionReachable) Success else Danger, fontSize = 12.sp,
-                                            modifier = Modifier.padding(top = 4.dp)
-                                        )
-                                    }
-                                    Switch(checked = limitedModeEnabled, onCheckedChange = { setLimitedMode(it) })
-                                }
-                                Text(
-                                    if (limitedModeEnabled)
-                                        "Текстовые сообщения сохраняются в зашифрованной очереди и автоматически отправляются с повторами. Переписка обновляется чаще, медиа можно не загружать."
-                                    else
-                                        "При слабой мобильной сети Nexura предложит включить режим. Настройка сохраняется на устройстве.",
-                                    color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)
-                                )
-                                Text(
-                                    "Режим помогает переживать кратковременные обрывы, но не обходит блокировки оператора. Для доступа в белых списках требуется официальное разрешение для серверов Nexura.",
-                                    color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp)
-                                )
-                            }
-                        }
-
                         Text("СЕАНС И БЕЗОПАСНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
@@ -540,7 +422,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
                         if (notice.isNotBlank()) Text(notice, color = Success, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.weight(1f))
                         OutlinedButton(onClick = { showLogoutDialog = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp).height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) { Text("Выйти из аккаунта") }
                     }
                     if (showLogoutDialog) AlertDialog(onDismissRequest = { showLogoutDialog = false }, title = { Text("Выйти из Nexura?") }, text = { Text("Вы сможете войти снова, используя свой способ авторизации.") }, confirmButton = { TextButton(onClick = { showLogoutDialog = false; scope.launch { busy = true; try { api.signOut(); signedIn = false; chats = emptyList(); selected = null; settingsOpen = false; notice = "" } catch (e: Exception) { error = e.message ?: "Ошибка выхода" } finally { busy = false } } }) { Text("Выйти", color = Danger) } }, dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") } })
@@ -558,43 +440,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) { Icon(Icons.Default.GroupAdd, "Создать группу", tint = Accent) }
                             IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }) {
                                 Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
-                            }
-                        }
-                        if (limitedModeEnabled || limitedModePrompt || !connectionReachable) {
-                            Card(
-                                Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                                colors = CardDefaults.cardColors(containerColor = if (connectionReachable) Surface1 else Color(0xFF382A25)),
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                when {
-                                                    limitedModeEnabled -> "Работа при слабом сигнале"
-                                                    !connectionReachable -> "Проблемы с подключением"
-                                                    slowNetworkDetected -> "Медленная мобильная сеть"
-                                                    else -> "Соединение нестабильно"
-                                                },
-                                                color = MainText, fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                when {
-                                                    limitedModeEnabled && connectionReachable -> "Сервер доступен. Текст отправляется с безопасными повторами, входящие проверяются каждые несколько секунд."
-                                                    limitedModeEnabled -> "Сервер пока недоступен. Повторим проверку автоматически."
-                                                    else -> "Nexura не может связаться с сервером. Можно включить режим диагностики."
-                                                },
-                                                color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)
-                                            )
-                                        }
-                                        Switch(checked = limitedModeEnabled, onCheckedChange = { setLimitedMode(it) })
-                                    }
-                                    if (!limitedModeEnabled && limitedModePrompt) {
-                                        TextButton(onClick = { setLimitedMode(true) }, modifier = Modifier.align(Alignment.End)) {
-                                            Text("Включить режим")
-                                        }
-                                    }
-                                }
                             }
                         }
                         if (homeTab == "chats" && showChatFilter) {
@@ -957,8 +802,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     keyboardActions = KeyboardActions(onSend = {
                                         val text = draft.trim()
                                         if (text.isNotEmpty()) {
+                                            val localId = "local-" + System.nanoTime().toString()
                                             val replyId = replyTarget?.id
-                                            queueAndSendText(chat.id, text, replyId)
+                                            val optimistic = MessageItem(localId, store.userId.orEmpty(), text, java.time.Instant.now().toString(), "text", replyId, null, "pending")
+                                            messages = messages + optimistic
+                                            draft = ""; replyTarget = null; error = ""
+                                            scope.launch {
+                                                try {
+                                                    api.sendMessage(chat.id, text, replyId)
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "sent") else it }
+                                                    scope.launch { try { api.sendPushForMessage(chat.id, text) } catch (_: Exception) { } }
+                                                } catch (e: Exception) {
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "failed") else it }
+                                                    error = e.message ?: "Не удалось отправить сообщение"
+                                                }
+                                            }
                                         }
                                     })
                                 )
@@ -967,8 +825,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     onClick = {
                                         val text = draft.trim()
                                         if (text.isNotEmpty()) {
+                                            val localId = "local-" + System.nanoTime().toString()
                                             val replyId = replyTarget?.id
-                                            queueAndSendText(chat.id, text, replyId)
+                                            val optimistic = MessageItem(localId, store.userId.orEmpty(), text, java.time.Instant.now().toString(), "text", replyId, null, "pending")
+                                            messages = messages + optimistic
+                                            draft = ""; replyTarget = null; error = ""
+                                            scope.launch {
+                                                try {
+                                                    api.sendMessage(chat.id, text, replyId)
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "sent") else it }
+                                                    scope.launch { try { api.sendPushForMessage(chat.id, text) } catch (_: Exception) { } }
+                                                } catch (e: Exception) {
+                                                    messages = messages.map { if (it.id == localId) it.copy(deliveryStatus = "failed") else it }
+                                                    error = e.message ?: "Не удалось отправить сообщение"
+                                                }
+                                            }
                                         }
                                     },
                                     enabled = draft.isNotBlank(),

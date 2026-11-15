@@ -29,23 +29,12 @@ class NexuraApi(private val store: SessionStore) {
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
-        .writeTimeout(45, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(25, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
-
-    suspend fun checkConnection(): Boolean = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("${BASE_URL}/auth/v1/health")
-            .header("apikey", PUBLIC_KEY)
-            .header("Accept", "application/json")
-            .get()
-            .build()
-        client.newCall(request).execute().use { it.isSuccessful }
-    }
-
 
     private suspend fun call(path: String, method: String = "GET", body: String? = null, auth: Boolean = true, prefer: String? = null): String = withContext(Dispatchers.IO) {
         val requestBody = body?.toRequestBody(JSON)
@@ -64,41 +53,16 @@ class NexuraApi(private val store: SessionStore) {
             return builder.build()
         }
 
-        // GET requests are safe to retry. Never automatically replay POST/PATCH/DELETE:
-        // a timeout can happen after the server has already committed a write.
-        val maxAttempts = when {
-            method != "GET" -> 1
-            store.limitedAccessMode -> 3
-            else -> 2
-        }
-        var response: okhttp3.Response? = null
-        var lastNetworkError: IOException? = null
-        for (attempt in 1..maxAttempts) {
-            try {
-                val result = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
-                if (method == "GET" && result.code in 500..599 && attempt < maxAttempts) {
-                    result.close()
-                    kotlinx.coroutines.delay(350L * attempt)
-                    continue
-                }
-                response = result
-                break
-            } catch (e: IOException) {
-                lastNetworkError = e
-                if (attempt == maxAttempts) throw e
-                kotlinx.coroutines.delay(350L * attempt)
-            }
-        }
-        var completedResponse = response ?: throw (lastNetworkError ?: IOException("Нет ответа от сервера"))
+        var response = client.newCall(buildRequest(if (auth) store.accessToken else null)).execute()
         // Refresh an expired access token once, then retry the original request.
-        if (completedResponse.code == 401 && auth && !store.refreshToken.isNullOrBlank()) {
-            completedResponse.close()
+        if (response.code == 401 && auth && !store.refreshToken.isNullOrBlank()) {
+            response.close()
             refreshSession()
             val freshToken = store.accessToken
                 ?: throw IOException("Сессия истекла. Войдите в Nexura ещё раз.")
-            completedResponse = client.newCall(buildRequest(freshToken)).execute()
+            response = client.newCall(buildRequest(freshToken)).execute()
         }
-        completedResponse.use {
+        response.use {
             val responseText = it.body?.string().orEmpty()
             if (!it.isSuccessful) {
                 val message = try {
@@ -248,20 +212,19 @@ class NexuraApi(private val store: SessionStore) {
         } catch (_: Exception) { }
     }
 
-    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null, messageId: String = UUID.randomUUID().toString()) {
+    suspend fun sendMessage(chatId: String, text: String, replyToId: String? = null) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val safeChatId = normalizeUuid(chatId)
         val content = text.trim()
         if (content.isEmpty()) throw IOException("Введите текст сообщения")
         if (content.length > 20000) throw IOException("Сообщение слишком длинное. Максимум — 20 000 символов.")
         val payload = JSONObject()
-            .put("id", normalizeUuid(messageId))
             .put("conversation_id", safeChatId)
             .put("sender_id", normalizeUuid(uid))
             .put("message_type", "text")
             .put("content", content)
         if (!replyToId.isNullOrBlank()) payload.put("reply_to_id", normalizeUuid(replyToId))
-        call("/rest/v1/messages", "POST", payload.toString(), prefer = "resolution=ignore-duplicates,return=minimal")
+        call("/rest/v1/messages", "POST", payload.toString(), prefer = "return=minimal")
     }
 
     suspend fun sendPushForMessage(chatId: String, preview: String) { notifyChatPush(chatId, preview) }
