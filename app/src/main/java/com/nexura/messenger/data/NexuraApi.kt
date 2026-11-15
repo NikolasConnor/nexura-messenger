@@ -2370,6 +2370,11 @@ class NexuraApi(private val store: SessionStore) {
         return normalizeUuid(call("/rest/v1/rpc/create_group_conversation", "POST", payload.toString()))
     }
 
+    suspend fun getOrCreateSavedConversation(): String {
+        val result = call("/rest/v1/rpc/get_or_create_saved_conversation", "POST", "{}")
+        return normalizeUuid(result.trim().trim('"'))
+    }
+
     suspend fun createDirect(userId: String): String {
         val result = call("/rest/v1/rpc/create_direct_conversation", "POST",
             JSONObject().put("p_other_user_id", normalizeUuid(userId)).toString())
