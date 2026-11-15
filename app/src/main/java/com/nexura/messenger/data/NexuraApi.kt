@@ -79,7 +79,7 @@ data class TurnIceServerConfig(
     val credential: String?
 )
 
-class NexuraApi(private val store: SessionStore, private val appContext: Context? = null) {
+class NexuraApi(private val store: SessionStore, private val appContext: Context = store.applicationContext) {
     companion object {
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
         const val PUBLIC_KEY = "sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY"
@@ -1454,7 +1454,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
     // Persist delivery attempts in WorkManager so a process death or temporary network
     // loss after message persistence does not silently discard the push request.
     private fun notifyChatPush(chatId: String, messageId: String) {
-        appContext?.let { com.nexura.messenger.push.PushDeliveryWorker.enqueue(it, chatId, messageId) }
+        com.nexura.messenger.push.PushDeliveryWorker.enqueue(appContext, chatId, messageId)
     }
 
     @Deprecated("Use sendEncryptedDirectMessage; plaintext transport is disabled in this branch.")
