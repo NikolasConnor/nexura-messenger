@@ -7,6 +7,10 @@ create table if not exists public.saved_messages (
 );
 create index if not exists saved_messages_user_saved_idx
   on public.saved_messages(user_id, saved_at desc);
+create index if not exists saved_messages_conversation_idx
+  on public.saved_messages(conversation_id);
+create index if not exists saved_messages_message_idx
+  on public.saved_messages(message_id);
 alter table public.saved_messages enable row level security;
 drop policy if exists "Users can view their saved messages" on public.saved_messages;
 create policy "Users can view their saved messages"
