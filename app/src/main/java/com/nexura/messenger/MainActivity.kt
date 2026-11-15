@@ -2027,7 +2027,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (socialStories.isEmpty()) Text("Пока нет историй. Опубликуйте первую!", color = SecondaryText, fontSize = 12.sp)
                                     socialStories.forEach { item ->
                                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            AsyncImage(model = item.mediaUrl, contentDescription = "История", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                            AsyncImage(model = item.mediaUrl, contentDescription = "Открыть историю", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = item.mediaType }, contentScale = ContentScale.Crop)
                                             Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                                 Text(if (item.userId == store.userId) "Ваша история" else "История пользователя", color = MainText, fontWeight = FontWeight.SemiBold)
                                                 Text(item.caption.ifBlank { if (item.mediaType == "video") "Видео" else "Фото" }, color = SecondaryText, fontSize = 11.sp)
@@ -2039,7 +2039,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 if (socialPhotos.isEmpty()) Text("Ваши фотографии будут храниться в профиле, пока вы сами их не удалите.", color = SecondaryText, fontSize = 12.sp)
                                 socialPhotos.forEach { item ->
                                     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        AsyncImage(model = item.mediaUrl, contentDescription = "Фото профиля", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                        AsyncImage(model = item.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
                                         Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(item.caption.ifBlank { "Фотография" }, color = MainText, fontWeight = FontWeight.SemiBold) }
                                         TextButton(onClick = { scope.launch { try { api.deleteSocialMedia(item, false); socialPhotos = socialPhotos.filterNot { it.id == item.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить фото" } } }) { Text("Удалить", color = Danger) }
                                     }
@@ -2767,7 +2767,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         viewedProfilePhotos.chunked(3).forEach { group ->
                                             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 group.forEach { photo ->
-                                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
                                                 }
                                                 repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
                                             }
