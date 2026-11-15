@@ -746,7 +746,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val metadata = kotlinx.coroutines.coroutineScope {
                     val reactionsJob = async { runCatching { api.messageReactions(chat.id) }.getOrDefault(emptyMap()) }
                     val pinnedJob = async { runCatching { api.pinnedMessage(chat.id) }.getOrNull() }
-                    val manageJob = async { runCatching { api.canManageConversation(chat.id) }.getOrDefault(false) }
+                    val manageJob = async { runCatching { api.canPinMessages(chat.id) }.getOrDefault(false) }
                     val receiptJob = async {
                         runCatching { api.peerReadReceiptAt(chat.id, chat.peerUserId) }.getOrNull()
                     }
