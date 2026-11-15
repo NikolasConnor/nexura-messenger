@@ -35,7 +35,7 @@ data class SocialPhotoComment(val id: String, val userId: String, val content: S
 data class SocialReactionState(val count: Int, val likedByMe: Boolean)
 data class GroupMemberItem(val userId: String, val displayName: String, val username: String, val avatar: String, val role: String)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
-data class UserItem(val id: String, val displayName: String, val avatar: String)
+data class UserItem(val id: String, val displayName: String, val avatar: String, val username: String = "")
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
 data class NotificationPreferences(
     val pushEnabled: Boolean = true,
@@ -218,11 +218,13 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             throw IOException("Supabase подтвердил вход, но не вернул полную сессию. Повторите вход.")
         }
     }
-    suspend fun signUp(email: String, password: String, displayName: String) {
+    suspend fun signUp(email: String, password: String, displayName: String, username: String) {
+        val normalizedUsername = username.trim().removePrefix("@").lowercase(java.util.Locale.US)
+        validateUsername(normalizedUsername)
         val redirect = java.net.URLEncoder.encode(AUTH_REDIRECT, "UTF-8")
         val result = JSONObject(call("/auth/v1/signup?redirect_to=$redirect", "POST",
             JSONObject().put("email", email).put("password", password)
-                .put("data", JSONObject().put("display_name", displayName)).toString(), auth = false))
+                .put("data", JSONObject().put("display_name", displayName).put("username", normalizedUsername)).toString(), auth = false))
         if (result.has("access_token")) saveSession(result)
         else throw IOException("Аккаунт создан. Подтвердите email по ссылке из письма, затем вернитесь в Nexura.")
     }
@@ -514,7 +516,8 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         afterMessageId: String? = null,
         pageSize: Int = 30,
         targetMessageId: String? = null,
-        targetMessageIds: List<String>? = null
+        targetMessageIds: List<String>? = null,
+        ascending: Boolean = false
     ): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val afterTimestamp = afterCreatedAt?.let { java.net.URLEncoder.encode(it, "UTF-8") }
@@ -540,7 +543,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         }
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at" +
-                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc,id.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter$targetFilter"
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=${if (ascending) "created_at.asc,id.asc" else "created_at.desc,id.desc"}&limit=$limit$afterFilter$beforeFilter$mediaFilter$targetFilter"
         ))
         // Decrypt the server-managed archive in one bounded request. Rows from
         // before cloud-history rollout keep their original Olm-only fallback.
@@ -2042,13 +2045,47 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
             val emailName = authUser.optString("email").substringBefore("@").takeIf { it.isNotBlank() } ?: "Пользователь"
             val display = metadata.optString("display_name").ifBlank { emailName }
+            val username = metadata.optString("username").trim().removePrefix("@").lowercase(java.util.Locale.US)
+                .takeIf { it.isNotBlank() }
             call("/rest/v1/profiles", "POST",
-                JSONObject().put("id", uid).put("display_name", display).put("avatar_url", "🙂").toString(),
+                JSONObject().put("id", uid).put("display_name", display).put("username", username ?: JSONObject.NULL)
+                    .put("avatar_url", "🙂").toString(),
                 prefer = "return=minimal")
-            return UserProfile(uid, display, "", "🙂", "", null)
+            return UserProfile(uid, display, username.orEmpty(), "🙂", "", null)
         }
         val p = raw.getJSONObject(0)
-        return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
+        var username = p.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+        if (username.isBlank()) {
+            val authUser = runCatching { JSONObject(call("/auth/v1/user", auth = true)) }.getOrNull()
+            val metadataUsername = authUser?.optJSONObject("user_metadata")?.optString("username")
+                ?.trim()?.removePrefix("@")?.lowercase(java.util.Locale.US).orEmpty()
+            if (metadataUsername.isNotBlank()) {
+                runCatching { updateMyUsername(metadataUsername) }.onSuccess { username = metadataUsername }
+            }
+        }
+        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
+    }
+
+    private fun validateUsername(value: String) {
+        if (!value.matches(Regex("^[a-z][a-z0-9_]{2,23}$"))) {
+            throw IOException("Username: 3–24 символа, латинские буквы, цифры и _, начинаться должен с буквы.")
+        }
+    }
+
+    suspend fun updateMyUsername(value: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val username = value.trim().removePrefix("@").lowercase(java.util.Locale.US)
+        validateUsername(username)
+        try {
+            call("/rest/v1/profiles?id=eq.$uid", "PATCH",
+                JSONObject().put("username", username).toString(), prefer = "return=minimal")
+        } catch (e: Exception) {
+            val message = e.message.orEmpty().lowercase()
+            if (message.contains("23505") || message.contains("duplicate key") || message.contains("unique constraint")) {
+                throw IOException("Это имя пользователя уже занято. Выберите другое.")
+            }
+            throw e
+        }
     }
 
     suspend fun updateMyProfile(displayName: String, avatar: String, bio: String = "", age: Int? = null) {
@@ -2280,25 +2317,30 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         }
     }
 
-    suspend fun findUsers(query: String): List<UserItem> {
+    suspend fun listUsers(query: String = "", offset: Int = 0, pageSize: Int = 50): List<UserItem> {
         val cleanQuery = query.trim()
-        if (cleanQuery.length < 2) return emptyList()
-        // Encode user input as a single PostgREST filter value. A space must be %20,
-        // not '+', because '+' is not consistently decoded as a space in raw filter expressions.
-        val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8").replace("+", "%20")
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)&limit=20"))
+        val filter = if (cleanQuery.isBlank()) "" else {
+            val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8").replace("+", "%20")
+            "&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)"
+        }
+        val limit = pageSize.coerceIn(1, 100)
+        val safeOffset = offset.coerceAtLeast(0)
+        val raw = JSONArray(call(
+            "/rest/v1/profiles?select=id,display_name,username,avatar_url&order=display_name.asc,id.asc&limit=$limit&offset=$safeOffset$filter"
+        ))
         val currentUserId = store.userId
         return (0 until raw.length()).mapNotNull { i ->
             val p = raw.optJSONObject(i) ?: return@mapNotNull null
             val id = p.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val username = p.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
             val name = p.optString("display_name").takeIf { it.isNotBlank() && it != "null" }
-                ?: p.optString("username").takeIf { it.isNotBlank() && it != "null" }
-                ?: "Пользователь"
+                ?: username.takeIf { it.isNotBlank() } ?: "Пользователь"
             val avatar = p.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂"
-            UserItem(id, name, avatar)
-        }.filter { it.id != currentUserId && it.id.isNotBlank() }
-            .distinctBy { it.id }
+            UserItem(id, name, avatar, username)
+        }.filter { it.id != currentUserId && it.id.isNotBlank() }.distinctBy { it.id }
     }
+
+    suspend fun findUsers(query: String): List<UserItem> = listUsers(query, 0, 20)
     private fun normalizeUuid(value: String): String {
         val raw = value.trim()
         val decoded = try {
