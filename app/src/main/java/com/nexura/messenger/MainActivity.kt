@@ -317,6 +317,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupNameDraft by remember { mutableStateOf("") }
     var groupSearchDraft by remember { mutableStateOf("") }
     var groupSearchResults by remember { mutableStateOf(emptyList<UserItem>()) }
+    var memberToRemove by remember { mutableStateOf<GroupMemberItem?>(null) }
     var savedMessagesOpen by remember { mutableStateOf(false) }
     var savedMessagesLoading by remember { mutableStateOf(false) }
     var savedMessageRows by remember { mutableStateOf(emptyList<Triple<ChatItem, MessageItem, String>>()) }
@@ -2608,16 +2609,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 ) { Text(if (member.role == "admin") "Снять админа" else "Админ") }
                                                 if (member.userId != store.userId) TextButton(
                                                     enabled = !groupManagementBusy,
-                                                    onClick = {
-                                                        scope.launch {
-                                                            groupManagementBusy = true
-                                                            try {
-                                                                api.removeGroupMember(chat.id, member.userId)
-                                                                groupMembers = api.groupMembers(chat.id)
-                                                            } catch (e: Exception) { error = e.message ?: "Не удалось удалить участника" }
-                                                            finally { groupManagementBusy = false }
-                                                        }
-                                                    }
+                                                    onClick = { memberToRemove = member }
                                                 ) { Text("Удалить", color = Danger) }
                                             }
                                         }
@@ -2626,6 +2618,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             },
                             confirmButton = { TextButton(onClick = { groupManagementOpen = false }) { Text("Готово") } }
+                        )
+                    }
+                    if (memberToRemove != null) {
+                        val targetMember = memberToRemove!!
+                        AlertDialog(
+                            onDismissRequest = { if (!groupManagementBusy) memberToRemove = null },
+                            containerColor = Surface1,
+                            title = { Text("Удалить участника?", color = MainText) },
+                            text = { Text("Участник «${targetMember.displayName}» больше не сможет читать новые сообщения группы.", color = SecondaryText) },
+                            confirmButton = {
+                                TextButton(enabled = !groupManagementBusy, onClick = {
+                                    scope.launch {
+                                        groupManagementBusy = true
+                                        try {
+                                            api.removeGroupMember(chat.id, targetMember.userId)
+                                            groupMembers = api.groupMembers(chat.id)
+                                            memberToRemove = null
+                                            notice = "Участник удалён из группы"
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось удалить участника" }
+                                        finally { groupManagementBusy = false }
+                                    }
+                                }) { Text("Удалить", color = Danger) }
+                            },
+                            dismissButton = { TextButton(onClick = { memberToRemove = null }, enabled = !groupManagementBusy) { Text("Отмена") } }
                         )
                     }
                     if (showChatModeDialog) {
