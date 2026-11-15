@@ -4645,26 +4645,13 @@ private fun chatMessagePreview(message: MessageItem, ownUserId: String): String 
 private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
     var pressed by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pressed) when (emoji) {
-            "❤️" -> 1.34f
-            "👍" -> 1.22f
-            "😂" -> 1.30f
-            "😮" -> 1.38f
-            "😢" -> 1.20f
-            else -> 1.32f
-        } else 1f,
-        animationSpec = spring(dampingRatio = 0.34f, stiffness = 430f),
+        targetValue = if (pressed) 1.28f else 1f,
+        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
         label = "reaction-picker-scale"
     )
     val rotation by animateFloatAsState(
-        targetValue = if (pressed) when (emoji) {
-            "❤️" -> 360f
-            "😂" -> 14f
-            "😢" -> -12f
-            "🔥" -> 9f
-            else -> 0f
-        } else 0f,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = 360f),
+        targetValue = 0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
         label = "reaction-picker-rotation"
     )
     val lift by animateFloatAsState(
@@ -4674,7 +4661,7 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
     )
     LaunchedEffect(pressed) {
         if (pressed) {
-            delay(430)
+            delay(150)
             onClick()
             pressed = false
         }
@@ -4695,9 +4682,14 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
 private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
     var pulse by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pulse || selected) 1.08f else 1f,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = 500f),
+        targetValue = if (pulse) 1.18f else 1f,
+        animationSpec = spring(dampingRatio = 0.46f, stiffness = 520f),
         label = "reaction-chip-scale"
+    )
+    val emojiScale by animateFloatAsState(
+        targetValue = if (pulse) 1.28f else 1f,
+        animationSpec = spring(dampingRatio = 0.42f, stiffness = 560f),
+        label = "reaction-chip-emoji-scale"
     )
     val chipColor by animateColorAsState(
         targetValue = if (selected) Accent.copy(alpha = 0.30f) else Surface2,
@@ -4705,26 +4697,18 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         label = "reaction-chip-color"
     )
     val emojiRotation by animateFloatAsState(
-        targetValue = if (pulse) when (emoji) {
-            "❤️" -> 24f
-            "👍" -> -18f
-            "😂" -> 16f
-            "😮" -> 22f
-            "😢" -> -16f
-            "🔥" -> 14f
-            else -> 12f
-        } else 0f,
-        animationSpec = spring(dampingRatio = 0.30f, stiffness = 420f),
+        targetValue = 0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
         label = "reaction-emoji-rotation"
     )
     val emojiLift by animateFloatAsState(
-        targetValue = if (pulse) -5f else 0f,
-        animationSpec = spring(dampingRatio = 0.28f, stiffness = 460f),
+        targetValue = if (pulse) -2f else 0f,
+        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
         label = "reaction-emoji-lift"
     )
     LaunchedEffect(pulse) {
         if (pulse) {
-            delay(220)
+            delay(300)
             pulse = false
         }
     }
@@ -4743,8 +4727,8 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
             modifier = Modifier.graphicsLayer {
                 rotationZ = emojiRotation
                 translationY = emojiLift * density
-                scaleX = if (pulse) 1.16f else 1f
-                scaleY = if (pulse) 1.16f else 1f
+                scaleX = emojiScale
+                scaleY = emojiScale
             }
         )
         Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
