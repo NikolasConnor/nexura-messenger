@@ -40,7 +40,7 @@ drop policy if exists "Users can remove their saved messages" on public.saved_me
 create policy "Users can remove their saved messages"
   on public.saved_messages for delete to authenticated
   using (user_id = (select auth.uid()));
-revoke all on table public.saved_messages from anon, public;
+revoke all on table public.saved_messages from anon, public, authenticated;
 grant select, insert, delete on table public.saved_messages to authenticated;
 
 drop policy if exists "Group admins can manage member roles" on public.conversation_members;
