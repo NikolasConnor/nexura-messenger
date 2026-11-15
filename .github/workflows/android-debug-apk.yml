@@ -3,6 +3,12 @@ on:
   push:
     branches: [ test/rebuild-v0.2.0-new ]
     paths:
+      - "app/**"
+      - "crypto-core/**"
+      - "crypto-jni/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
       - ".github/workflows/android-debug-apk.yml"
   workflow_dispatch:
 permissions:
@@ -16,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v0.2.0
+          ref: test/rebuild-v0.2.0-new
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
