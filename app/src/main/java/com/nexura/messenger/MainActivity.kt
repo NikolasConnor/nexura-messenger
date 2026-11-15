@@ -318,10 +318,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupSearchDraft by remember { mutableStateOf("") }
     var groupSearchResults by remember { mutableStateOf(emptyList<UserItem>()) }
     var memberToRemove by remember { mutableStateOf<GroupMemberItem?>(null) }
-    var savedMessagesOpen by remember { mutableStateOf(false) }
-    var savedMessagesLoading by remember { mutableStateOf(false) }
-    var savedMessageRows by remember { mutableStateOf(emptyList<Triple<ChatItem, MessageItem, String>>()) }
-    var savedMessageIds by remember { mutableStateOf(emptySet<String>()) }
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var forwardingTarget by remember { mutableStateOf<MessageItem?>(null) }
@@ -682,46 +678,20 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
         .sortedWith(compareByDescending<ChatItem> { favoriteChatIds.contains(it.id) }.thenByDescending { it.updated.orEmpty() })
 
-    fun loadSavedMessages() {
-        savedMessagesOpen = true
-        savedMessagesLoading = true
-        scope.launch {
-            try {
-                val refs = api.savedMessageRefs()
-                val chatById = chats.associateBy { it.id }
-                val loaded = mutableMapOf<String, MessageItem>()
-                refs.groupBy { it.conversationId }.forEach { (conversationId, groupRefs) ->
-                    groupRefs.chunked(100).forEach { chunk ->
-                        val found = api.messages(
-                            conversationId, e2eeClient,
-                            pageSize = chunk.size.coerceAtLeast(1),
-                            targetMessageIds = chunk.map { it.messageId }
-                        )
-                        found.forEach { loaded[it.id] = it }
-                    }
-                }
-                savedMessageRows = refs.mapNotNull { ref ->
-                    val chat = chatById[ref.conversationId] ?: return@mapNotNull null
-                    val message = loaded[ref.messageId] ?: return@mapNotNull null
-                    Triple(chat, message, ref.savedAt)
-                }
-            } catch (e: Exception) {
-                error = e.message ?: "Не удалось загрузить избранные сообщения"
-                savedMessageRows = emptyList()
-            } finally { savedMessagesLoading = false }
-        }
-    }
-
     fun loadChats() {
         scope.launch {
             busy = true
             try {
                 val latestChats = api.chats()
-                chats = latestChats
+                val savedChatId = api.getOrCreateSavedConversation()
+                val withSavedChat = if (latestChats.any { it.id == savedChatId }) latestChats else {
+                    latestChats + ChatItem(savedChatId, "⭐ Избранное", "group", null, avatar = "⭐", chatMode = "cloud")
+                }
+                chats = withSavedChat
                 // ChatItem intentionally contains no server-side plaintext preview: message bodies are E2EE.
                 // Seed each row from this account's encrypted-at-rest local message cache.
                 val cachedPreviews = withContext(Dispatchers.IO) {
-                    latestChats.mapNotNull { chat ->
+                    withSavedChat.mapNotNull { chat ->
                         localCache.readMessages(store.userId.orEmpty(), chat.id)
                             .maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                             ?.let { chat.id to chatMessagePreview(it, store.userId.orEmpty()) }
@@ -729,7 +699,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 chatPreviews.clear()
                 cachedPreviews.forEach { (chatId, preview) -> chatPreviews[chatId] = preview }
-                withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
+                withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), withSavedChat) }
                 error = ""
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось загрузить чаты"
@@ -834,7 +804,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         messageReactions = emptyMap()
         pinnedMessageId = null
         canManagePins = false
-        savedMessageIds = emptySet()
         scrollToMessageId = null
         replyTarget = null
         chatSearchOpen = false
@@ -2268,48 +2237,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
-                        }
-                        if (savedMessagesOpen) {
-                            AlertDialog(
-                                onDismissRequest = { savedMessagesOpen = false },
-                                containerColor = Surface1,
-                                title = { Text("Избранные сообщения", color = MainText, fontWeight = FontWeight.Bold) },
-                                text = {
-                                    Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-                                        when {
-                                            savedMessagesLoading -> Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.Center) {
-                                                CircularProgressIndicator(color = Accent, modifier = Modifier.size(22.dp))
-                                            }
-                                            savedMessageRows.isEmpty() -> Text("Здесь будут сообщения, которые вы сохраните из переписок.", color = SecondaryText, fontSize = 13.sp)
-                                            else -> savedMessageRows.forEach { (savedChat, savedMessage, savedAt) ->
-                                                Row(
-                                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface2)
-                                                        .clickable {
-                                                            savedMessagesOpen = false
-                                                            openChat(savedChat, savedMessage.id)
-                                                        }.padding(10.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column(Modifier.weight(1f)) {
-                                                        Text(savedChat.title, color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                                        Text(savedMessage.content.take(180).ifBlank { "Вложение" }, color = MainText, fontSize = 13.sp, maxLines = 3)
-                                                        Text(messageTimeLabel(savedMessage.createdAt), color = SecondaryText, fontSize = 10.sp)
-                                                    }
-                                                    IconButton(onClick = {
-                                                        scope.launch {
-                                                            runCatching { api.setMessageSaved(savedChat.id, savedMessage.id, false) }
-                                                                .onSuccess { savedMessageRows = savedMessageRows.filterNot { it.second.id == savedMessage.id } }
-                                                                .onFailure { error = it.message ?: "Не удалось удалить из избранного" }
-                                                        }
-                                                    }) { Icon(Icons.Default.Star, "Убрать из избранного", tint = Accent) }
-                                                }
-                                                Spacer(Modifier.height(7.dp))
-                                            }
-                                        }
-                                    }
-                                },
-                                confirmButton = { TextButton(onClick = { savedMessagesOpen = false }) { Text("Закрыть") } }
-                            )
                         }
                         AudioMiniPlayer()
                         NexuraBottomBar(
@@ -3763,21 +3690,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 }
                                                             )
                                                         }
-                                                        DropdownMenuItem(
-                                                            text = { Text(if (msg.id in savedMessageIds) "Убрать из избранного" else "Сохранить в избранное") },
-                                                            leadingIcon = { Icon(if (msg.id in savedMessageIds) Icons.Default.Star else Icons.Default.StarBorder, null, tint = Accent) },
-                                                            onClick = {
-                                                                openMessageMenu = null
-                                                                val save = msg.id !in savedMessageIds
-                                                                scope.launch {
-                                                                    try {
-                                                                        api.setMessageSaved(chat.id, msg.id, save)
-                                                                        savedMessageIds = if (save) savedMessageIds + msg.id else savedMessageIds - msg.id
-                                                                        notice = if (save) "Сообщение добавлено в избранное" else "Сообщение удалено из избранного"
-                                                                    } catch (e: Exception) { error = e.message ?: "Не удалось изменить избранное" }
-                                                                }
-                                                            }
-                                                        )
                                                         HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
                                                         Text(
                                                             "РЕАКЦИЯ",
