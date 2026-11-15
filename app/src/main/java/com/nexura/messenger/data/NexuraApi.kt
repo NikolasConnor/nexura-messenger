@@ -1426,7 +1426,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         val now = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
             .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
         val rows = JSONArray(call(
-            "/rest/v1/conversation_members?select=muted_until&conversation_id=eq.$id&user_id=eq.undefined&muted_until=gt.${Uri.encode(now)}&limit=1"
+            "/rest/v1/conversation_members?select=muted_until&conversation_id=eq.$id&user_id=eq.$uid&muted_until=gt.${Uri.encode(now)}&limit=1"
         ))
         return rows.length() > 0
     }
