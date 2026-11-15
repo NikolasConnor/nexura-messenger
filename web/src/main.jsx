@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Bell, BellOff, Volume2, Vibrate } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
@@ -191,6 +191,14 @@ function App() {
   const [groupMembers, setGroupMembers] = useState([]);
   const [groupBusy, setGroupBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
+  const [notificationPrefs, setNotificationPrefs] = useState({ push_enabled: true, show_message_preview: false, sound_enabled: true, vibration_enabled: true });
+  const [notificationPermission, setNotificationPermission] = useState(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+  const [notificationBusy, setNotificationBusy] = useState(false);
+  const [muteDialogOpen, setMuteDialogOpen] = useState(false);
+  const [muteBusy, setMuteBusy] = useState(false);
+  const notificationContextRef = useRef({ chats: [], prefs: { push_enabled: true, show_message_preview: false, sound_enabled: true, vibration_enabled: true }, userId: null });
+  notificationContextRef.current = { chats, prefs: notificationPrefs, userId: session?.user?.id || null };
   const [profileDraft, setProfileDraft] = useState({ display_name: '', avatar_url: '🙂', bio: '', age: '' });
   const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
@@ -245,7 +253,7 @@ function App() {
       // depends on the other, so the sidebar is not held up by the RPC.
       const [membershipResult, unreadResult] = await Promise.all([
         supabase.from('conversation_members')
-          .select('conversation_id, joined_at, conversations(id,kind,title,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))')
+          .select('conversation_id, joined_at, muted_until, conversations(id,kind,title,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))')
           .eq('user_id', session.user.id).order('joined_at', { ascending: false }),
         supabase.rpc('get_my_unread_counts')
       ]);
@@ -261,7 +269,7 @@ function App() {
         return {
           id: c.id, kind: c.kind, peerUserId: peer?.user_id || null,
           title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
-          avatar: p?.avatar_url || null, updated: c.last_message_at, unread: unread[c.id] || 0
+          avatar: p?.avatar_url || null, updated: c.last_message_at, unread: unread[c.id] || 0, mutedUntil: row.muted_until || null
         };
       }).filter(Boolean).sort((a, b) => new Date(b.updated || 0) - new Date(a.updated || 0));
       setChats(list);
@@ -271,6 +279,19 @@ function App() {
     } finally {
       if (requestId === chatLoadSeq.current) setLoadingChats(false);
     }
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let active = true;
+    supabase.from('notification_preferences').select('push_enabled,show_message_preview,sound_enabled,vibration_enabled').eq('user_id', session.user.id).maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) { setNotice('Не удалось загрузить настройки уведомлений: ' + error.message); return; }
+        if (data) setNotificationPrefs({ push_enabled: data.push_enabled ?? true, show_message_preview: data.show_message_preview ?? false, sound_enabled: data.sound_enabled ?? true, vibration_enabled: data.vibration_enabled ?? true });
+      });
+    if (typeof Notification !== 'undefined') setNotificationPermission(Notification.permission);
+    return () => { active = false; };
   }, [session?.user?.id]);
 
   useEffect(() => {
@@ -399,7 +420,20 @@ function App() {
     if (!session?.user?.id) return;
     let refreshTimer = null;
     const channel = supabase.channel('web-chat-list-' + session.user.id)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
+        if (payload.eventType === 'INSERT' && payload.new?.sender_id !== session.user.id) {
+          const context = notificationContextRef.current;
+          const chat = context.chats.find(item => item.id === payload.new.conversation_id);
+          const muted = chat?.mutedUntil && Date.parse(chat.mutedUntil) > Date.now();
+          if (context.prefs.push_enabled && !muted && document.visibilityState !== 'visible' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            const encrypted = isEncrypted(payload.new.content || '');
+            const body = context.prefs.show_message_preview && !encrypted ? String(payload.new.content || '').slice(0, 120) : 'Новое сообщение';
+            try {
+              new Notification(chat?.title || 'Nexura', { body, tag: 'nexura-' + payload.new.conversation_id, silent: !context.prefs.sound_enabled, renotify: false });
+              if (context.prefs.vibration_enabled && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([120, 60, 120]);
+            } catch { /* Browser notification APIs may be restricted by the current context. */ }
+          }
+        }
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(() => loadChats({ silent: true }), 350);
       })
@@ -717,6 +751,37 @@ function App() {
   }
 
   async function signOut() { await supabase.auth.signOut(); }
+  async function saveNotificationPreference(key, value) {
+    const next = { ...notificationPrefs, [key]: value };
+    setNotificationPrefs(next);
+    setNotificationBusy(true);
+    try {
+      const { error } = await supabase.from('notification_preferences').upsert({ user_id: session.user.id, ...next, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      if (error) throw error;
+    } catch (error) {
+      setNotificationPrefs(notificationPrefs);
+      setNotice('Не удалось сохранить настройки уведомлений: ' + (error?.message || 'ошибка'));
+    } finally { setNotificationBusy(false); }
+  }
+  async function requestBrowserNotifications() {
+    if (typeof Notification === 'undefined') { setNotificationPermission('unsupported'); return; }
+    try { const permission = await Notification.requestPermission(); setNotificationPermission(permission); if (permission === 'granted') setNotice('Уведомления браузера разрешены.'); }
+    catch (error) { setNotice('Не удалось запросить разрешение браузера: ' + (error?.message || 'ошибка')); }
+  }
+  async function changeCurrentChatMute(durationMs) {
+    if (!selected) return;
+    const mutedUntil = durationMs == null ? null : durationMs === Infinity ? '9999-12-31T23:59:59.999Z' : new Date(Date.now() + durationMs).toISOString();
+    setMuteBusy(true);
+    try {
+      const { error } = await supabase.from('conversation_members').update({ muted_until: mutedUntil }).eq('conversation_id', selected.id).eq('user_id', session.user.id);
+      if (error) throw error;
+      setChats(previous => previous.map(chat => chat.id === selected.id ? { ...chat, mutedUntil } : chat));
+      setSelected(previous => previous?.id === selected.id ? { ...previous, mutedUntil } : previous);
+      setMuteDialogOpen(false);
+      setNotice(mutedUntil ? 'Уведомления этого чата отключены.' : 'Уведомления этого чата включены.');
+    } catch (error) { setNotice('Не удалось изменить уведомления чата: ' + (error?.message || 'ошибка')); }
+    finally { setMuteBusy(false); }
+  }
   function openChat(chat) { setChats(previous => previous.map(item => item.id === chat.id ? { ...item, unread: 0 } : item)); setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
   const activeMenuMessage = messages.find(message => message.id === messageMenu) || null;
@@ -741,7 +806,7 @@ function App() {
   return <div className="messenger">
     <aside className={'sidebar '+(mobileChatOpen?'mobile-hidden':'')}>
       <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><div className="side-actions"><button className="icon-button" onClick={()=>setGroupOpen(true)} title="Создать группу"><Plus size={18}/></button><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div></div>
-      <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={openProfileSettings} title="Настройки профиля"><Settings size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
+      <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={()=>setNotificationSettingsOpen(true)} title="Настройки уведомлений" aria-label="Настройки уведомлений"><Bell size={17}/></button><button className="icon-button" onClick={openProfileSettings} title="Настройки профиля"><Settings size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
       <div className="side-tabs"><button className={activeTab==='chats'?'active':''} onClick={()=>setActiveTab('chats')}><MessageCircle size={17}/> Чаты</button><button className={activeTab==='contacts'?'active':''} onClick={()=>setActiveTab('contacts')}><Users size={17}/> Контакты</button></div>
       <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':'ПОИСК ЛЮДЕЙ'}</span><span>{activeTab==='chats'?chats.length:contactResults.length}</span></div>
       <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:contactQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setContactQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
@@ -771,7 +836,7 @@ function App() {
     <main className={'chat-area '+(mobileChatOpen?'mobile-visible':'')}>
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
       {!selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><button className="icon-button chat-theme-trigger" onClick={()=>setMuteDialogOpen(true)} title={selected.mutedUntil && Date.parse(selected.mutedUntil)>Date.now()?'Включить уведомления чата':'Отключить уведомления чата'} aria-label="Уведомления чата">{selected.mutedUntil && Date.parse(selected.mutedUntil)>Date.now()?<BellOff size={17}/>:<Bell size={17}/>}</button><button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
         <div className="messages-pane" ref={messagesPaneRef} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
           {!loadingMessages && messages.length===0 && <div className="empty-messages"><div className="empty-chat-icon"><MessageCircle size={28}/></div><b>Начните общение</b><span>Напиши первое сообщение — оно появится здесь.</span></div>}
@@ -843,6 +908,24 @@ function App() {
       </section>
     </div>}
     {chatThemeOpen && <div className="modal-backdrop" onClick={()=>setChatThemeOpen(false)}><section className="group-modal theme-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">ПЕРСОНАЛИЗАЦИЯ</div><h3>Оформление чата</h3></div><button className="icon-button" onClick={()=>setChatThemeOpen(false)} aria-label="Закрыть">×</button></div><p className="theme-description">Выбери оформление переписки. Настройка сохраняется на этом устройстве.</p><div className="theme-presets">{[{id:'violet',name:'Nexura',wall:'#100d19',bubble:'#49366a',mine:'#49366a'},{id:'midnight',name:'Полночь',wall:'#0b1420',bubble:'#1d3447',mine:'#285879'},{id:'ocean',name:'Океан',wall:'#0b1920',bubble:'#173b42',mine:'#176b70'},{id:'rose',name:'Розовый',wall:'#1b1019',bubble:'#422338',mine:'#713b5b'},{id:'graphite',name:'Графит',wall:'#111318',bubble:'#292d35',mine:'#3f4a60'}].map(theme=><button type="button" key={theme.id} className={'theme-preset '+((chatTheme.id||'violet')===theme.id?'active':'')} onClick={()=>applyChatTheme(theme)}><span className="theme-preview" style={{background:theme.wall}}><i style={{background:theme.bubble}}/><i style={{background:theme.mine}}/></span><b>{theme.name}</b></button>)}</div><div className="theme-modal-foot"><span>Изменения применяются сразу</span><button className="primary-btn" onClick={()=>{applyChatTheme({});setChatThemeOpen(false)}}>Сбросить</button></div></section></div>}
+    {notificationSettingsOpen && <div className="modal-backdrop" onClick={()=>setNotificationSettingsOpen(false)}>
+      <section className="group-modal notification-modal" onClick={event=>event.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">НАСТРОЙКИ NEXURA</div><h3>Уведомления</h3></div><button className="icon-button" onClick={()=>setNotificationSettingsOpen(false)} aria-label="Закрыть">×</button></div>
+        <div className="notification-status"><div className="notification-status-icon"><Bell size={18}/></div><div><b>Уведомления браузера</b><span>{notificationPermission==='granted'?'Разрешены':notificationPermission==='denied'?'Заблокированы в настройках браузера':notificationPermission==='unsupported'?'Этот браузер не поддерживает уведомления':'Нужно разрешение браузера'}</span></div>{notificationPermission!=='granted' && notificationPermission!=='unsupported' && <button className="secondary-btn" type="button" onClick={requestBrowserNotifications}>Разрешить</button>}</div>
+        <div className="notification-setting-row"><div><b>Уведомления о сообщениях</b><span>Показывать уведомления, когда вкладка Nexura не активна</span></div><input type="checkbox" checked={notificationPrefs.push_enabled} disabled={notificationBusy} onChange={event=>saveNotificationPreference('push_enabled',event.target.checked)}/></div>
+        <div className="notification-setting-row"><div><b>Предпросмотр текста</b><span>Показывать текст сообщения в уведомлении, если он не зашифрован</span></div><input type="checkbox" checked={notificationPrefs.show_message_preview} disabled={notificationBusy} onChange={event=>saveNotificationPreference('show_message_preview',event.target.checked)}/></div>
+        <div className="notification-setting-row"><div><b><Volume2 size={15}/> Звук</b><span>Использовать системный звук уведомления</span></div><input type="checkbox" checked={notificationPrefs.sound_enabled} disabled={notificationBusy} onChange={event=>saveNotificationPreference('sound_enabled',event.target.checked)}/></div>
+        <div className="notification-setting-row"><div><b><Vibrate size={15}/> Вибрация</b><span>Вибрировать на поддерживаемых мобильных браузерах</span></div><input type="checkbox" checked={notificationPrefs.vibration_enabled} disabled={notificationBusy} onChange={event=>saveNotificationPreference('vibration_enabled',event.target.checked)}/></div>
+        <p className="notification-footnote">В этой версии уведомления браузера приходят, пока Nexura открыта в браузере. Для доставки при полностью закрытом браузере потребуется отдельная настройка Web Push.</p>
+      </section>
+    </div>}
+    {muteDialogOpen && selected && <div className="modal-backdrop" onClick={()=>!muteBusy&&setMuteDialogOpen(false)}>
+      <section className="group-modal mute-modal" onClick={event=>event.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">НАСТРОЙКИ ЧАТА</div><h3>Уведомления чата</h3></div><button className="icon-button" onClick={()=>setMuteDialogOpen(false)} disabled={muteBusy} aria-label="Закрыть">×</button></div>
+        <p className="modal-description">Отключи уведомления только для «{selected.title}». Остальные чаты продолжат присылать уведомления.</p>
+        {selected.mutedUntil && Date.parse(selected.mutedUntil)>Date.now() ? <button className="primary-btn wide" disabled={muteBusy} onClick={()=>changeCurrentChatMute(null)}>Включить уведомления</button> : <div className="mute-options"><button disabled={muteBusy} onClick={()=>changeCurrentChatMute(60*60*1000)}>На 1 час</button><button disabled={muteBusy} onClick={()=>changeCurrentChatMute(8*60*60*1000)}>На 8 часов</button><button disabled={muteBusy} onClick={()=>changeCurrentChatMute(48*60*60*1000)}>На 2 дня</button><button disabled={muteBusy} onClick={()=>changeCurrentChatMute(Infinity)}>Навсегда</button></div>}
+      </section>
+    </div>}
     {settingsOpen && <div className="modal-backdrop" onClick={()=>setSettingsOpen(false)}>
       <section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}>
         <div className="modal-head"><div><div className="eyebrow">ТВОЙ АККАУНТ</div><h3>Профиль</h3></div><button className="icon-button" onClick={()=>setSettingsOpen(false)} aria-label="Закрыть">×</button></div>
