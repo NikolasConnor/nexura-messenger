@@ -1422,6 +1422,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
 
     suspend fun isConversationMuted(conversationId: String): Boolean {
         val id = normalizeUuid(conversationId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
         val now = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
             .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
         val rows = JSONArray(call(
