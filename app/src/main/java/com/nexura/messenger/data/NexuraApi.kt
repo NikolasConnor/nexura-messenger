@@ -1492,6 +1492,29 @@ class NexuraApi(private val store: SessionStore) {
                 .put("p_read_receipts_enabled", readReceiptsEnabled).toString())
     }
 
+
+    suspend fun setTypingStatus(conversationId: String, typing: Boolean) {
+        val uid = store.userId ?: return
+        val chat = normalizeUuid(conversationId)
+        if (typing) {
+            call("/rest/v1/conversation_typing?on_conflict=conversation_id,user_id", "POST",
+                JSONObject().put("conversation_id", chat).put("user_id", normalizeUuid(uid))
+                    .put("updated_at", java.time.Instant.now().toString()).toString(),
+                prefer = "resolution=merge-duplicates,return=minimal")
+        } else {
+            call("/rest/v1/conversation_typing?conversation_id=eq.$chat&user_id=eq.$uid", "DELETE",
+                prefer = "return=minimal")
+        }
+    }
+
+    suspend fun isPeerTyping(conversationId: String): Boolean {
+        val uid = store.userId ?: return false
+        val chat = normalizeUuid(conversationId)
+        val cutoff = java.net.URLEncoder.encode(java.time.Instant.now().minusSeconds(9).toString(), "UTF-8")
+        val rows = JSONArray(call("/rest/v1/conversation_typing?select=user_id&conversation_id=eq.$chat&user_id=neq.$uid&updated_at=gt.$cutoff&limit=1"))
+        return rows.length() > 0
+    }
+
     suspend fun updatePresenceHeartbeat() {
         val uid = store.userId ?: return
         val now = java.time.Instant.now().toString()
