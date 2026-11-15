@@ -2164,95 +2164,105 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Column(Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("Контакты", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
-                                        Text("Люди, с которыми можно общаться в Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                                        Text("Все пользователи", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
+                                        Text("Каталог зарегистрированных пользователей Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
                                     }
                                     Box(
                                         Modifier.size(42.dp).clip(RoundedCornerShape(14.dp))
                                             .background(Brush.linearGradient(listOf(Accent, Accent2))),
                                         contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp))
-                                    }
+                                    ) { Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp)) }
                                 }
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Surface1),
-                                    shape = RoundedCornerShape(22.dp),
-                                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-                                ) {
-                                    Column(Modifier.padding(16.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Refresh, null, tint = Accent, modifier = Modifier.size(19.dp))
-                                            Text("Синхронизация контактов", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 9.dp))
+                                OutlinedTextField(
+                                    value = contactsSearch,
+                                    onValueChange = { contactsSearch = it },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp),
+                                    placeholder = { Text("Поиск по имени или @username") },
+                                    singleLine = true,
+                                    leadingIcon = { Icon(Icons.Default.Search, null, tint = Accent) },
+                                    trailingIcon = {
+                                        if (contactsSearch.isNotBlank()) IconButton(onClick = { contactsSearch = "" }) {
+                                            Icon(Icons.Default.Close, "Очистить", tint = SecondaryText)
                                         }
-                                        Text(
-                                            "Найдём знакомых из адресной книги, которые уже зарегистрированы. Номера не отображаются в профиле.",
-                                            color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 7.dp)
-                                        )
-                                        Button(
-                                            onClick = {
-                                                if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED) syncContacts()
-                                                else contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-                                            },
-                                            enabled = !syncingContacts,
-                                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp),
-                                            shape = RoundedCornerShape(15.dp)
-                                        ) {
-                                            Text(if (syncingContacts) "Синхронизируем…" else if (contactsSynced) "Обновить контакты" else "Найти знакомых")
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MainText, unfocusedTextColor = MainText,
+                                        focusedBorderColor = Accent, unfocusedBorderColor = Surface2
+                                    )
+                                )
+                                if (contactsLoading && contactsUsers.isEmpty()) {
+                                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = Accent)
+                                    }
+                                } else if (contactsUsers.isEmpty()) {
+                                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(if (contactsSearch.length < 2 && contactsSearch.isNotBlank()) "Введите минимум 2 символа" else "Пользователи не найдены", color = MainText, fontWeight = FontWeight.SemiBold)
+                                            Text("Здесь появятся все аккаунты Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
                                         }
                                     }
-                                }
-                                if (contactsError.isNotBlank()) Text(contactsError, color = if (contactsSynced) SecondaryText else Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
-                                if (contactsSynced) {
-                                    val registered = deviceContacts.count { it.match != null }
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                } else {
+                                    LazyColumn(
+                                        Modifier.weight(1f),
+                                        contentPadding = PaddingValues(bottom = 18.dp),
+                                        verticalArrangement = Arrangement.spacedBy(7.dp)
                                     ) {
-                                        Column(
-                                            Modifier.weight(1f).clip(RoundedCornerShape(15.dp)).background(Surface1).padding(12.dp)
-                                        ) {
-                                            Text("$registered", color = Success, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                                            Text("В Nexura", color = SecondaryText, fontSize = 11.sp)
-                                        }
-                                        Column(
-                                            Modifier.weight(1f).clip(RoundedCornerShape(15.dp)).background(Surface1).padding(12.dp)
-                                        ) {
-                                            Text("${deviceContacts.size - registered}", color = MainText, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                                            Text("Можно пригласить", color = SecondaryText, fontSize = 11.sp)
-                                        }
-                                    }
-                                    LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
-                                        items(deviceContacts, key = { it.phone }) { person ->
+                                        items(contactsUsers, key = { it.id }) { person ->
                                             Row(
-                                                Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                                    .clip(RoundedCornerShape(17.dp)).background(Surface1)
-                                                    .padding(horizontal = 12.dp, vertical = 11.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if (person.match != null) Avatar(person.match.displayName, person.match.avatar) else Avatar(person.name, "👤")
-                                                Column(Modifier.weight(1f).padding(start = 11.dp, end = 4.dp)) {
-                                                    Text(person.match?.displayName ?: person.name, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
-                                                    Text(if (person.match != null) "Уже в Nexura" else "Ещё не зарегистрирован", color = if (person.match != null) Success else SecondaryText, fontSize = 11.sp)
-                                                }
-                                                if (person.match != null) {
-                                                    TextButton(onClick = {
+                                                Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp))
+                                                    .background(Surface1).clickable {
                                                         scope.launch {
                                                             try {
-                                                                val id = api.createDirect(person.match.userId)
-                                                                openChat(ChatItem(id, person.match.displayName, "direct", null, avatar = person.match.avatar))
+                                                                val chatId = api.createDirect(person.id)
+                                                                openChat(ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id))
                                                                 homeTab = "chats"
                                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
                                                         }
-                                                    }) { Text("Написать", maxLines = 1) }
-                                                } else TextButton(onClick = { inviteContact(person) }) { Text("Пригласить", maxLines = 1) }
+                                                    }.padding(horizontal = 12.dp, vertical = 11.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Avatar(person.displayName, person.avatar)
+                                                Column(Modifier.weight(1f).padding(start = 11.dp, end = 8.dp)) {
+                                                    Text(person.displayName, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                                                    Text(if (person.username.isNotBlank()) "@${person.username}" else "Пользователь Nexura", color = Accent, fontSize = 11.sp, maxLines = 1)
+                                                }
+                                                TextButton(onClick = {
+                                                    scope.launch {
+                                                        try {
+                                                            val chatId = api.createDirect(person.id)
+                                                            openChat(ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id))
+                                                            homeTab = "chats"
+                                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
+                                                    }
+                                                }) { Text("Написать", maxLines = 1) }
+                                            }
+                                        }
+                                        if (contactsHasMore) {
+                                            item {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        scope.launch {
+                                                            contactsLoading = true
+                                                            try {
+                                                                val next = api.listUsers(contactsSearch, contactsOffset, 50)
+                                                                contactsUsers = (contactsUsers + next).distinctBy { it.id }
+                                                                contactsOffset += next.size
+                                                                contactsHasMore = next.size == 50
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось загрузить ещё пользователей" }
+                                                            finally { contactsLoading = false }
+                                                        }
+                                                    },
+                                                    enabled = !contactsLoading,
+                                                    modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
+                                                    shape = RoundedCornerShape(14.dp)
+                                                ) { Text(if (contactsLoading) "Загружаем…" else "Показать ещё") }
                                             }
                                         }
                                     }
-                                } else Spacer(Modifier.weight(1f))
+                                }
                             }
                         }
-
                         if (homeTab == "social") {
                             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
