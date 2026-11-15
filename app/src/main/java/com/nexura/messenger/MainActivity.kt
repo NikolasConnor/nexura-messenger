@@ -827,6 +827,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         messageReactions = emptyMap()
         pinnedMessageId = null
         canManagePins = false
+        savedMessageIds = emptySet()
+        scrollToMessageId = null
         replyTarget = null
         chatSearchOpen = false
         chatSearchQuery = ""
@@ -2598,7 +2600,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         }
                                                     }
                                                 ) { Text(if (member.role == "admin") "Снять админа" else "Админ") }
-                                                TextButton(
+                                                if (member.userId != store.userId) TextButton(
                                                     enabled = !groupManagementBusy,
                                                     onClick = {
                                                         scope.launch {
@@ -3296,6 +3298,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 groupSearchDraft = ""
                                                 groupSearchResults = emptyList()
                                                 groupManagementOpen = true
+                                                groupManagerCanEdit = false
                                                 scope.launch {
                                                     groupManagementBusy = true
                                                     try {
@@ -3341,25 +3344,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text("📌", fontSize = 16.sp)
-                                Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                                    Text("Закреплённое сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                    Column(Modifier.weight(1f).padding(start = 8.dp).clickable(enabled = pinnedMessageId != null) {
-                                        val targetId = pinnedMessageId ?: return@clickable
-                                        scope.launch {
-                                            try {
-                                                val target = api.messages(chat.id, e2eeClient, targetMessageId = targetId).firstOrNull()
-                                                    ?: throw IOException("Закреплённое сообщение больше недоступно")
-                                                val before = api.messages(chat.id, e2eeClient, beforeCreatedAt = target.createdAt, pageSize = 30)
-                                                val after = api.messages(chat.id, e2eeClient, afterCreatedAt = target.createdAt, pageSize = 30)
-                                                messages = (messages + before + after + target).distinctBy { it.id }
-                                                    .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
-                                                scrollToMessageId = target.id
-                                            } catch (e: Exception) { error = e.message ?: "Не удалось перейти к закреплённому сообщению" }
-                                        }
-                                    }) {
-                                        Text("Закреплённое сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                        Text(pinned?.content?.take(90) ?: "Нажмите, чтобы перейти к сообщению", color = MainText, fontSize = 12.sp, maxLines = 1)
+                                Column(Modifier.weight(1f).padding(start = 8.dp).clickable(enabled = pinnedMessageId != null) {
+                                    val targetId = pinnedMessageId ?: return@clickable
+                                    scope.launch {
+                                        try {
+                                            val target = api.messages(chat.id, e2eeClient, targetMessageId = targetId).firstOrNull()
+                                                ?: throw IOException("Закреплённое сообщение больше недоступно")
+                                            val before = api.messages(chat.id, e2eeClient, beforeCreatedAt = target.createdAt, pageSize = 30)
+                                            val after = api.messages(chat.id, e2eeClient, afterCreatedAt = target.createdAt, pageSize = 30)
+                                            messages = (messages + before + after + target).distinctBy { it.id }
+                                                .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                            scrollToMessageId = target.id
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось перейти к закреплённому сообщению" }
                                     }
+                                }) {
+                                    Text("Закреплённое сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(pinned?.content?.take(90) ?: "Нажмите, чтобы перейти к сообщению", color = MainText, fontSize = 12.sp, maxLines = 1)
                                 }
                                 if (canManagePins) {
                                     TextButton(onClick = {
