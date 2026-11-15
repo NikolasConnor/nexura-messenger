@@ -1,0 +1,45 @@
+name: Validate Nexura Web v2
+
+on:
+  push:
+    branches:
+      - feature/web-v2-notifications
+    paths:
+      - "web/**"
+      - "crypto-wasm/**"
+      - "crypto-core/**"
+      - ".github/workflows/web-v2-build.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "crypto-wasm/**"
+      - "crypto-core/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Rust and WebAssembly target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Set up wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+      - name: Build shared Olm WebAssembly module
+        run: wasm-pack build crypto-wasm --target web --out-dir ../web/src/crypto/pkg
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Nexura Web
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build -- --base=/nexura-messenger/app/ --outDir=../website/app
