@@ -14,7 +14,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nexura-release-v020-test
+  group: nexura-release-v020-test-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
   build:
