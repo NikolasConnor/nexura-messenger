@@ -1,7 +1,7 @@
 name: Nexura v0.2.0 — NEW test APK
 on:
   push:
-    branches: [ test/rebuild-v0.2.0-new ]
+    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management ]
     paths:
       - "app/**"
       - "crypto-core/**"
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: test/rebuild-v0.2.0-new
+          ref: ${{ github.ref }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
