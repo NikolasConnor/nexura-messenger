@@ -212,6 +212,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var searching by remember { mutableStateOf(false) }
     var openingDirectUserId by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var lowDataMode by remember {
+        mutableStateOf(context.getSharedPreferences("nexura_network", Context.MODE_PRIVATE)
+            .getBoolean("low_data_mode", false))
+    }
     var homeTab by remember { mutableStateOf("chats") }
     var deviceContacts by remember { mutableStateOf(emptyList<DeviceContact>()) }
     var syncingContacts by remember { mutableStateOf(false) }
@@ -598,6 +602,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     withContext(Dispatchers.IO) {
                         secureClient!!.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
                     }
+                } else if (lowDataMode) {
+                    withContext(Dispatchers.IO) {
+                        store.savePendingCloudMessage(messageId, chat.id, text, replyToId)
+                    }
                 }
                 var delivered = false
                 var lastFailure: Exception? = null
@@ -628,6 +636,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (delivered) {
                     messageDelivery[messageId] = "sent"
                     failedMessageRetries.remove(messageId)
+                    if (chat.chatMode == "cloud") {
+                        withContext(Dispatchers.IO) { store.removePendingCloudMessage(messageId) }
+                    }
                     // Only secret chats advance Olm ratchets and need E2EE backup sync.
                     if (chat.chatMode == "secret") {
                         runCatching { api.syncE2eeBackupIfEnabled(secureClient!!) }
@@ -820,7 +831,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             launch {
                 while (true) {
                     if (context.getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE).getBoolean("activity_visible", false)) runCatching { api.updatePresenceHeartbeat() }
-                    delay(60_000L)
+                    delay(if (lowDataMode) 180_000L else 60_000L)
                 }
             }
             try {
@@ -939,7 +950,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         e2eeStatus = "Защита обновлена · $available ключей"
                         retryDelay = 120_000L
-                        delay(120_000L)
+                        delay(if (lowDataMode) 600_000L else 120_000L)
                     } catch (e: Exception) {
                         // Keep the failure visible so users know why key replenishment failed.
                         e2eeStatus = "Не удалось обновить ключи: ${e.message ?: "ошибка сети или сервера"}"
@@ -1054,6 +1065,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    // Retry cloud-mode text messages from the encrypted local queue after connectivity returns.
+    // The same UUID is reused, so a timeout after server acceptance cannot create duplicates.
+    LaunchedEffect(signedIn, chats, lowDataMode) {
+        if (signedIn) {
+            while (true) {
+                delay(if (lowDataMode) 30_000L else 12_000L)
+                val queued = withContext(Dispatchers.IO) { store.pendingCloudMessages() }
+                queued.forEach { item ->
+                    val target = chats.firstOrNull { it.id == item.chatId && it.chatMode == "cloud" }
+                    if (target != null && messageDelivery[item.id] != "sending" && messageDelivery[item.id] != "sent") {
+                        dispatchSecureMessage(target, item.id, item.text, item.replyToId)
+                    }
+                }
+            }
+        }
+    }
+
     // Keep messages and the chat list responsive; optimize the work, not refresh frequency.
     LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
@@ -1061,7 +1089,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             var lastReceiptRefresh = 0L
             while (true) {
                 val currentChat = selected
-                delay(if (currentChat != null && realtimeConnected) 20_000L else if (currentChat != null) retryDelay else maxOf(20_000L, retryDelay))
+                delay(if (lowDataMode) {
+                    if (currentChat != null) 60_000L else 180_000L
+                } else if (currentChat != null && realtimeConnected) 20_000L else if (currentChat != null) retryDelay else maxOf(20_000L, retryDelay))
                 try {
                     if (currentChat != null) {
                         val lastTimestamp = lastSyncedMessageTimestamp
@@ -1086,7 +1116,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
-                    } else if (System.currentTimeMillis() - lastReceiptRefresh >= 60_000L) {
+                    } else if (System.currentTimeMillis() - lastReceiptRefresh >= if (lowDataMode) 180_000L else 60_000L) {
                         val latestChats = api.chats()
                         chats = latestChats
                         withContext(Dispatchers.IO) {
@@ -1280,6 +1310,33 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
+                            }
+                        }
+                        Text("СЕТЬ И ТРАФИК", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Режим 2G / слабый интернет", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            "Меньше фоновых запросов. Текстовые сообщения сохраняются на устройстве и отправляются автоматически, когда связь восстановится.",
+                                            color = SecondaryText, fontSize = 11.sp
+                                        )
+                                    }
+                                    Switch(
+                                        checked = lowDataMode,
+                                        onCheckedChange = { enabled ->
+                                            lowDataMode = enabled
+                                            context.getSharedPreferences("nexura_network", Context.MODE_PRIVATE)
+                                                .edit().putBoolean("low_data_mode", enabled).apply()
+                                            notice = if (enabled) "Включён режим слабого интернета." else "Обычный режим сети включён."
+                                        }
+                                    )
+                                }
+                                if (lowDataMode) {
+                                    Text("РЕЖИМ ВКЛЮЧЁН · синхронизация экономит трафик", color = Success, fontSize = 10.sp,
+                                        modifier = Modifier.padding(top = 10.dp), fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                         Text("ПРИВАТНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
