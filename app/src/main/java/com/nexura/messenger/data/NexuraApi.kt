@@ -143,7 +143,13 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         var response = executeWithTransientRetry(initialRequest, safeToRetry)
         // Refresh an expired access token once, then retry the original request.
         // If another request already rotated the token, reuse its fresh access token.
-        if (response.code == 401 && auth) {
+        val responseError = if (response.code == 403 && auth) {
+            runCatching { response.peekBody(64L * 1024L).string() }.getOrDefault("")
+        } else ""
+        val expiredJwt = responseError.contains("\"code\"") &&
+            (responseError.contains("bad_jwt") || responseError.contains("token is expired") ||
+             responseError.contains("token has invalid claims"))
+        if ((response.code == 401 || (response.code == 403 && expiredJwt)) && auth) {
             response.close()
             refreshAfterUnauthorized(refreshTokenAtRequestStart)
             val freshToken = store.accessToken
