@@ -5110,6 +5110,7 @@ private fun OwnProfileScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PeopleDirectoryScreen(
     modifier: Modifier = Modifier,
@@ -5378,10 +5379,7 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
                 scaleY = emojiScale
             }
         )
-        AnimatedContent(targetState = count, transitionSpec = {
-            (fadeIn(tween(130)) + scaleIn(initialScale = 0.82f, animationSpec = tween(150))) togetherWith
-                fadeOut(tween(90))
-        }, label = "reaction-count") { value ->
+        AnimatedContent(targetState = count, label = "reaction-count") { value ->
             Text(" $value", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
     }
