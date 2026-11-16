@@ -34,23 +34,17 @@ class SessionStore(context: Context) {
         get() = prefs.getString("user_id", null)
         set(value) { prefs.edit().putString("user_id", value).apply() }
 
-    // One-time Telegram OIDC state and PKCE verifier are kept encrypted until callback.
-    var telegramPendingState: String?
-        get() = prefs.getString("telegram_pending_state", null)
-        set(value) { prefs.edit().putString("telegram_pending_state", value).apply() }
+    // Telegram's native OIDC SDK uses PKCE as the callback binding; keep the verifier encrypted.
     var telegramCodeVerifier: String?
         get() = prefs.getString("telegram_code_verifier", null)
         set(value) { prefs.edit().putString("telegram_code_verifier", value).apply() }
 
     @Synchronized
-    fun consumeTelegramVerifier(callbackState: String?): String? {
-        val savedState = telegramPendingState
+    fun consumeTelegramVerifier(): String? {
         val verifier = telegramCodeVerifier
-        val valid = !savedState.isNullOrBlank() && !verifier.isNullOrBlank() &&
-            (callbackState.isNullOrBlank() || savedState == callbackState)
-        if (!valid) return null
-        // Consume only a matching one-time state; invalid deep links cannot cancel a pending login.
-        prefs.edit().remove("telegram_pending_state").remove("telegram_code_verifier").apply()
+        if (verifier.isNullOrBlank()) return null
+        // The verifier is one-time and cannot be reused after a callback.
+        prefs.edit().remove("telegram_code_verifier").apply()
         return verifier
     }
 
