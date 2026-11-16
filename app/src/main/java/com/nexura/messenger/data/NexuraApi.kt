@@ -2149,7 +2149,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
 
     private suspend fun uploadProfileImage(bytes: ByteArray, mimeType: String, prefix: String): String {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        if (bytes.isEmpty() || bytes.size > 8 * 1024 * 1024) throw IOException("Изображение должно быть не больше 8 МБ")
+        if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) throw IOException("Изображение должно быть не больше 5 МБ")
         val ext = when (mimeType.lowercase()) { "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }
         val path = "$uid/$prefix-${UUID.randomUUID()}.$ext"
         val request = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-avatars/$path")
