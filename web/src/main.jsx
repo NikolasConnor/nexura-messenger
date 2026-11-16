@@ -258,6 +258,8 @@ function App() {
   const [scheduleAt,setScheduleAt] = useState('');
   const [scheduleBusy,setScheduleBusy] = useState(false);
   const [scheduledCount,setScheduledCount] = useState(0);
+  const [scheduledModalOpen,setScheduledModalOpen] = useState(false);
+  const [scheduledItems,setScheduledItems] = useState([]);
   const scheduledSendingRef = useRef(new Set());
 
   const [chatThemeOpen, setChatThemeOpen] = useState(false);
@@ -949,6 +951,22 @@ function App() {
     } catch(error) { setNotice('Не удалось запланировать сообщение: '+error.message); }
     finally { setScheduleBusy(false); }
   }
+  async function openScheduledQueue() {
+    try {
+      const rows=await loadEncryptedRecordsByPrefix(session.user.id,'scheduled:');
+      setScheduledItems(rows.map(row=>row.value).filter(Boolean).sort((a,b)=>a.sendAt-b.sendAt));
+      setScheduledModalOpen(true);
+    } catch(error) { setNotice('Не удалось открыть очередь отложенных сообщений: '+error.message); }
+  }
+  async function cancelScheduledMessage(item) {
+    try {
+      await removeEncryptedRecord(session.user.id,'scheduled:'+item.id);
+      setScheduledItems(previous=>previous.filter(row=>row.id!==item.id));
+      setScheduledCount(value=>Math.max(0,value-1));
+      setNotice('Отложенное сообщение отменено.');
+    } catch(error) { setNotice('Не удалось отменить сообщение: '+error.message); }
+  }
+
   const processScheduledMessages = useCallback(async()=>{
     if(!session?.user?.id)return;
     const pending=await loadEncryptedRecordsByPrefix(session.user.id,'scheduled:');
@@ -1790,6 +1808,11 @@ function App() {
         {forwardingBusy && <div className="list-hint">Пересылаем с повторным шифрованием…</div>}
       </section>
     </div>}
+    {scheduledModalOpen&&<div className="modal-backdrop" onClick={()=>setScheduledModalOpen(false)}><section className="group-modal schedule-modal" onClick={event=>event.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">ЛОКАЛЬНАЯ ОЧЕРЕДЬ</div><h3>Отложенные сообщения</h3></div><button className="icon-button" onClick={()=>setScheduledModalOpen(false)}><X size={18}/></button></div>
+      <p className="settings-description">Очередь хранится в зашифрованном хранилище этого браузера. Отправка выполняется, когда Nexura открыта.</p>
+      <div className="scheduled-list">{scheduledItems.map(item=><article className="scheduled-item" key={item.id}><div><b>{item.chatTitle||'Чат'}</b><time>{new Date(item.sendAt).toLocaleString('ru-RU')}</time><p>{item.text}</p><small>{item.chatMode==='cloud'?'Облачный режим':'Сквозное шифрование'}</small></div><button className="danger-text" onClick={()=>cancelScheduledMessage(item)}>Отменить</button></article>)}{!scheduledItems.length&&<div className="social-empty">Отложенных сообщений нет.</div>}</div>
+    </section></div>}
     {scheduleOpen&&<div className="modal-backdrop" onClick={()=>!scheduleBusy&&setScheduleOpen(false)}><section className="group-modal schedule-modal" onClick={event=>event.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">ОТЛОЖЕННАЯ ОТПРАВКА</div><h3>Запланировать сообщение</h3></div><button className="icon-button" onClick={()=>setScheduleOpen(false)} disabled={scheduleBusy}><X size={18}/></button></div>
       <div className="schedule-preview">{draft}</div><label className="modal-label">Дата и время<input type="datetime-local" value={scheduleAt} onChange={event=>setScheduleAt(event.target.value)}/></label>

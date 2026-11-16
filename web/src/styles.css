@@ -716,3 +716,10 @@ body{overscroll-behavior:none}
 .schedule-modal input[type=datetime-local]{width:100%;margin-top:7px;border:1px solid #393047;border-radius:10px;background:#120f1a;color:white;padding:11px 12px;color-scheme:dark}
 
 .social-caption-field{display:grid;gap:7px;margin:12px 2px 20px;color:#a89db6;font-size:10px}.social-caption-field input{width:100%;border:1px solid #393047;border-radius:10px;background:#120f1a;color:white;padding:11px 12px;font-size:11px}.block-user-button{padding:10px 12px;border:1px solid #ffffff20;border-radius:10px;background:#ffffff08;color:#d6cce4;font-size:10px}.block-user-button:hover{border-color:#d46a7a;color:#ffb4bd}
+
+.scheduled-list{display:grid;gap:9px;max-height:55vh;overflow:auto}
+.scheduled-item{display:flex;align-items:flex-start;gap:12px;padding:12px;border:1px solid #ffffff12;border-radius:12px;background:#ffffff06}
+.scheduled-item>div{display:grid;gap:5px;min-width:0;flex:1}
+.scheduled-item b{font-size:11px;color:#f0e9f7}.scheduled-item time,.scheduled-item small{font-size:9px;color:#a49ab2}
+.scheduled-item p{margin:0;color:#e2d9eb;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.scheduled-item .danger-text{border:0;background:transparent;color:#ff9ba9;font-size:10px;cursor:pointer}

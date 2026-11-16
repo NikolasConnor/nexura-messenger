@@ -231,9 +231,17 @@ export async function sendCloudMessage(supabase,{conversationId,messageId,plaint
   if(!clean.trim()||new TextEncoder().encode(clean).byteLength>12000)throw new Error('Сообщение пустое или слишком большое');
   const row={id:id(messageId),conversation_id:id(conversationId),sender_id:user.id,content:clean,message_type:messageType};
   if(replyToId)row.reply_to_id=id(replyToId);
-  const {data,error}=await supabase.from('messages').insert(row).select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at').single();
+  const {data,error}=await supabase.from('messages').upsert(row,{onConflict:'id',ignoreDuplicates:true})
+    .select('id,conversation_id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at').maybeSingle();
   if(error)throw error;
-  return {...data,encrypted:false};
+  if(data)return {...data,encrypted:false};
+  const {data:existing,error:readError}=await supabase.from('messages')
+    .select('id,conversation_id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+    .eq('id',row.id).maybeSingle();
+  if(readError)throw readError;
+  if(!existing||existing.sender_id!==user.id||existing.conversation_id!==row.conversation_id||existing.content!==clean)
+    throw new Error('Сервер уже содержит другое сообщение с этим идентификатором');
+  return {...existing,encrypted:false};
 }
 export async function editCloudMessage(supabase,messageId,newText) {
   const clean=String(newText||'').trim();
