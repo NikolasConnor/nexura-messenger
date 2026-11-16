@@ -279,10 +279,10 @@ object AudioTranscriber {
                 var mixed = 0f
                 repeat(channels) {
                     val sample = when (encoding) {
-                        AudioFormat.ENCODING_PCM_FLOAT -> buffer.float
+                        AudioFormat.ENCODING_PCM_FLOAT -> buffer.getFloat()
                         AudioFormat.ENCODING_PCM_8BIT ->
                             (((buffer.get().toInt() and 0xFF) - 128) / 128f)
-                        else -> buffer.short / 32768f
+                        else -> buffer.getShort() / 32768f
                     }
                     mixed += sample
                 }
