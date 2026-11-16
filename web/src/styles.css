@@ -885,3 +885,12 @@ body{overscroll-behavior:none}
  .stories-feed-actions{display:grid;grid-template-columns:1fr 1fr}
  .stories-feed-actions .social-add-button{padding:9px 7px;font-size:10px}
 }
+
+
+/* Telegram OIDC sign-in */
+.auth-divider{display:flex;align-items:center;gap:14px;margin:18px 0 12px;color:#8f849f;font-size:11px}
+.auth-divider:before,.auth-divider:after{content:'';height:1px;flex:1;background:#ffffff18}
+.telegram-login-btn{display:flex;align-items:center;justify-content:center;gap:11px;min-height:48px;border:1px solid #ffffff20;border-radius:12px;background:#229ed9;color:#fff;font-weight:750;box-shadow:0 8px 24px #168ac733;transition:filter .18s,transform .18s}
+.telegram-login-btn:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.telegram-login-btn:disabled{opacity:.6;cursor:wait;transform:none}
+.telegram-login-mark{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:#ffffff24;font-size:14px;transform:rotate(-25deg)}
