@@ -7,6 +7,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -21,6 +22,8 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 import java.security.MessageDigest
+import java.security.SecureRandom
+import android.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -82,6 +85,9 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
         const val PUBLIC_KEY = "sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY"
         const val AUTH_REDIRECT = "nexura://auth/callback"
+        // Telegram Login OIDC client registered for Nexura in BotFather.
+        const val TELEGRAM_CLIENT_ID = "9098453191"
+        const val TELEGRAM_REDIRECT = "https://app9098453191-login.tg.dev/tglogin"
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
     private val client = OkHttpClient.Builder()
@@ -90,6 +96,13 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         .callTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .build()
+    private val telegramTokenClient = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(45, TimeUnit.SECONDS)
+        // Authorization codes are single-use: never automatically replay this POST.
+        .retryOnConnectionFailure(false)
         .build()
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
     private val remoteDeviceCache = ConcurrentHashMap<String, Pair<E2eeRemoteDevice, Long>>()
@@ -170,6 +183,103 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 throw NexuraHttpException(it.code, message.ifBlank { "HTTP ${it.code}" })
             }
             responseText
+        }
+    }
+
+    private fun randomUrlSafe(bytes: Int): String {
+        val value = ByteArray(bytes)
+        SecureRandom().nextBytes(value)
+        return Base64.encodeToString(value, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    }
+
+    /** Creates a Telegram OIDC Authorization Code + PKCE request for the native app. */
+    fun createTelegramAuthorizationUrl(): String {
+        val verifier = randomUrlSafe(32)
+        val challenge = Base64.encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)),
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+        )
+        val state = randomUrlSafe(24)
+        store.telegramPendingState = state
+        store.telegramCodeVerifier = verifier
+        return Uri.parse("https://oauth.telegram.org/auth").buildUpon()
+            .appendQueryParameter("client_id", TELEGRAM_CLIENT_ID)
+            .appendQueryParameter("redirect_uri", TELEGRAM_REDIRECT)
+            .appendQueryParameter("response_type", "code")
+            .appendQueryParameter("scope", "openid profile")
+            .appendQueryParameter("state", state)
+            .appendQueryParameter("code_challenge", challenge)
+            .appendQueryParameter("code_challenge_method", "S256")
+            .build().toString()
+    }
+
+    /**
+     * Completes Telegram OIDC in the app, then exchanges the verified Telegram ID token
+     * with Supabase's id_token grant. This avoids Supabase Auth's flaky server-side
+     * request to oauth.telegram.org/token that previously consumed the OAuth state on timeout.
+     */
+    suspend fun consumeTelegramCallback(uri: Uri) {
+        if (uri.scheme != "https" || uri.host != "app9098453191-login.tg.dev" || uri.path != "/tglogin") {
+            throw IOException("Получена неизвестная ссылка авторизации Telegram.")
+        }
+        val providerError = uri.getQueryParameter("error")
+        if (!providerError.isNullOrBlank()) {
+            store.telegramPendingState = null
+            store.telegramCodeVerifier = null
+            throw IOException(uri.getQueryParameter("error_description") ?: "Telegram отменил вход: $providerError")
+        }
+        val code = uri.getQueryParameter("code")
+            ?: throw IOException("Telegram не вернул код авторизации. Начните вход заново.")
+        val state = uri.getQueryParameter("state")
+            ?: throw IOException("Telegram не вернул защитный параметр state. Начните вход заново.")
+        val verifier = store.consumeTelegramVerifier(state)
+            ?: throw IOException("Состояние входа Telegram устарело или уже использовано. Нажмите «Продолжить с Telegram» ещё раз.")
+
+        val tokenRequest = Request.Builder()
+            .url("https://oauth.telegram.org/token")
+            .post(
+                FormBody.Builder()
+                    .add("grant_type", "authorization_code")
+                    .add("client_id", TELEGRAM_CLIENT_ID)
+                    .add("code", code)
+                    .add("redirect_uri", TELEGRAM_REDIRECT)
+                    .add("code_verifier", verifier)
+                    .build()
+            )
+            .header("Accept", "application/json")
+            .build()
+
+        val telegramPayload = withContext(Dispatchers.IO) {
+            telegramTokenClient.newCall(tokenRequest).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    val detail = runCatching {
+                        val json = JSONObject(body)
+                        json.optString("error_description").ifBlank { json.optString("error") }
+                    }.getOrDefault("")
+                    throw IOException(detail.ifBlank { "Telegram не завершил обмен кода (HTTP ${response.code}). Попробуйте ещё раз." })
+                }
+                JSONObject(body)
+            }
+        }
+        val idToken = telegramPayload.optString("id_token").takeIf { it.isNotBlank() }
+            ?: throw IOException("Telegram не вернул ID-токен. Попробуйте войти ещё раз.")
+
+        val supabaseSession = JSONObject(
+            call(
+                "/auth/v1/token?grant_type=id_token",
+                "POST",
+                JSONObject()
+                    .put("provider", "custom:telegram")
+                    .put("id_token", idToken)
+                    .toString(),
+                auth = false
+            )
+        )
+        saveSession(supabaseSession)
+        if (store.accessToken.isNullOrBlank() || store.refreshToken.isNullOrBlank() || store.userId.isNullOrBlank()) {
+            store.clear()
+            throw IOException("Telegram подтвердил вход, но Supabase не выдал полноценную сессию. Повторите вход.")
         }
     }
 
