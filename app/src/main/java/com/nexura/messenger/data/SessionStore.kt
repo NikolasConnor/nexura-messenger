@@ -34,6 +34,22 @@ class SessionStore(context: Context) {
         get() = prefs.getString("user_id", null)
         set(value) { prefs.edit().putString("user_id", value).apply() }
 
+    // One-time Telegram OIDC state and PKCE verifier are kept encrypted until callback.
+    var telegramPendingState: String?
+        get() = prefs.getString("telegram_pending_state", null)
+        set(value) { prefs.edit().putString("telegram_pending_state", value).apply() }
+    var telegramCodeVerifier: String?
+        get() = prefs.getString("telegram_code_verifier", null)
+        set(value) { prefs.edit().putString("telegram_code_verifier", value).apply() }
+
+    fun consumeTelegramVerifier(callbackState: String): String? {
+        val savedState = telegramPendingState
+        val verifier = telegramCodeVerifier
+        // Clear first so a repeated callback cannot reuse the same state/code verifier.
+        prefs.edit().remove("telegram_pending_state").remove("telegram_code_verifier").apply()
+        return verifier?.takeIf { !savedState.isNullOrBlank() && savedState == callbackState }
+    }
+
     data class PendingCloudMessage(val id: String, val chatId: String, val text: String, val replyToId: String?)
 
     @Synchronized
