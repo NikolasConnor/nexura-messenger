@@ -1131,15 +1131,6 @@ function App() {
             <div className="chat-meta"><b>{chat.title}</b><span>{chat.kind==='group'?'Группа':'Личная переписка'}</span></div>
             <div className="chat-trailing">{chat.updated && <time>{timeLabel(chat.updated)}</time>}{chat.unread>0&&<i>{chat.unread}</i>}</div>
           </button>)}
-        </> : <>
-          {contactQuery.trim().length<2 && <div className="empty-list"><Users size={24}/><b>Найди собеседника</b><span>Введи минимум два символа имени или имени пользователя.</span></div>}
-          {contactBusy && <div className="list-hint">Ищем пользователей…</div>}
-          {!contactBusy && contactQuery.trim().length>=2 && contactResults.length===0 && <div className="empty-list"><UserRound size={24}/><b>Никого не нашли</b><span>Попробуй другое имя или username.</span></div>}
-          {contactResults.map(person=><button key={person.id} className="chat-item" onClick={()=>createDirectChat(person)} disabled={contactBusy}>
-            <Avatar value={person.avatar} name={person.title}/>
-            <div className="chat-meta"><b>{person.title}</b><span>{person.username?'@'+person.username:'Пользователь Nexura'}</span></div>
-            <div className="contact-open"><MessageCircle size={16}/></div>
-          </button>)}
         </> : activeTab==='people' ? <>
           {peopleQuery.trim().length>=2 && people.length===0 && !peopleBusy && <div className="empty-list"><UserRoundSearch size={24}/><b>Никого не нашли</b><span>Попробуй другое имя или username.</span></div>}
           {people.length===0 && peopleQuery.trim().length<2 && !peopleBusy && <div className="empty-list"><Users size={24}/><b>Люди Nexura</b><span>Все зарегистрированные пользователи — в одном каталоге.</span></div>}

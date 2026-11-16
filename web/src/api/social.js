@@ -12,6 +12,11 @@ export async function loadProfile(supabase, userId) {
     .select('id,display_name,username,avatar_url,bio,age,banner_url,read_receipts_enabled')
     .eq('id', userId).maybeSingle();
   if (error) throw error;
+  if (data?.banner_url?.startsWith('social:')) {
+    const { data: signed, error: signError } = await supabase.storage.from(SOCIAL_BUCKET)
+      .createSignedUrl(data.banner_url.slice(7), 7 * 24 * 60 * 60);
+    if (!signError) data.banner_display_url = signed.signedUrl;
+  }
   return data;
 }
 
