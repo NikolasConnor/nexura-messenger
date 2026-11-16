@@ -602,14 +602,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 encrypted = withContext(Dispatchers.IO) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
-                // Media bytes upload independently; serialize only the final E2EE envelope
+                // Upload media independently; serialize only the final E2EE envelope
                 // with text sends so simultaneous Olm ratchet operations cannot race.
-                messageSendMutex.withLock {
-                    if (chat.kind == "direct") {
-                        api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
-                    } else {
-                        api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
-                    }
+                if (chat.kind == "direct") {
+                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId, messageSendMutex)
+                } else {
+                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId, messageSendMutex)
                 }
                 uploaded = true
                 messageDelivery[messageId] = "sent"
