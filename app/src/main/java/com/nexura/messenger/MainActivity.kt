@@ -602,10 +602,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 encrypted = withContext(Dispatchers.IO) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
-                if (chat.kind == "direct") {
-                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
-                } else {
-                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
+                // Media bytes upload independently; serialize only the final E2EE envelope
+                // with text sends so simultaneous Olm ratchet operations cannot race.
+                messageSendMutex.withLock {
+                    if (chat.kind == "direct") {
+                        api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
+                    } else {
+                        api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
+                    }
                 }
                 uploaded = true
                 messageDelivery[messageId] = "sent"
@@ -4274,7 +4278,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Spacer(Modifier.width(2.dp))
                                 IconButton(
                                     onClick = { scheduleDraft(chat) },
-                                    enabled = draft.isNotBlank() && !sendingImage && !recordingVoice,
+                                    enabled = draft.isNotBlank() && !recordingVoice,
                                     modifier = Modifier.size(40.dp).align(Alignment.Bottom)
                                 ) { Icon(Icons.Default.Schedule, "Отложить отправку", tint = if (draft.isNotBlank()) Accent else SecondaryText) }
                                 Spacer(Modifier.width(3.dp))
@@ -4297,7 +4301,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             stopVoiceRecording(chat)
                                         }
                                     },
-                                    enabled = !sendingImage,
+                                    enabled = !sendingImage || draft.isNotBlank(),
                                     modifier = Modifier.size(46.dp)
                                         .graphicsLayer { scaleX = sendButtonScale; scaleY = sendButtonScale }
                                         .clip(CircleShape)
@@ -4307,7 +4311,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         )
                                         .align(Alignment.Bottom)
                                 ) {
-                                    if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
+                                    if (sendingImage && draft.isBlank()) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
                                     else if (hasOutgoingContent) Icon(Icons.Default.Send, "Отправить", tint = Bg, modifier = Modifier.size(21.dp))
                                     else Icon(
                                         if (recordingVoice) Icons.Default.Stop else Icons.Default.Mic,
