@@ -68,6 +68,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Description
@@ -4759,7 +4760,7 @@ private fun NexuraBottomBar(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Default.Image, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
+                Icon(Icons.Default.AccountCircle, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
                 Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
         }
