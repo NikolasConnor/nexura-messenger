@@ -1815,20 +1815,29 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 prefer = "resolution=merge-duplicates,return=minimal")
         }
     }
-    private suspend fun signedAttachmentUrl(path: String, bucket: String = "chat-attachments"): String {
+    private suspend fun signedAttachmentUrl(
+        path: String,
+        bucket: String = "chat-attachments",
+        expiresInSeconds: Int = 3600
+    ): String {
         val now = System.currentTimeMillis()
         val cacheKey = "$bucket/$path"
         signedUrlCache[cacheKey]?.let { cached ->
             if (cached.second > now) return cached.first
             signedUrlCache.remove(cacheKey, cached)
         }
-        val payload = JSONObject().put("expiresIn", 3600)
-        val result = JSONObject(call("/storage/v1/object/sign/$bucket/$path", "POST", payload.toString()))
+        val safeExpiry = expiresInSeconds.coerceIn(60, 7 * 24 * 60 * 60)
+        val result = JSONObject(call(
+            "/storage/v1/object/sign/$bucket/$path",
+            "POST",
+            JSONObject().put("expiresIn", safeExpiry).toString()
+        ))
         val signed = result.optString("signedURL").ifBlank { result.optString("signedUrl") }
         if (signed.isBlank()) throw IOException("Не удалось получить ссылку на медиафайл")
         val url = if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
         if (signedUrlCache.size > 500) signedUrlCache.clear()
-        signedUrlCache[cacheKey] = url to (now + 55 * 60 * 1000L)
+        val cacheLifetime = (safeExpiry - 300).coerceAtLeast(30) * 1000L
+        signedUrlCache[cacheKey] = url to (now + cacheLifetime)
         return url
     }
 
@@ -2168,7 +2177,12 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         return path
     }
 
-    private suspend fun socialSignedUrl(path: String): String = signedAttachmentUrl(path, "nexura-social-media")
+    private suspend fun socialSignedUrl(path: String, story: Boolean = false): String =
+        signedAttachmentUrl(
+            path,
+            "nexura-social-media",
+            if (story) 24 * 60 * 60 else 7 * 24 * 60 * 60
+        )
 
     suspend fun publishProfilePhoto(bytes: ByteArray, mimeType: String, caption: String = ""): SocialMediaItem {
         val uid = store.userId ?: throw IOException("Сессия истекла")
@@ -2198,7 +2212,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             val inserted = JSONArray(call("/rest/v1/user_stories", "POST", row.toString(), prefer = "return=representation"))
             val saved = inserted.optJSONObject(0) ?: throw IOException("История не сохранилась")
             return SocialMediaItem(saved.optString("id"), uid, path, mediaType, saved.optString("caption"),
-                saved.optString("created_at"), saved.optString("expires_at"), socialSignedUrl(path))
+                saved.optString("created_at"), saved.optString("expires_at"), socialSignedUrl(path, story = true))
         } catch (e: Exception) {
             runCatching { call("/storage/v1/object/nexura-social-media/$path", "DELETE", auth = true) }
             throw e
@@ -2214,7 +2228,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             result += SocialMediaItem(row.optString("id"), row.optString("user_id"), path,
                 if (stories) row.optString("media_type") else "image", row.optString("caption"),
                 row.optString("created_at"), row.optString("expires_at").takeIf { it.isNotBlank() && it != "null" },
-                socialSignedUrl(path))
+                socialSignedUrl(path, story = stories))
         }
         return result
     }
