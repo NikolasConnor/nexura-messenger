@@ -831,3 +831,17 @@ export async function loadPeopleDirectory(supabase, userId, query = '', offset =
 .group-management-modal{max-height:88vh}.group-rename-row{display:flex;gap:8px}.group-rename-row input,.group-add-area>input{min-width:0;flex:1;border:1px solid #393047;border-radius:10px;background:#120f1a;color:white;padding:11px 12px}.group-rename-row .primary-btn{padding:10px 13px;font-size:10px}
 .group-member-list{display:grid;gap:7px;max-height:260px;overflow:auto}.group-member-manage-row{display:flex;align-items:center;gap:10px;padding:9px;border:1px solid var(--line);border-radius:12px;background:#211c2b}.group-member-manage-row>div:nth-child(2){display:grid;gap:4px;min-width:0;flex:1}.group-member-manage-row b{font-size:11px}.group-member-manage-row small{font-size:9px;color:#9d93aa}.group-member-actions{display:flex;flex-direction:column;gap:5px}.group-member-actions button{border:0;background:#ffffff0b;color:#d1c5e2;border-radius:7px;padding:6px 8px;font-size:9px}.group-member-actions .danger-text{color:#ff9ca8}
 .group-add-area{display:grid;gap:9px}.group-add-area>b{font-size:11px}.group-add-results{display:grid;gap:5px;max-height:145px;overflow:auto}.group-add-results button{display:flex;align-items:center;gap:9px;padding:7px;border:0;border-radius:9px;background:#ffffff08;color:#e5dced;text-align:left}.group-add-results button span{flex:1;font-size:11px}.group-add-results>small{color:#a99eb7;font-size:10px;padding:8px}.leave-group-button{border:1px solid #a9475a55;background:#55263333;color:#ffabb4;border-radius:10px;padding:11px;font-size:11px;font-weight:700}
+
+.group-management-modal{max-height:min(88vh,820px);overflow:auto}
+.group-member-heading{display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px;color:#eee8f7;font-size:12px}
+.group-member-heading span{color:#a49ab2;font-size:10px}
+.group-manage-member-list{display:grid;gap:4px;max-height:310px;overflow:auto}
+.group-manage-member{display:flex;align-items:center;gap:9px;padding:9px 4px;border-top:1px solid #ffffff0c}
+.group-manage-member>div:nth-child(2){display:grid;gap:3px;min-width:0;flex:1}
+.group-manage-member b{font-size:11px;color:#eee8f7}
+.group-manage-member small{font-size:9px;color:#a49ab2}
+.group-manage-member .avatar{width:36px;height:36px;flex:0 0 36px}
+.group-add-result{width:100%;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.group-add-result>span{display:grid;gap:3px;flex:1}
+.group-add-result b{font-size:11px}.group-add-result small{font-size:9px;color:#a49ab2}
+.danger-text-button{border:0;background:transparent;color:#ff9ba9;font-size:10px;cursor:pointer;padding:7px}
