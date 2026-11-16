@@ -208,7 +208,6 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("scope", "openid profile")
             .appendQueryParameter("redirect_uri", TELEGRAM_REDIRECT)
-            .appendQueryParameter("state", state)
             .appendQueryParameter("android_sdk", "1")
             .appendQueryParameter("code_challenge", challenge)
             .appendQueryParameter("code_challenge_method", "S256")
