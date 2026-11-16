@@ -705,7 +705,7 @@ function App() {
       const {error:storageError}=await supabase.storage.from('nexura-social-media').remove([socialViewer.storage_path]);
       if(storageError)throw storageError;
       if(socialViewer.kind==='story'){setProfileStories(previous=>previous.filter(item=>item.id!==socialViewer.id));setStoriesFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
-      else setProfilePhotos(previous=>previous.filter(item=>item.id!==socialViewer.id));
+      else {setProfilePhotos(previous=>previous.filter(item=>item.id!==socialViewer.id));setPublicationsFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
       setSocialViewer(null);setNotice('Публикация удалена');
     }catch(error){setNotice('Не удалось удалить публикацию: '+error.message);}
     finally{setSocialBusy(false);}
