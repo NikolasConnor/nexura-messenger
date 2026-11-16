@@ -39,11 +39,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
 
       - name: Build Nexura Web
         working-directory: web
         run: |
-          npm ci --no-audit --no-fund
+          npm install --no-audit --no-fund --no-package-lock
           npm run build
