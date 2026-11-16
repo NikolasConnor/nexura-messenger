@@ -4035,8 +4035,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             exit = fadeOut() + shrinkVertically()
                                         ) {
                                             Row(
-                                                Modifier.fillMaxWidth().padding(top = 4.dp, start = 5.dp, end = 5.dp),
-                                                horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                                                Modifier.align(if (mine) Alignment.End else Alignment.Start)
+                                                    .padding(top = 4.dp, start = 5.dp, end = 5.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                     reactionsForMessage.forEach { reaction ->
