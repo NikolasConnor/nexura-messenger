@@ -34,7 +34,7 @@ data class SocialMediaItem(
 data class SocialPhotoComment(val id: String, val userId: String, val content: String, val createdAt: String)
 data class SocialReactionState(val count: Int, val likedByMe: Boolean)
 data class GroupMemberItem(val userId: String, val displayName: String, val username: String, val avatar: String, val role: String)
-data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
+data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null, val banner: String = "")
 data class UserItem(val id: String, val displayName: String, val avatar: String, val username: String = "")
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
 data class NotificationPreferences(
@@ -2062,7 +2062,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
 
     suspend fun myProfile(): UserProfile {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$uid&limit=1"))
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age,banner_url&id=eq.$uid&limit=1"))
         if (raw.length() == 0) {
             val authUser = JSONObject(call("/auth/v1/user", auth = true))
             val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
@@ -2090,13 +2090,18 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 runCatching { updateMyUsername(metadataUsername) }.onSuccess { username = metadataUsername }
             }
         }
-        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
+        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"), p.optString("banner_url"))
     }
 
     private fun validateUsername(value: String) {
         if (!value.matches(Regex("^[a-z][a-z0-9_]{2,23}$"))) {
             throw IOException("Username: 3–24 символа, латинские буквы, цифры и _, начинаться должен с буквы.")
         }
+    }
+
+    suspend fun updateMyBanner(url: String?) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        call("/rest/v1/profiles?id=eq.$uid", "PATCH", JSONObject().put("banner_url", url ?: JSONObject.NULL).toString(), prefer = "return=minimal")
     }
 
     suspend fun updateMyUsername(value: String) {
@@ -2128,7 +2133,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
 
     suspend fun userProfile(userId: String): UserProfile {
         val id = normalizeUuid(userId)
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$id&limit=1"))
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age,banner_url&id=eq.$id&limit=1"))
         if (raw.length() == 0) throw IOException("Профиль пользователя не найден")
         val p = raw.getJSONObject(0)
         return UserProfile(
@@ -2137,8 +2142,24 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             p.optString("username"),
             p.optString("avatar_url").ifBlank { "🙂" },
             p.optString("bio"),
-            if (p.isNull("age")) null else p.optInt("age")
+            if (p.isNull("age")) null else p.optInt("age"),
+            p.optString("banner_url")
         )
+    }
+
+    suspend fun uploadBanner(bytes: ByteArray, mimeType: String): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (bytes.isEmpty() || bytes.size > 8 * 1024 * 1024) throw IOException("Баннер должен быть не больше 8 МБ")
+        val ext = when (mimeType.lowercase()) { "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }
+        val path = "$uid/banner-${UUID.randomUUID()}.$ext"
+        val request = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-avatars/$path")
+            .header("apikey", PUBLIC_KEY).header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
+            .header("Content-Type", mimeType).header("x-upsert", "false")
+            .post(bytes.toRequestBody(mimeType.toMediaType())).build()
+        withContext(Dispatchers.IO) { client.newCall(request).execute() }.use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить баннер (HTTP ${it.code})")
+        }
+        return "$BASE_URL/storage/v1/object/public/nexura-avatars/$path"
     }
 
     suspend fun uploadAvatar(bytes: ByteArray, mimeType: String): String {

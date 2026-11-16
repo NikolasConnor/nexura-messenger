@@ -279,6 +279,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingDownloadFile by remember { mutableStateOf<File?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
+    var mediaViewerItems by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var mediaViewerIndex by remember { mutableIntStateOf(0) }
+    val openChatMedia: (MessageItem) -> Unit = { mediaItem ->
+        val galleryItems = messages.filter { it.mediaKind == "image" || it.mediaKind == "video" }.sortedBy { it.createdAt }
+        mediaViewerItems = galleryItems
+        mediaViewerIndex = galleryItems.indexOfFirst { it.id == mediaItem.id }.coerceAtLeast(0)
+        mediaViewerUri = Uri.parse(mediaItem.content)
+        mediaViewerType = mediaItem.mediaKind ?: "image"
+    }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
@@ -3054,7 +3063,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         .clickable {
                                                             when (item.mediaKind) {
                                                                 "video", "image" -> {
-                                                                    mediaViewerUri = Uri.parse(item.content)
+                                                                    openChatMedia(item)
                                                                     mediaViewerType = item.mediaKind ?: "image"
                                                                     chatGallery = null
                                                                 }
@@ -3743,7 +3752,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     VideoThumbnail(
                                                         uri = mediaUri,
                                                         modifier = Modifier.width(230.dp).height(150.dp),
-                                                        onClick = { mediaViewerUri = mediaUri; mediaViewerType = "video" }
+                                                        onClick = { openChatMedia(msg) }
                                                     )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
                                                         Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
@@ -4362,11 +4371,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     // Global media viewer, independent of the currently selected screen.
     if (mediaViewerUri != null) {
-        Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null })
-                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null }, contentScale = ContentScale.Fit)
-                IconButton(onClick = { mediaViewerUri = null }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
+        Dialog(onDismissRequest = { mediaViewerUri = null; mediaViewerItems = emptyList() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            var horizontalDrag by remember { mutableFloatStateOf(0f) }
+            Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(mediaViewerIndex, mediaViewerItems) {
+                detectHorizontalDragGestures(onDragEnd = {
+                    if (horizontalDrag < -70f && mediaViewerIndex < mediaViewerItems.lastIndex) { mediaViewerIndex++; val next = mediaViewerItems[mediaViewerIndex]; mediaViewerUri = Uri.parse(next.content); mediaViewerType = next.mediaKind ?: "image" }
+                    else if (horizontalDrag > 70f && mediaViewerIndex > 0) { mediaViewerIndex--; val next = mediaViewerItems[mediaViewerIndex]; mediaViewerUri = Uri.parse(next.content); mediaViewerType = next.mediaKind ?: "image" }
+                    horizontalDrag = 0f
+                }, onHorizontalDrag = { _, amount -> horizontalDrag += amount })
+            }, contentAlignment = Alignment.Center) {
+                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
+                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null; mediaViewerItems = emptyList() }, contentScale = ContentScale.Fit)
+                if (mediaViewerItems.size > 1) Text("${mediaViewerIndex + 1} / ${mediaViewerItems.size}", color = Color.White, fontSize = 12.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 34.dp).background(Color(0x99000000), RoundedCornerShape(20.dp)).padding(horizontal = 13.dp, vertical = 7.dp))
+                IconButton(onClick = { mediaViewerUri = null; mediaViewerItems = emptyList() }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
             }
         }
     }
@@ -4378,6 +4395,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
     val context = LocalContext.current
     var playbackError by remember(uri) { mutableStateOf<String?>(null) }
+    var playing by remember(uri) { mutableStateOf(true) }
+    var position by remember(uri) { mutableLongStateOf(0L) }
+    var duration by remember(uri) { mutableLongStateOf(0L) }
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
@@ -4385,35 +4405,59 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
             prepare()
         }
     }
-
     DisposableEffect(player) {
         val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+            override fun onPlaybackStateChanged(state: Int) { duration = player.duration.coerceAtLeast(0L) }
             override fun onPlayerError(error: PlaybackException) {
-                playbackError = error.localizedMessage?.takeIf { it.isNotBlank() }
-                    ?: "Формат видео не поддерживается этим устройством"
+                playbackError = error.localizedMessage?.takeIf { it.isNotBlank() } ?: "Не удалось воспроизвести видео"
             }
         }
         player.addListener(listener)
-        onDispose {
-            player.removeListener(listener)
-            player.release()
+        onDispose { player.removeListener(listener); player.release() }
+    }
+    LaunchedEffect(player) {
+        while (true) {
+            position = player.currentPosition.coerceAtLeast(0L)
+            duration = player.duration.coerceAtLeast(0L)
+            delay(250L)
         }
     }
-
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
+    fun timeLabel(ms: Long): String {
+        val seconds = (ms / 1000L).coerceAtLeast(0L)
+        return "%d:%02d".format(seconds / 60L, seconds % 60L)
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
-            factory = { ctx ->
-                (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView)
-                    .apply { this.player = player }
-            },
-            update = { it.player = player },
-            modifier = Modifier.weight(1f).fillMaxWidth()
+            factory = { ctx -> (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView).apply { this.player = player; useController = false } },
+            update = { it.player = player; it.useController = false },
+            modifier = Modifier.fillMaxSize()
         )
-        playbackError?.let {
-            Text(it, color = Color.White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
-        }
-        Row(Modifier.fillMaxWidth().padding(end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onClose) { Text("Закрыть", color = Color.White) }
+        Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent, Color.Transparent, Color(0xCC000000)))).padding(horizontal = 18.dp, vertical = 22.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("NEXURA PLAYER", color = Color.White.copy(alpha = 0.72f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Text("Сейчас воспроизводится", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                IconButton(onClick = onClose, modifier = Modifier.background(Color(0x66000000), CircleShape)) { Icon(Icons.Default.Close, "Закрыть", tint = Color.White) }
+            }
+            Column {
+                playbackError?.let { Text(it, color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
+                Slider(value = if (duration > 0L) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f,
+                    onValueChange = { fraction -> if (duration > 0L) { val target = (fraction * duration).toLong(); position = target; player.seekTo(target) } },
+                    modifier = Modifier.fillMaxWidth(), colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color.White.copy(alpha = 0.35f)))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(timeLabel(position), color = Color.White, fontSize = 11.sp)
+                    Spacer(Modifier.weight(1f))
+                    Surface(color = Color(0x55000000), shape = RoundedCornerShape(24.dp)) {
+                        IconButton(onClick = { if (playing) player.pause() else player.play() }, modifier = Modifier.size(54.dp)) {
+                            Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "Пауза" else "Воспроизвести", tint = Color.White, modifier = Modifier.size(30.dp))
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(timeLabel(duration), color = Color.White, fontSize = 11.sp)
+                }
+            }
         }
     }
 }
@@ -4868,6 +4912,7 @@ private fun NexuraBottomBar(
             )
             items.forEach { (key, label, icon) ->
                 val active = selected == key && !profileSelected
+                val iconScale by animateFloatAsState(targetValue = if (active) 1.08f else 1f, animationSpec = spring(stiffness = 420f), label = "nexura-nav-scale")
                 Column(
                     modifier = Modifier.weight(1f).fillMaxHeight()
                         .clip(RoundedCornerShape(17.dp))
@@ -4876,7 +4921,7 @@ private fun NexuraBottomBar(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp))
+                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale })
                     Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
                 }
             }
