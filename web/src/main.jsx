@@ -204,6 +204,8 @@ function App() {
   const selectedChatIdRef = useRef(null);
   selectedChatIdRef.current = selected?.id || null;
   const [messages, setMessages] = useState([]);
+  const [peerTyping,setPeerTyping] = useState(false);
+  const [peerPresence,setPeerPresence] = useState(null);
   const [outgoingMediaStatus, setOutgoingMediaStatus] = useState({});
   const messageLoadSeq = useRef(0);
   const pendingMediaOutboxRef = useRef(new Map());
@@ -1476,6 +1478,82 @@ function App() {
   const activeMenuMessage = messages.find(message => message.id === messageMenu) || null;
   const activeMenuMine = activeMenuMessage?.sender_id === session?.user?.id;
 
+  useEffect(()=>{
+    if(!session?.user?.id)return;
+    let active=true;
+    const heartbeat=async()=>{
+      try{
+        const {data,error}=await supabase.from('user_presence').select('user_id').eq('user_id',session.user.id).maybeSingle();
+        if(error)throw error;
+        const payload={last_seen_at:new Date().toISOString()};
+        const result=data
+          ? await supabase.from('user_presence').update(payload).eq('user_id',session.user.id)
+          : await supabase.from('user_presence').insert({user_id:session.user.id,...payload});
+        if(result.error)throw result.error;
+      }catch(error){if(active)console.debug('Nexura presence heartbeat unavailable',error?.message);}
+    };
+    void heartbeat();
+    const timer=setInterval(()=>{if(document.visibilityState==='visible')void heartbeat();},60000);
+    const onFocus=()=>{if(document.visibilityState==='visible')void heartbeat();};
+    document.addEventListener('visibilitychange',onFocus);
+    return()=>{active=false;clearInterval(timer);document.removeEventListener('visibilitychange',onFocus);};
+  },[session?.user?.id]);
+
+  useEffect(()=>{
+    if(!selected?.id||!session?.user?.id){setPeerTyping(false);setPeerPresence(null);return;}
+    let active=true;
+    const peerId=selected.kind==='direct'?selected.peerUserId:null;
+    const refresh=async()=>{
+      if(!peerId){setPeerTyping(false);setPeerPresence(null);return;}
+      try{
+        const [{data:typing,error:typingError},{data:presence,error:presenceError}]=await Promise.all([
+          supabase.from('conversation_typing').select('user_id,updated_at').eq('conversation_id',selected.id).neq('user_id',session.user.id).gt('updated_at',new Date(Date.now()-9000).toISOString()).limit(1),
+          supabase.rpc('get_user_presence',{p_user_id:peerId})
+        ]);
+        if(typingError)throw typingError;
+        if(presenceError)throw presenceError;
+        if(!active)return;
+        setPeerTyping(!!typing?.length);
+        const row=Array.isArray(presence)?presence[0]:presence;
+        setPeerPresence(row||null);
+      }catch(error){if(active)console.debug('Nexura peer status unavailable',error?.message);}
+    };
+    void refresh();
+    const timer=setInterval(refresh,3500);
+    const channel=supabase.channel('web-typing-'+selected.id)
+      .on('postgres_changes',{event:'*',schema:'public',table:'conversation_typing',filter:'conversation_id=eq.'+selected.id},()=>void refresh())
+      .subscribe();
+    return()=>{active=false;clearInterval(timer);supabase.removeChannel(channel);};
+  },[selected?.id,selected?.peerUserId,selected?.kind,session?.user?.id]);
+
+  useEffect(()=>{
+    if(!selected?.id||!session?.user?.id)return;
+    let cancelled=false;
+    const syncTyping=async()=>{
+      try{
+        if(draft.trim()){
+          const {error}=await supabase.from('conversation_typing').upsert({
+            conversation_id:selected.id,user_id:session.user.id,updated_at:new Date().toISOString()
+          },{onConflict:'conversation_id,user_id'});
+          if(error)throw error;
+        }else{
+          const {error}=await supabase.from('conversation_typing').delete().eq('conversation_id',selected.id).eq('user_id',session.user.id);
+          if(error)throw error;
+        }
+      }catch(error){if(!cancelled)console.debug('Nexura typing sync unavailable',error?.message);}
+    };
+    const timer=setTimeout(()=>void syncTyping(),draft.trim()?450:0);
+    return()=>{cancelled=true;clearTimeout(timer);};
+  },[draft,selected?.id,session?.user?.id]);
+
+  useEffect(()=>{
+    return()=>{
+      if(selectedChatIdRef.current&&session?.user?.id){
+        void supabase.from('conversation_typing').delete().eq('conversation_id',selectedChatIdRef.current).eq('user_id',session.user.id);
+      }
+    };
+  },[session?.user?.id]);
+
   useEffect(() => {
     const field = composerInputRef.current;
     if (!field) return;
@@ -1544,7 +1622,7 @@ function App() {
           <div className="web-social-grid">{profilePhotos.map(item=><button key={item.id} className="web-photo-card" onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фотография профиля'}/></button>)}{!profilePhotos.length&&<div className="social-empty">Здесь будут фотографии твоего профиля.</div>}</div>
         </div>
       </section> : activeTab==='people' ? <div className="people-page"><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p></div><section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Свежие публикации участников</span></div><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline/>:<img src={item.url} alt="История"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{!storiesFeed.length&&<div className="social-empty">Пока нет активных историй. Будь первым — опубликуй свою в профиле.</div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_online?'в сети':peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
           <button onClick={()=>{setChatSearchOpen(value=>!value);setChatSearchQuery('');setChatToolsOpen(false);}}><Search size={15}/>Поиск по переписке</button>
           <button onClick={()=>{setChatGalleryOpen(true);setChatToolsOpen(false);}}><ImageIcon size={15}/>Медиа и ссылки</button>
           <button onClick={()=>changeChatMute(chatMutedUntil&&new Date(chatMutedUntil)>new Date()?null:60*60*1000)}><Bell size={15}/>{chatMutedUntil&&new Date(chatMutedUntil)>new Date()?'Включить уведомления':'Отключить на час'}</button>
