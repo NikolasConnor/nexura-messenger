@@ -141,37 +141,20 @@ function AuthScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  function loginWithTelegram() {
+  async function loginWithTelegram() {
     setBusy(true); setError(''); setNotice('');
-    const telegram = window.Telegram?.Login;
-    if (!telegram?.auth) {
-      setBusy(false);
-      setError('Не удалось загрузить Telegram Login. Обнови страницу и попробуй ещё раз.');
-      return;
-    }
-    const nonceBytes = new Uint8Array(32);
-    window.crypto.getRandomValues(nonceBytes);
-    const nonce = Array.from(nonceBytes, byte => byte.toString(16).padStart(2, '0')).join('');
     try {
-      telegram.auth({ client_id: 9098453191, scope: ['profile'], lang: 'ru', nonce }, async result => {
-        try {
-          if (result?.error) throw new Error(result.error);
-          if (!result?.id_token) throw new Error('Telegram не вернул токен авторизации.');
-          const { error: authError } = await supabase.auth.signInWithIdToken({
-            provider: 'custom:telegram',
-            token: result.id_token,
-            nonce
-          });
-          if (authError) throw authError;
-        } catch (e) {
-          setError(e?.message || 'Не удалось войти через Telegram');
-        } finally {
-          setBusy(false);
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider: 'custom:telegram',
+        options: {
+          redirectTo: window.location.origin + window.location.pathname,
+          scopes: 'openid profile'
         }
       });
+      if (authError) throw authError;
     } catch (e) {
       setBusy(false);
-      setError(e?.message || 'Не удалось открыть окно Telegram');
+      setError(e?.message || 'Не удалось начать вход через Telegram');
     }
   }
 
