@@ -196,6 +196,8 @@ function App() {
   const [profilePhotos, setProfilePhotos] = useState([]);
   const [profileStories, setProfileStories] = useState([]);
   const [storiesFeed, setStoriesFeed] = useState([]);
+  const [storiesFeedLoading, setStoriesFeedLoading] = useState(false);
+  const [storiesFeedError, setStoriesFeedError] = useState('');
   const [people, setPeople] = useState([]);
   const [peopleQuery, setPeopleQuery] = useState('');
   const [peopleOffset, setPeopleOffset] = useState(0);
@@ -660,6 +662,9 @@ function App() {
   }
 
   async function loadStoriesFeed() {
+    if (!session?.user?.id) return;
+    setStoriesFeedLoading(true);
+    setStoriesFeedError('');
     try {
       const stories=await loadStories(supabase,{activeOnly:true});
       const ids=[...new Set(stories.map(story=>story.user_id))];
@@ -668,10 +673,24 @@ function App() {
       if(error)throw error;
       const byId=new Map((profiles||[]).map(profile=>[profile.id,profile]));
       setStoriesFeed(stories.map(story=>({...story,profile:byId.get(story.user_id)||{display_name:'Пользователь'}})));
-    } catch(error) { setNotice('Не удалось загрузить истории: '+error.message); }
+    } catch(error) {
+      console.error('Nexura stories feed:', error);
+      setStoriesFeedError(error?.message || 'Не удалось загрузить истории');
+      setNotice('Не удалось загрузить истории: '+(error?.message || 'ошибка'));
+    } finally { setStoriesFeedLoading(false); }
   }
 
-  useEffect(()=>{if(activeTab==='people'&&session?.user?.id)void loadStoriesFeed();},[activeTab,session?.user?.id]);
+  useEffect(()=>{
+    if(activeTab!=='people'||!session?.user?.id)return;
+    void loadStoriesFeed();
+    let timer=null;
+    const channel=supabase.channel('web-stories-feed-'+session.user.id)
+      .on('postgres_changes',{event:'*',schema:'public',table:'user_stories'},()=>{
+        if(timer)clearTimeout(timer);
+        timer=setTimeout(()=>void loadStoriesFeed(),250);
+      }).subscribe();
+    return()=>{if(timer)clearTimeout(timer);supabase.removeChannel(channel);};
+  },[activeTab,session?.user?.id]);
 
   async function deleteCurrentSocialItem() {
     if(!socialViewer||socialViewer.user_id!==session.user.id||socialBusy)return;
@@ -1839,7 +1858,7 @@ function App() {
   if (!session) return <AuthScreen/>;
 
   return <div className="messenger">
-    <aside className={'sidebar '+(mobileChatOpen?'mobile-hidden':'')}>
+    <aside className={'sidebar '+(mobileChatOpen||activeTab!=='chats'?'mobile-hidden':'')}>
       <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><div className="side-actions"><button className="icon-button" onClick={()=>setGroupOpen(true)} title="Создать группу"><Plus size={18}/></button><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div></div>
       <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={openProfileSettings} title="Редактировать профиль"><Settings size={17}/></button><button className="icon-button" onClick={openAdvancedSettings} title="Настройки приватности и безопасности"><ShieldCheck size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
       <div className="side-tabs side-tabs-expanded">
@@ -1875,9 +1894,9 @@ function App() {
       </div>
       <div className="sidebar-foot"><ShieldCheck size={15}/> Nexura · веб-клиент</div>
     </aside>
-    <main className={'chat-area '+(mobileChatOpen?'mobile-visible':'')}>
+    <main className={'chat-area '+(mobileChatOpen||activeTab==='people'||activeTab==='profile'?'mobile-visible':'')}>
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
-      {activeTab==='profile' ? <section className="web-profile-page">
+      {activeTab==='profile' ? <section className="web-profile-page"><button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button>
         <div className="web-profile-cover" onClick={()=>bannerInputRef.current?.click()}>
           {profile?.banner_display_url || profile?.banner_url?.startsWith('http') ? (profile.banner_url?.startsWith('social:') ? <video src={profile.banner_display_url} autoPlay muted loop playsInline/> : <img src={profile.banner_url} alt="Обложка профиля"/>) : <div className="cover-placeholder"><ImageIcon size={34}/><b>Добавь обложку профиля</b><span>Фото или видео без звука</span></div>}
           <button className="cover-edit" onClick={event=>{event.stopPropagation();bannerInputRef.current?.click();}}><Camera size={15}/> Изменить обложку</button>
@@ -1891,9 +1910,9 @@ function App() {
         <div className="web-social-section"><div className="web-section-heading"><div><h3>Фотографии</h3><span>Твоя галерея профиля</span></div><button className="social-add-button" onClick={()=>photoInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={photoInputRef} type="file" accept="image/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('photo',file);event.target.value='';}}/></div>
           <div className="web-social-grid">{profilePhotos.map(item=><button key={item.id} className="web-photo-card" onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фотография профиля'}/></button>)}{!profilePhotos.length&&<div className="social-empty">Здесь будут фотографии твоего профиля.</div>}</div>
         </div>
-      </section> : activeTab==='people' ? <div className="people-page"><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p><div className="people-tools"><button className="secondary-btn" onClick={syncBrowserContacts} disabled={contactSyncBusy}>{contactSyncBusy?'Проверяем…':'Синхронизировать контакты'}</button><button className="primary-btn" onClick={shareNexuraInvite}>Пригласить друзей</button><small>Браузер попросит выбрать контакты вручную. На сервер отправляются только выбранные номера для поиска совпадений.</small></div></div>
+      </section> : activeTab==='people' ? <div className="people-page"><button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p><div className="people-tools"><button className="secondary-btn" onClick={syncBrowserContacts} disabled={contactSyncBusy}>{contactSyncBusy?'Проверяем…':'Синхронизировать контакты'}</button><button className="primary-btn" onClick={shareNexuraInvite}>Пригласить друзей</button><small>Браузер попросит выбрать контакты вручную. На сервер отправляются только выбранные номера для поиска совпадений.</small></div></div>
       {contactMatches.length>0&&<section className="contact-matches"><div className="web-section-heading"><h3>Знакомые в Nexura</h3><span>{contactMatches.length}</span></div><div className="contact-match-grid">{contactMatches.map(person=><article key={person.user_id} className="contact-match-item"><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.phone||''}</small></span><button className="primary-btn" onClick={()=>createDirectChat({id:person.user_id,title:person.display_name||'Пользователь',avatar:person.avatar_url})}><MessageCircle size={14}/> Написать</button></article>)}</div></section>}
-      <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Свежие публикации участников</span></div><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline/>:<img src={item.url} alt="История"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{!storiesFeed.length&&<div className="social-empty">Пока нет активных историй. Будь первым — опубликуй свою в профиле.</div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
+      <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>{storiesFeed.length ? `${storiesFeed.length} активных публикаций` : 'Свежие публикации участников'}</span></div><div className="stories-feed-actions"><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading} title="Обновить истории"><RefreshCw size={15}/> Обновить</button><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')} aria-label={`Открыть историю: ${item.profile?.display_name||item.profile?.username||'Участник'}`}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline preload="metadata"/>:<img src={item.url} alt="История" loading="lazy"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{storiesFeedLoading&&!storiesFeed.length&&<div className="social-empty stories-feed-empty">Загружаем истории…</div>}{!storiesFeedLoading&&!storiesFeed.length&&<div className="stories-feed-empty"><div className="social-empty">{storiesFeedError ? `Не удалось загрузить истории: ${storiesFeedError}` : 'Пока нет активных историй. Будь первым — опубликуй свою в профиле.'}</div><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading}><RefreshCw size={15}/> Повторить загрузку</button></div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
         <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_visible&&peerPresence?.is_online?'в сети':peerPresence?.is_visible&&peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><button className="icon-button" onClick={toggleConversationMode} title="Режим шифрования" aria-label="Режим шифрования"><LockKeyhole size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
           <button onClick={()=>{setChatSearchOpen(value=>!value);setChatSearchQuery('');setChatToolsOpen(false);}}><Search size={15}/>Поиск по переписке</button>
           <button onClick={()=>{setChatGalleryOpen(true);setChatToolsOpen(false);}}><ImageIcon size={15}/>Медиа и ссылки</button>
