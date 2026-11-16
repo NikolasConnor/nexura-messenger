@@ -1443,6 +1443,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
                         ) { Text("Продолжить с Google", fontWeight = FontWeight.SemiBold) }
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
+                                val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=custom%3Atelegram&redirect_to=$redirect"
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            },
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
+                        ) { Text("Продолжить с Telegram", fontWeight = FontWeight.SemiBold) }
                         Text("или войдите по электронной почте", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 22.dp, bottom = 8.dp))
                         if (phoneMode) {
                             AuthField(phone, { phone = it; smsSent = false }, "Номер телефона", "+49 123 456789", keyboard = ImeAction.Next)
