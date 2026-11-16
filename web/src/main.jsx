@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
@@ -102,6 +102,8 @@ function PendingMediaPreview({ file }) {
   return <span className="pending-file-icon">📎</span>;
 }
 
+import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
+
 function AuthScreen() {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -164,6 +166,28 @@ function App() {
   const [session, setSession] = useState(null);
   const [initializing, setInitializing] = useState(true);
   const [profile, setProfile] = useState(null);
+  const [profilePhotos, setProfilePhotos] = useState([]);
+  const [profileStories, setProfileStories] = useState([]);
+  const [people, setPeople] = useState([]);
+  const [peopleQuery, setPeopleQuery] = useState('');
+  const [peopleOffset, setPeopleOffset] = useState(0);
+  const [peopleHasMore, setPeopleHasMore] = useState(true);
+  const [peopleBusy, setPeopleBusy] = useState(false);
+  const [viewedProfile, setViewedProfile] = useState(null);
+  const [viewedPhotos, setViewedPhotos] = useState([]);
+  const [viewedStories, setViewedStories] = useState([]);
+  const [socialViewer, setSocialViewer] = useState(null);
+  const [socialComments, setSocialComments] = useState([]);
+  const [socialCommentDraft, setSocialCommentDraft] = useState('');
+  const [socialLiked, setSocialLiked] = useState(false);
+  const [socialBusy, setSocialBusy] = useState(false);
+  const [socialCaption, setSocialCaption] = useState('');
+  const [profileEdit, setProfileEdit] = useState(false);
+  const [profileEditDraft, setProfileEditDraft] = useState({display_name:'',username:'',avatar_url:'🙂',bio:'',age:''});
+  const [profileEditBusy, setProfileEditBusy] = useState(false);
+  const photoInputRef = useRef(null);
+  const storyInputRef = useRef(null);
+  const bannerInputRef = useRef(null);
   const [chats, setChats] = useState([]);
   const [selected, setSelected] = useState(null);
   const selectedChatIdRef = useRef(null);
@@ -191,7 +215,7 @@ function App() {
   const [groupMembers, setGroupMembers] = useState([]);
   const [groupBusy, setGroupBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [profileDraft, setProfileDraft] = useState({ display_name: '', avatar_url: '🙂', bio: '', age: '' });
+  const [profileDraft, setProfileDraft] = useState({ display_name: '', username: '', avatar_url: '🙂', bio: '', age: '' });
   const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [pendingMedia, setPendingMedia] = useState(null);
@@ -454,6 +478,146 @@ function App() {
       supabase.removeChannel(channel);
     };
   }, [session?.user?.id, loadChats]);
+
+  const loadPeople = useCallback(async ({reset = false} = {}) => {
+    if (!session?.user?.id || peopleBusy) return;
+    const offset = reset ? 0 : peopleOffset;
+    setPeopleBusy(true);
+    try {
+      const rows = await loadPeopleDirectory(supabase, session.user.id, peopleQuery, offset, 40);
+      setPeople(previous => reset ? rows : [...previous, ...rows.filter(row => !previous.some(old => old.id === row.id))]);
+      setPeopleOffset(offset + 40);
+      setPeopleHasMore(rows.length === 40);
+    } catch (error) { setNotice('Не удалось загрузить каталог: ' + error.message); }
+    finally { setPeopleBusy(false); }
+  }, [session?.user?.id, peopleQuery, peopleOffset, peopleBusy]);
+
+  useEffect(() => {
+    if (activeTab !== 'people' || !session?.user?.id) return;
+    const timer = setTimeout(() => loadPeople({reset:true}), 180);
+    return () => clearTimeout(timer);
+  }, [activeTab, peopleQuery, session?.user?.id]);
+
+  async function openUserProfile(person) {
+    setSocialBusy(true); setNotice('');
+    try {
+      const {data, error} = await supabase.from('profiles')
+        .select('id,display_name,username,avatar_url,bio,age,banner_url')
+        .eq('id', person.id).single();
+      if (error) throw error;
+      const [photos, stories] = await Promise.all([
+        loadProfilePhotos(supabase, person.id),
+        loadStories(supabase, {userId:person.id, activeOnly:true})
+      ]);
+      let bannerUrl = data.banner_url || '';
+      if (bannerUrl.startsWith('social:')) {
+        const {data: signed, error: signError} = await supabase.storage.from('nexura-social-media').createSignedUrl(bannerUrl.slice(7), 7*86400);
+        if (!signError) bannerUrl = signed.signedUrl;
+      }
+      setViewedProfile({...data, banner_display_url:bannerUrl});
+      setViewedPhotos(photos); setViewedStories(stories);
+    } catch(error) { setNotice('Не удалось открыть профиль: '+error.message); }
+    finally { setSocialBusy(false); }
+  }
+
+  async function loadOwnSocial() {
+    if (!session?.user?.id) return;
+    try {
+      const [photos, stories] = await Promise.all([
+        loadProfilePhotos(supabase, session.user.id),
+        loadStories(supabase, {userId:session.user.id, activeOnly:true})
+      ]);
+      setProfilePhotos(photos); setProfileStories(stories);
+    } catch(error) { setNotice('Не удалось загрузить публикации: '+error.message); }
+  }
+
+  async function openSocialItem(item, kind) {
+    setSocialViewer({...item, kind});
+    setSocialCommentDraft(''); setSocialComments([]);
+    if (kind === 'photo') {
+      try {
+        const [{data:likes,error:likeError},{data:comments,error:commentError}] = await Promise.all([
+          supabase.from('profile_photo_likes').select('user_id').eq('photo_id',item.id),
+          supabase.from('profile_photo_comments').select('id,user_id,content,created_at').eq('photo_id',item.id).order('created_at')
+        ]);
+        if (likeError) throw likeError;
+        if (commentError) throw commentError;
+        setSocialLiked((likes||[]).some(row=>row.user_id===session.user.id));
+        setSocialComments(comments||[]);
+        setSocialViewer(current=>current?.id===item.id?{...current,likeCount:(likes||[]).length}:current);
+      } catch(error) { setNotice('Не удалось загрузить реакции: '+error.message); }
+    } else {
+      const {data:likes,error} = await supabase.from('user_story_likes').select('user_id').eq('story_id',item.id);
+      if (!error) {
+        setSocialLiked((likes||[]).some(row=>row.user_id===session.user.id));
+        setSocialViewer(current=>current?.id===item.id?{...current,likeCount:(likes||[]).length}:current);
+      }
+    }
+  }
+
+  async function toggleCurrentSocialLike() {
+    if (!socialViewer || socialBusy) return;
+    setSocialBusy(true);
+    try {
+      const kind = socialViewer.kind;
+      const table = kind==='story'?'user_story_likes':'profile_photo_likes';
+      const key = kind==='story'?'story_id':'photo_id';
+      const {data,error} = await supabase.from(table).select('id').eq(key,socialViewer.id).eq('user_id',session.user.id).maybeSingle();
+      if (error) throw error;
+      if (data?.id) {
+        const {error:removeError}=await supabase.from(table).delete().eq('id',data.id);
+        if(removeError)throw removeError;
+        setSocialLiked(false); setSocialViewer(v=>({...v,likeCount:Math.max(0,(v.likeCount||0)-1)}));
+      } else {
+        const {error:addError}=await supabase.from(table).insert({[key]:socialViewer.id,user_id:session.user.id});
+        if(addError)throw addError;
+        setSocialLiked(true); setSocialViewer(v=>({...v,likeCount:(v.likeCount||0)+1}));
+      }
+    } catch(error) { setNotice('Не удалось поставить реакцию: '+error.message); }
+    finally { setSocialBusy(false); }
+  }
+
+  async function submitSocialComment(event) {
+    event.preventDefault();
+    const clean=socialCommentDraft.trim();
+    if(!clean||!socialViewer||socialViewer.kind!=='photo')return;
+    setSocialBusy(true);
+    try {
+      const {data,error}=await supabase.from('profile_photo_comments').insert({photo_id:socialViewer.id,user_id:session.user.id,content:clean}).select('id,user_id,content,created_at').single();
+      if(error)throw error;
+      setSocialComments(previous=>[...previous,data]);setSocialCommentDraft('');
+    } catch(error) { setNotice('Не удалось отправить комментарий: '+error.message); }
+    finally { setSocialBusy(false); }
+  }
+
+  async function publishProfileMedia(kind, file) {
+    if(!file||socialBusy)return;
+    setSocialBusy(true);
+    try {
+      const path=session.user.id+'/'+(kind==='story'?'stories':'photos')+'/'+crypto.randomUUID()+'.'+((file.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'')||'jpg').toLowerCase());
+      const {error:uploadError}=await supabase.storage.from('nexura-social-media').upload(path,file,{upsert:false,contentType:file.type});
+      if(uploadError)throw uploadError;
+      const now=new Date();
+      const row=kind==='story'
+        ? {user_id:session.user.id,storage_path:path,media_type:file.type.startsWith('video/')?'video':'image',caption:socialCaption.trim().slice(0,500),created_at:now.toISOString(),expires_at:new Date(now.getTime()+86400000).toISOString()}
+        : {user_id:session.user.id,storage_path:path,caption:socialCaption.trim().slice(0,500)};
+      const table=kind==='story'?'user_stories':'profile_photos';
+      const {data,error}=await supabase.from(table).insert(row).select('id,user_id,storage_path,media_type,caption,created_at,expires_at').single();
+      if(error){await supabase.storage.from('nexura-social-media').remove([path]);throw error;}
+      const {data:signed,error:signError}=await supabase.storage.from('nexura-social-media').createSignedUrl(path,kind==='story'?86400:7*86400);
+      if(signError)throw signError;
+      if(kind==='story')setProfileStories(previous=>[{...data,url:signed.signedUrl},...previous]);
+      else setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
+      setSocialCaption('');
+      setNotice(kind==='story'?'История опубликована на 24 часа':'Фотография добавлена в профиль');
+    } catch(error) { setNotice('Не удалось опубликовать: '+error.message); }
+    finally { setSocialBusy(false); }
+  }
+
+  async function openOwnProfile() {
+    setActiveTab('profile'); setViewedProfile(null);
+    await loadOwnSocial();
+  }
 
   const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
 
@@ -762,7 +926,7 @@ function App() {
   }
 
   async function signOut() { await supabase.auth.signOut(); }
-  function openChat(chat) { setChats(previous => previous.map(item => item.id === chat.id ? { ...item, unread: 0 } : item)); setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); }
+  function openChat(chat) { setChats(previous => previous.map(item => item.id === chat.id ? { ...item, unread: 0 } : item)); setSelected(chat); setMobileChatOpen(true); setActiveTab('chats'); setViewedProfile(null); }
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
   const activeMenuMessage = messages.find(message => message.id === messageMenu) || null;
   const activeMenuMine = activeMenuMessage?.sender_id === session?.user?.id;
@@ -787,9 +951,13 @@ function App() {
     <aside className={'sidebar '+(mobileChatOpen?'mobile-hidden':'')}>
       <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><div className="side-actions"><button className="icon-button" onClick={()=>setGroupOpen(true)} title="Создать группу"><Plus size={18}/></button><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div></div>
       <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={openProfileSettings} title="Настройки профиля"><Settings size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
-      <div className="side-tabs"><button className={activeTab==='chats'?'active':''} onClick={()=>setActiveTab('chats')}><MessageCircle size={17}/> Чаты</button><button className={activeTab==='contacts'?'active':''} onClick={()=>setActiveTab('contacts')}><Users size={17}/> Контакты</button></div>
-      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':'ПОИСК ЛЮДЕЙ'}</span><span>{activeTab==='chats'?chats.length:contactResults.length}</span></div>
-      <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:contactQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setContactQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
+      <div className="side-tabs side-tabs-expanded">
+        <button className={activeTab==='chats'?'active':''} onClick={()=>{setActiveTab('chats');setViewedProfile(null);}}><MessageCircle size={16}/> Чаты</button>
+        <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setMobileChatOpen(false);setPeopleOffset(0);setPeople([]);}}><Users size={16}/> Люди</button>
+        <button className={activeTab==='profile'?'active':''} onClick={openOwnProfile}><UserRound size={16}/> Профиль</button>
+      </div>
+      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КАТАЛОГ ПОЛЬЗОВАТЕЛЕЙ':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
+      <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
       <div className="chat-list">
         {activeTab==='chats' ? <>
           {loadingChats && chats.length===0 && <div className="chat-skeleton-list" aria-label="Загружаем чаты">{Array.from({length:5},(_,i)=><div className="chat-skeleton" key={i}><i/><span><b/><small/></span><em/></div>)}</div>}
@@ -809,13 +977,36 @@ function App() {
             <div className="chat-meta"><b>{person.title}</b><span>{person.username?'@'+person.username:'Пользователь Nexura'}</span></div>
             <div className="contact-open"><MessageCircle size={16}/></div>
           </button>)}
-        </>}
+        </> : activeTab==='people' ? <>
+          {peopleQuery.trim().length>=2 && people.length===0 && !peopleBusy && <div className="empty-list"><UserRoundSearch size={24}/><b>Никого не нашли</b><span>Попробуй другое имя или username.</span></div>}
+          {people.length===0 && peopleQuery.trim().length<2 && !peopleBusy && <div className="empty-list"><Users size={24}/><b>Люди Nexura</b><span>Все зарегистрированные пользователи — в одном каталоге.</span></div>}
+          {people.map(person=><button key={person.id} className="chat-item" onClick={()=>openUserProfile(person)}>
+            <Avatar value={person.avatar_url} name={person.display_name}/>
+            <div className="chat-meta"><b>{person.display_name||'Пользователь'}</b><span>{person.username?'@'+person.username:'Пользователь Nexura'}</span></div>
+            <div className="contact-open"><UserRound size={16}/></div>
+          </button>)}
+          {peopleBusy && <div className="list-hint">Загружаем пользователей…</div>}
+          {!peopleBusy && peopleHasMore && <button className="load-more-people" onClick={()=>loadPeople()}>{people.length?'Показать ещё':'Загрузить людей'}</button>}
+        </> : <div className="empty-list"><UserRound size={24}/><b>Профиль открыт</b><span>Управляй своими публикациями в основной области.</span></div>}
       </div>
-      <div className="sidebar-foot"><ShieldCheck size={15}/> Nexura · ранняя веб-версия</div>
+      <div className="sidebar-foot"><ShieldCheck size={15}/> Nexura · веб-клиент</div>
     </aside>
     <main className={'chat-area '+(mobileChatOpen?'mobile-visible':'')}>
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
-      {!selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
+      {activeTab==='profile' ? <section className="web-profile-page">
+        <div className="web-profile-cover" onClick={()=>bannerInputRef.current?.click()}>
+          {profile?.banner_display_url || profile?.banner_url?.startsWith('http') ? (profile.banner_url?.startsWith('social:') ? <video src={profile.banner_display_url} autoPlay muted loop playsInline/> : <img src={profile.banner_url} alt="Обложка профиля"/>) : <div className="cover-placeholder"><ImageIcon size={34}/><b>Добавь обложку профиля</b><span>Фото или видео без звука</span></div>}
+          <button className="cover-edit" onClick={event=>{event.stopPropagation();bannerInputRef.current?.click();}}><Camera size={15}/> Изменить обложку</button>
+          <input ref={bannerInputRef} type="file" accept="image/*,video/*" className="visually-hidden-file" onChange={async event=>{const file=event.target.files?.[0];if(!file)return;setSocialBusy(true);try{const path=profile?.id+'/'+(file.type.startsWith('video/')?'banners/':'banner-')+crypto.randomUUID()+'.'+((file.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'')||'jpg');const bucket=file.type.startsWith('video/')?'nexura-social-media':'nexura-avatars';const {error:uploadError}=await supabase.storage.from(bucket).upload(path,file,{upsert:false,contentType:file.type});if(uploadError)throw uploadError;const banner_url=bucket==='nexura-social-media'?'social:'+path:supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;const {error:updateError}=await supabase.from('profiles').update({banner_url}).eq('id',session.user.id);if(updateError)throw updateError;let banner_display_url=banner_url;if(banner_url.startsWith('social:')){const {data:signed,error}=await supabase.storage.from('nexura-social-media').createSignedUrl(path,7*86400);if(error)throw error;banner_display_url=signed.signedUrl;}setProfile(previous=>({...previous,banner_url,banner_display_url}));setNotice('Обложка профиля обновлена');}catch(error){setNotice('Не удалось обновить обложку: '+error.message);}finally{setSocialBusy(false);event.target.value='';}}}/>
+        </div>
+        <div className="web-profile-heading"><Avatar className="web-profile-avatar" value={profile?.avatar_url} name={profile?.display_name}/><div className="web-profile-title"><h2>{profile?.display_name||'Твой профиль'}</h2><span>{profile?.username?'@'+profile.username:'Username не задан'}</span>{profile?.bio&&<p>{profile.bio}</p>}{profile?.age&&<small>{profile.age} лет</small>}</div><button className="primary-btn" onClick={()=>{setProfileEditDraft({display_name:profile?.display_name||'',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂',bio:profile?.bio||'',age:profile?.age==null?'':String(profile.age)});setProfileEdit(true);}}>Изменить профиль</button></div>
+        <div className="web-social-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Публикации доступны 24 часа</span></div><button className="social-add-button" onClick={()=>storyInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={storyInputRef} type="file" accept="image/*,video/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('story',file);event.target.value='';}}/></div>
+          <div className="web-social-grid stories-grid">{profileStories.map(item=><button key={item.id} className="web-story-card" onClick={()=>openSocialItem(item,'story')}><div className="web-story-media">{item.media_type==='video'?<video src={item.url} muted playsInline/>:<img src={item.url} alt="История"/>}<span><Play size={16}/></span></div><small>{new Date(item.created_at).toLocaleDateString('ru-RU')}</small></button>)}{!profileStories.length&&<div className="social-empty">У тебя пока нет историй. Добавь фото или видео.</div>}</div>
+        </div>
+        <div className="web-social-section"><div className="web-section-heading"><div><h3>Фотографии</h3><span>Твоя галерея профиля</span></div><button className="social-add-button" onClick={()=>photoInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={photoInputRef} type="file" accept="image/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('photo',file);event.target.value='';}}/></div>
+          <div className="web-social-grid">{profilePhotos.map(item=><button key={item.id} className="web-photo-card" onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фотография профиля'}/></button>)}{!profilePhotos.length&&<div className="social-empty">Здесь будут фотографии твоего профиля.</div>}</div>
+        </div>
+      </section> : activeTab==='people' ? <div className="people-page"><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p></div><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
         <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
         <div className="messages-pane" ref={messagesPaneRef} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
@@ -903,6 +1094,30 @@ function App() {
         </form>
       </section>
     </div>}
+    {viewedProfile && <div className="modal-backdrop profile-view-backdrop" onClick={()=>setViewedProfile(null)}><section className="web-user-profile-modal" onClick={event=>event.stopPropagation()}>
+      <button className="profile-modal-close" onClick={()=>setViewedProfile(null)} aria-label="Закрыть"><X size={19}/></button>
+      <div className="web-profile-cover user-cover">{viewedProfile.banner_display_url ? (viewedProfile.banner_url?.startsWith('social:')?<video src={viewedProfile.banner_display_url} autoPlay muted loop playsInline/>:<img src={viewedProfile.banner_display_url} alt="Обложка"/>) : <div className="cover-placeholder"><UserRound size={30}/></div>}</div>
+      <div className="web-profile-heading"><Avatar className="web-profile-avatar" value={viewedProfile.avatar_url} name={viewedProfile.display_name}/><div className="web-profile-title"><h2>{viewedProfile.display_name}</h2><span>@{viewedProfile.username||'user'}</span>{viewedProfile.bio&&<p>{viewedProfile.bio}</p>}{viewedProfile.age&&<small>{viewedProfile.age} лет</small>}</div><button className="primary-btn" onClick={()=>createDirectChat({id:viewedProfile.id,title:viewedProfile.display_name,avatar:viewedProfile.avatar_url})}><MessageCircle size={15}/> Написать</button></div>
+      <div className="web-social-section"><div className="web-section-heading"><h3>Истории</h3></div><div className="web-social-grid stories-grid">{viewedStories.map(item=><button className="web-story-card" key={item.id} onClick={()=>openSocialItem(item,'story')}><div className="web-story-media">{item.media_type==='video'?<video src={item.url} muted playsInline/>:<img src={item.url} alt="История"/>}<span><Play size={16}/></span></div></button>)}{!viewedStories.length&&<div className="social-empty">Активных историй нет.</div>}</div></div>
+      <div className="web-social-section"><div className="web-section-heading"><h3>Фотографии профиля</h3></div><div className="web-social-grid">{viewedPhotos.map(item=><button className="web-photo-card" key={item.id} onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фото'}/></button>)}{!viewedPhotos.length&&<div className="social-empty">Фотографий пока нет.</div>}</div></div>
+    </section></div>}
+    {socialViewer && <div className="modal-backdrop social-viewer-backdrop" onClick={()=>setSocialViewer(null)}><section className="social-viewer-modal" onClick={event=>event.stopPropagation()}>
+      <button className="profile-modal-close" onClick={()=>setSocialViewer(null)}><X size={19}/></button>
+      <div className="social-viewer-media">{socialViewer.media_type==='video'?<video src={socialViewer.url} controls autoPlay muted playsInline/>:<img src={socialViewer.url} alt={socialViewer.caption||'Публикация'}/>}</div>
+      <div className="social-viewer-content"><p>{socialViewer.caption||' '}</p><div className="social-viewer-actions"><button onClick={toggleCurrentSocialLike} disabled={socialBusy} className={socialLiked?'liked':''}><Heart size={17} fill={socialLiked?'currentColor':'none'}/> {socialViewer.likeCount||0}</button>{socialViewer.kind==='photo'&&<span><MessageSquare size={16}/> {socialComments.length}</span>}</div>
+      {socialViewer.kind==='photo'&&<><div className="social-comments">{socialComments.map(comment=><div key={comment.id}><b>{comment.user_id===session.user.id?'Вы':'Участник Nexura'}</b><span>{comment.content}</span></div>)}{!socialComments.length&&<small>Комментариев пока нет.</small>}</div><form className="social-comment-form" onSubmit={submitSocialComment}><input value={socialCommentDraft} onChange={event=>setSocialCommentDraft(event.target.value)} placeholder="Написать комментарий…" maxLength={1000}/><button className="primary-btn" disabled={socialBusy||!socialCommentDraft.trim()}>Отправить</button></form></>}
+      </div>
+    </section></div>}
+    {profileEdit && <div className="modal-backdrop" onClick={()=>setProfileEdit(false)}><section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">АККАУНТ NEXURA</div><h3>Изменить профиль</h3></div><button className="icon-button" onClick={()=>setProfileEdit(false)}><X size={18}/></button></div>
+      <form className="profile-form" onSubmit={async event=>{event.preventDefault();setProfileEditBusy(true);try{const saved=await saveProfile(supabase,session.user.id,profileEditDraft);setProfile(previous=>({...previous,...saved}));setProfileEdit(false);setNotice('Профиль сохранён');}catch(error){setNotice('Не удалось сохранить профиль: '+error.message);}finally{setProfileEditBusy(false);}}}>
+        <div className="emoji-picker">{['🙂','😎','🤝','🦊','🐼','🐱','🐸','🐻','🌙','⭐','🔥','💜','🐺','🦋','🚀','🎧','🌸','🧸','🦄','🍀','⚡','👑','🎮','🌊'].map(emoji=><button type="button" key={emoji} className={profileEditDraft.avatar_url===emoji?'active':''} onClick={()=>setProfileEditDraft(v=>({...v,avatar_url:emoji}))}>{emoji}</button>)}</div>
+        <label className="modal-label">Имя<input value={profileEditDraft.display_name} onChange={e=>setProfileEditDraft(v=>({...v,display_name:e.target.value}))} maxLength={40} required/></label>
+        <label className="modal-label">Username<input value={profileEditDraft.username} onChange={e=>setProfileEditDraft(v=>({...v,username:e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,'').slice(0,24)}))} placeholder="username" required/></label>
+        <label className="modal-label">Возраст<input type="number" min="13" max="120" value={profileEditDraft.age} onChange={e=>setProfileEditDraft(v=>({...v,age:e.target.value}))}/></label>
+        <label className="modal-label">О себе<textarea value={profileEditDraft.bio} onChange={e=>setProfileEditDraft(v=>({...v,bio:e.target.value}))} maxLength={160} rows={3}/></label>
+        <div className="profile-form-foot"><span>{profileEditDraft.bio.length}/160</span><button className="primary-btn" disabled={profileEditBusy}>{profileEditBusy?'Сохраняем…':'Сохранить'}</button></div>
+      </form>
+    </section></div>}
     {groupOpen && <div className="modal-backdrop" onClick={()=>setGroupOpen(false)}>
       <section className="group-modal" onClick={event=>event.stopPropagation()}>
         <div className="modal-head"><div><div className="eyebrow">НОВАЯ ПЕРЕПИСКА</div><h3>Создать группу</h3></div><button className="icon-button" onClick={()=>setGroupOpen(false)}>×</button></div>
