@@ -4492,10 +4492,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
     // Global media viewer, independent of the currently selected screen.
     if (mediaViewerUri != null) {
-        Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Dialog(onDismissRequest = { mediaViewerUri = null; mediaViewerQueue = emptyList(); mediaViewerIndex = 0 }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
             var swipeDistance by remember { mutableFloatStateOf(0f) }
             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null })
+                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null; mediaViewerQueue = emptyList(); mediaViewerIndex = 0 })
                 else AsyncImage(
                     model = mediaViewerUri,
                     contentDescription = "Фото на весь экран",
