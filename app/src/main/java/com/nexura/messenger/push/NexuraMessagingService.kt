@@ -52,7 +52,9 @@ class NexuraMessagingService : FirebaseMessagingService() {
         val vibrationEnabled = notificationPrefs.getBoolean("vibration_enabled", true)
         val channelId = messageChannelId(soundEnabled, vibrationEnabled)
         val title = payload["title"]?.takeIf { it.isNotBlank() } ?: "Nexura"
+        val senderName = payload["sender_name"]?.takeIf { it.isNotBlank() } ?: title
         val body = payload["body"]?.takeIf { it.isNotBlank() } ?: "Новое сообщение"
+        val isGroup = payload["conversation_kind"] == "group"
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -72,9 +74,9 @@ class NexuraMessagingService : FirebaseMessagingService() {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(
-                NotificationCompat.MessagingStyle("Nexura")
-                    .addMessage(body, System.currentTimeMillis(), title)
-                    .setConversationTitle(title)
+                NotificationCompat.MessagingStyle(senderName)
+                    .addMessage(body, System.currentTimeMillis(), senderName)
+                    .apply { if (isGroup) setConversationTitle(title) }
             )
             .setContentIntent(contentIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
