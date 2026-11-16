@@ -4357,9 +4357,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         )
     }
-}
-}
-
     // Global media viewer, independent of the currently selected screen.
     if (mediaViewerUri != null) {
         Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -4370,6 +4367,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         }
     }
+
+}
 }
 
 @Composable
