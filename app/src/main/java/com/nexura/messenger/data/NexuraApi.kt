@@ -1845,7 +1845,8 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         encryptedMedia: EncryptedMediaFile,
         caption: String = "",
         replyToId: String? = null,
-        messageId: String = UUID.randomUUID().toString()
+        messageId: String = UUID.randomUUID().toString(),
+        sendMutex: Mutex? = null
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) throw IOException("Зашифрованный файл превышает лимит Storage")
@@ -1885,7 +1886,11 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         try {
             // If the POST committed but its read-back confirmation was interrupted,
             // keep the ciphertext object: deleting it could break a valid message.
-            sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media")
+            if (sendMutex != null) {
+                sendMutex.withLock { sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media") }
+            } else {
+                sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media")
+            }
         } finally {
             encryptedMedia.file.delete()
         }
@@ -1897,7 +1902,8 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         encryptedMedia: EncryptedMediaFile,
         caption: String = "",
         replyToId: String? = null,
-        messageId: String = UUID.randomUUID().toString()
+        messageId: String = UUID.randomUUID().toString(),
+        sendMutex: Mutex? = null
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) {
@@ -1937,7 +1943,11 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             .put("caption", caption.trim())
             .toString()
         try {
-            sendEncryptedGroupMessage(chat, e2ee, messageId, payload, "media", replyToId)
+            if (sendMutex != null) {
+                sendMutex.withLock { sendEncryptedGroupMessage(chat, e2ee, messageId, payload, "media", replyToId) }
+            } else {
+                sendEncryptedGroupMessage(chat, e2ee, messageId, payload, "media", replyToId)
+            }
         } finally {
             encryptedMedia.file.delete()
         }
