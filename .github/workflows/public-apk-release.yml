@@ -8,6 +8,9 @@ on:
       - feature/nexura-0.6.1-media-transcription
     paths:
       - "app/build.gradle.kts"
+      - "web/package.json"
+      - "web/src/**"
+      - "crypto-wasm/**"
       - ".github/workflows/public-apk-release.yml"
 
 permissions:
