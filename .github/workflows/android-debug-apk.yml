@@ -1,8 +1,8 @@
-name: Nexura v0.2.0 — NEW test APK
-# Build verification for Android UX and account-identity updates.
+name: Nexura 0.6.1 — media regression build
+# Build verification for media playback, offline transcription and account UI updates.
 on:
   push:
-    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins ]
+    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins, feature/media-viewer-transcription-auth-ui ]
     paths:
       - "app/**"
       - "crypto-core/**"
@@ -15,7 +15,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nexura-release-v020-test-${{ github.run_id }}
+  group: nexura-media-061-test-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
   build:
@@ -48,7 +48,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build debug APK from release tag v0.2.0
+      - name: Build Nexura 0.6.1 debug APK
         run: gradle --no-daemon assembleDebug
       - name: Verify native libraries are packaged
         run: |
@@ -58,7 +58,7 @@ jobs:
       - name: Upload clearly marked test APK
         uses: actions/upload-artifact@v4
         with:
-          name: "🆕 NEXURA — НОВАЯ СБОРКА (v0.2.0)"
+          name: "Nexura 0.6.1 — media test APK"
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
