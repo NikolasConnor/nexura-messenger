@@ -734,3 +734,5 @@ body{overscroll-behavior:none}
 .contact-match-item>span{display:grid;gap:3px;flex:1;min-width:0}
 .contact-match-item b{font-size:11px;color:#eee8f7}.contact-match-item small{font-size:9px;color:#a49ab2}
 .contact-match-item .avatar{width:34px;height:34px;flex:0 0 34px}
+
+.load-older-messages{align-self:center;display:block;margin:8px auto 14px;padding:8px 13px;border:1px solid #ffffff18;border-radius:20px;background:#ffffff08;color:#bdb1cc;font-size:10px}.load-older-messages:disabled{opacity:.55}

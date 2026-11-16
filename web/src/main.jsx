@@ -204,6 +204,10 @@ function App() {
   const selectedChatIdRef = useRef(null);
   selectedChatIdRef.current = selected?.id || null;
   const [messages, setMessages] = useState([]);
+  const [hasOlderMessages,setHasOlderMessages] = useState(false);
+  const [loadingOlderMessages,setLoadingOlderMessages] = useState(false);
+  const olderLoadingRef = useRef(false);
+  const messagesRef = useRef([]);
   const [peerTyping,setPeerTyping] = useState(false);
   const [peerPresence,setPeerPresence] = useState(null);
   const [outgoingMediaStatus, setOutgoingMediaStatus] = useState({});
@@ -417,7 +421,33 @@ function App() {
     }
   }, [session?.user?.id]);
 
-  const loadMessages = useCallback(async (chat, { silent = false } = {}) => {
+  const decryptMessageBatch = useCallback(async(chat,rawRows)=>{
+    const missingSharedIds=rawRows.filter(message=>isEncrypted(message.content)&&!(typeof message.cloud_content==='string'&&message.cloud_content.length)).map(message=>message.id);
+    let personalArchives=[];
+    if(missingSharedIds.length&&session?.user?.id){
+      const {data,error}=await supabase.from('message_cloud_archives').select('message_id,cloud_content')
+        .eq('user_id',session.user.id).eq('conversation_id',chat.id).in('message_id',missingSharedIds);
+      if(!error&&Array.isArray(data))personalArchives=data;
+    }
+    const cloudItems=[
+      ...rawRows.filter(message=>(isEncrypted(message.content)||message.content==='NEXURA_CLOUD_V1')&&typeof message.cloud_content==='string'&&message.cloud_content.length)
+        .map(message=>({id:message.id,cloud_content:message.cloud_content,scope:'shared'})),
+      ...personalArchives.filter(item=>typeof item.message_id==='string'&&typeof item.cloud_content==='string'&&item.cloud_content.length)
+        .map(item=>({id:item.message_id,cloud_content:item.cloud_content,scope:'user'}))
+    ];
+    let cloudPlaintextById=new Map();
+    if(cloudItems.length){
+      try{
+        const {data,error}=await supabase.functions.invoke('cloud-history',{body:{action:'decrypt',conversation_id:chat.id,items:cloudItems}});
+        if(!error&&Array.isArray(data?.items))cloudPlaintextById=new Map(data.items.filter(item=>typeof item?.id==='string'&&typeof item?.plaintext==='string').map(item=>[item.id,item.plaintext]));
+      }catch{/* strict E2EE device checks remain the fallback */}
+    }
+    return Promise.all(rawRows.map(message=>decryptMessageRow(chat,message,cloudPlaintextById.get(message.id)||null)));
+  },[session?.user?.id,decryptMessageRow]);
+
+  useEffect(()=>{messagesRef.current=messages;},[messages]);
+
+  const loadMessages = useCallback(async (chat, { silent = false, before = null } = {}) => {
     if (!chat?.id) return;
     const requestId = ++messageLoadSeq.current;
     if (!silent) setLoadingMessages(true);
@@ -425,58 +455,33 @@ function App() {
     try {
       // Load the newest page, then reverse it for chronological rendering.
       // The old ascending+limit query could hide all recent messages in long chats.
-      const [messageResult, reactionsResult] = await Promise.all([
-        supabase.from('messages')
-          .select('id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
-          .eq('conversation_id', chat.id).is('deleted_at', null)
-          .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50),
-        loadMessageReactions(supabase, chat.id).catch(() => ({}))
+      let messageQuery=supabase.from('messages')
+        .select('id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+        .eq('conversation_id',chat.id).is('deleted_at',null);
+      if(before?.created_at)messageQuery=messageQuery.lt('created_at',before.created_at);
+      const [messageResult,reactionsResult]=await Promise.all([
+        messageQuery.order('created_at',{ascending:false}).order('id',{ascending:false}).limit(50),
+        before?Promise.resolve({data:null}):loadMessageReactions(supabase,chat.id).catch(()=>({}))
       ]);
       if (messageResult.error) throw messageResult.error;
       const rawRows = (messageResult.data || []).reverse();
-      const missingSharedIds = rawRows
-        .filter(message => isEncrypted(message.content) && !(typeof message.cloud_content === 'string' && message.cloud_content.length))
-        .map(message => message.id);
-      let personalArchives = [];
-      if (missingSharedIds.length && session?.user?.id) {
-        // Android backfills legacy messages into an account-scoped encrypted archive.
-        // The browser must read that archive too, otherwise old messages remain
-        // incorrectly bound to whichever device originally received them.
-        const { data, error } = await supabase.from('message_cloud_archives')
-          .select('message_id,cloud_content')
-          .eq('user_id', session.user.id)
-          .eq('conversation_id', chat.id)
-          .in('message_id', missingSharedIds);
-        if (!error && Array.isArray(data)) personalArchives = data;
-      }
-      const cloudItems = [
-        ...rawRows
-          .filter(message => (isEncrypted(message.content)||message.content==='NEXURA_CLOUD_V1') && typeof message.cloud_content === 'string' && message.cloud_content.length)
-          .map(message => ({ id: message.id, cloud_content: message.cloud_content, scope: 'shared' })),
-        ...personalArchives
-          .filter(item => typeof item.message_id === 'string' && typeof item.cloud_content === 'string' && item.cloud_content.length)
-          .map(item => ({ id: item.message_id, cloud_content: item.cloud_content, scope: 'user' }))
-      ];
-      let cloudPlaintextById = new Map();
-      if (cloudItems.length) {
-        // Both shared and account-scoped archives remain encrypted at rest.
-        try {
-          const { data, error } = await supabase.functions.invoke('cloud-history', {
-            body: { action: 'decrypt', conversation_id: chat.id, items: cloudItems }
-          });
-          if (!error && Array.isArray(data?.items)) {
-            cloudPlaintextById = new Map(data.items
-              .filter(item => typeof item?.id === 'string' && typeof item?.plaintext === 'string')
-              .map(item => [item.id, item.plaintext]));
-          }
-        } catch { /* Keep strict per-device E2EE decryption as the fallback. */ }
-      }
-      const rows = await Promise.all(rawRows.map(message =>
-        decryptMessageRow(chat, message, cloudPlaintextById.get(message.id) || null)
-      ));
+      const rows = await decryptMessageBatch(chat,rawRows);
       if (requestId !== messageLoadSeq.current) return;
       const localPending = [...pendingMediaOutboxRef.current.values()].filter(item => item.conversation_id === chat.id);
-      setMessages([...rows.filter(item => !localPending.some(pending => pending.id === item.id)), ...localPending].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-50));
+      if(before){
+        setMessages(previous=>{
+          const combined=[...rows,...previous,...localPending];
+          return [...new Map(combined.map(item=>[item.id,item])).values()].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+        });
+        setHasOlderMessages(rawRows.length===50);
+      }else{
+        setHasOlderMessages(rawRows.length===50);
+        setMessages(previous=>{
+          const base=silent&&selectedChatIdRef.current===chat.id?previous:[];
+          const combined=[...base,...rows,...localPending];
+          return [...new Map(combined.map(item=>[item.id,item])).values()].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-500);
+        });
+      }
       setMessageReactions(reactionsResult || {});
       markConversationRead(supabase, chat.id).catch(() => {});
     } catch (error) {
@@ -484,7 +489,23 @@ function App() {
     } finally {
       if (requestId === messageLoadSeq.current) setLoadingMessages(false);
     }
-  }, [session?.user?.id, decryptMessageRow]);
+  }, [session?.user?.id, decryptMessageBatch]);
+
+  const loadOlderMessages = useCallback(async()=>{
+    const chat=selected;
+    const oldest=messagesRef.current[0];
+    if(!chat?.id||!oldest||!hasOlderMessages||olderLoadingRef.current)return;
+    olderLoadingRef.current=true;setLoadingOlderMessages(true);
+    const pane=messagesPaneRef.current;
+    const previousHeight=pane?.scrollHeight||0;
+    const previousTop=pane?.scrollTop||0;
+    try{
+      await loadMessages(chat,{silent:true,before:oldest});
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        if(pane)pane.scrollTop=previousTop+(pane.scrollHeight-previousHeight);
+      }));
+    }finally{olderLoadingRef.current=false;setLoadingOlderMessages(false);}
+  },[selected?.id,hasOlderMessages,loadMessages]);
 
   useEffect(() => {
     if (!messageMenu && !reactionPickerFor) return;
@@ -508,6 +529,7 @@ function App() {
     if (!selected) { messageLoadSeq.current++; setMessages([]); setMessageReactions({}); return; }
     const chat = selected;
     setMessages([]);
+    setHasOlderMessages(false);
     setMessageReactions({});
     loadMessages(chat);
     let active = true;
@@ -528,13 +550,13 @@ function App() {
         setMessages(previous => {
           const next = [...previous.filter(item => item.id !== message.id), message]
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-          return next.slice(-50);
+          return next.slice(-500);
         });
         if (message.sender_id !== session?.user?.id) markConversationRead(supabase, chat.id).catch(() => {});
       })
       .subscribe();
     return () => { active = false; supabase.removeChannel(channel); };
-  }, [selected?.id, loadMessages, decryptMessageRow, session?.user?.id, e2eeReady]);
+  }, [selected?.id, loadMessages, decryptMessageBatch, session?.user?.id, e2eeReady]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -1807,7 +1829,8 @@ function App() {
           <button onClick={()=>changeChatMute(8*60*60*1000)}><Bell size={15}/>Отключить на 8 часов</button>
           <button onClick={()=>changeChatMute(48*60*60*1000)}><Bell size={15}/>Отключить на 2 дня</button>
         </div>}</div><div className="header-secure" title={selected.chatMode==='cloud'?'Облачный режим: без сквозного шифрования':e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{selected.chatMode==='cloud'?'Облачный режим':e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
-        <div className="messages-pane" ref={messagesPaneRef} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
+        <div className="messages-pane" ref={messagesPaneRef} onScroll={event=>{if(event.currentTarget.scrollTop<55)loadOlderMessages();}} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
+          {hasOlderMessages&&<button className="load-older-messages" onClick={loadOlderMessages} disabled={loadingOlderMessages}>{loadingOlderMessages?'Загружаем…':'Загрузить предыдущие сообщения'}</button>}
           {chatSearchOpen&&<div className="chat-search-bar"><Search size={15}/><input autoFocus value={chatSearchQuery} onChange={e=>setChatSearchQuery(e.target.value)} placeholder="Поиск по загруженной истории…"/><button onClick={()=>{setChatSearchOpen(false);setChatSearchQuery('');}}><X size={15}/></button><small>{visibleMessages.length}</small></div>}
           {pinnedMessage&&<button className="pinned-message-banner" onClick={()=>document.getElementById('message-'+pinnedMessage.id)?.scrollIntoView({behavior:'smooth',block:'center'})}><span>⌖ Закреплено</span><b>{String(pinnedMessage.content||'Медиа').slice(0,100)}</b><X size={14} onClick={event=>{event.stopPropagation();togglePinnedChatMessage(pinnedMessage);}}/></button>}
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
