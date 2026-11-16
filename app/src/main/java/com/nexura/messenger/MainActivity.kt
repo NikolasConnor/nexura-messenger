@@ -4554,6 +4554,12 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
     var position by remember(uri) { mutableLongStateOf(0L) }
     var duration by remember(uri) { mutableLongStateOf(0L) }
     var showControls by remember(uri) { mutableStateOf(true) }
+    LaunchedEffect(showControls, isPlaying) {
+        if (showControls && isPlaying) {
+            kotlinx.coroutines.delay(2800L)
+            showControls = false
+        }
+    }
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
