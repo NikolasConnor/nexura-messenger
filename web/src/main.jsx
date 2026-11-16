@@ -594,7 +594,8 @@ function App() {
     if(!file||socialBusy)return;
     setSocialBusy(true);
     try {
-      const path=session.user.id+'/'+(kind==='story'?'stories':'photos')+'/'+crypto.randomUUID()+'.'+((file.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'')||'jpg').toLowerCase());
+      const extension=(file.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'').toLowerCase()||'jpg';
+      const path=session.user.id+'/'+(kind==='story'?'stories':'photos')+'/'+crypto.randomUUID()+'.'+extension;
       const {error:uploadError}=await supabase.storage.from('nexura-social-media').upload(path,file,{upsert:false,contentType:file.type});
       if(uploadError)throw uploadError;
       const now=new Date();
@@ -798,10 +799,10 @@ function App() {
     const replyToId = existingMessageId ? (pendingMediaOutboxRef.current.get(existingMessageId)?.reply_to_id || null) : (replyTarget?.id || null);
     try {
       const metadata = await encryptAndUploadMedia(supabase, { file, userId:session.user.id, conversationId, messageId });
-      const sent = await sendBrowserDirectMessage(supabase, {
-        userId:session.user.id, conversationId, peerUserId:selected.peerUserId,
-        messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId
-      });
+      const payload = {userId:session.user.id, conversationId, messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId};
+      const sent = selected.kind === 'group'
+        ? await sendBrowserGroupMessage(supabase, payload)
+        : await sendBrowserDirectMessage(supabase, {...payload, peerUserId:selected.peerUserId});
       pendingMediaOutboxRef.current.delete(messageId);
       if (selectedChatIdRef.current === conversationId) setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
@@ -873,11 +874,13 @@ function App() {
         setEditingMessageId(null);
       } else {
         const messageId = crypto.randomUUID();
-        const sent = await sendBrowserDirectMessage(supabase, {
-          userId: session.user.id, conversationId: selected.id,
-          peerUserId: selected.peerUserId, messageId, plaintext: text,
+        const payload = {
+          userId: session.user.id, conversationId: selected.id, messageId, plaintext: text,
           replyToId: replyTarget?.id || null
-        });
+        };
+        const sent = selected.kind === 'group'
+          ? await sendBrowserGroupMessage(supabase, payload)
+          : await sendBrowserDirectMessage(supabase, {...payload, peerUserId:selected.peerUserId});
         setMessages(previous => [...previous, sent]);
       }
       setDraft('');
