@@ -4638,8 +4638,21 @@ private fun isRetryableOutboxFailure(error: Throwable): Boolean {
 }
 
 private fun messageTimeLabel(value: String): String {
-    val time = value.substringAfter("T", "").take(5)
-    return if (time.length == 5) time else value.take(16).replace("T", " ")
+    // Presence timestamps are stored in UTC; render them in this device's
+    // current timezone so travel and automatic timezone changes are respected.
+    return runCatching {
+        val instant = java.time.Instant.parse(value)
+        java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(instant)
+    }.getOrElse {
+        runCatching {
+            val instant = java.time.OffsetDateTime.parse(value).toInstant()
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+                .withZone(java.time.ZoneId.systemDefault())
+                .format(instant)
+        }.getOrElse { value.take(16).replace("T", " ") }
+    }
 }
 
 private fun chatTimeLabel(value: String?): String {
