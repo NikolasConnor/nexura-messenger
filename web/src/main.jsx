@@ -223,6 +223,13 @@ function App() {
   const [groupResults, setGroupResults] = useState([]);
   const [groupMembers, setGroupMembers] = useState([]);
   const [groupBusy, setGroupBusy] = useState(false);
+  const [groupManagementOpen, setGroupManagementOpen] = useState(false);
+  const [groupMemberRows, setGroupMemberRows] = useState([]);
+  const [groupManageAllowed, setGroupManageAllowed] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState('');
+  const [groupMemberQuery, setGroupMemberQuery] = useState('');
+  const [groupMemberResults, setGroupMemberResults] = useState([]);
+  const [groupManageBusy, setGroupManageBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ display_name: '', username: '', avatar_url: '🙂', bio: '', age: '' });
   const [profileBusy, setProfileBusy] = useState(false);
@@ -776,6 +783,77 @@ function App() {
     finally { setContactBusy(false); }
   }
 
+  async function openGroupManagement() {
+    if(!selected||selected.kind!=='group')return;
+    setGroupManagementOpen(true);setGroupNameDraft(selected.title);setGroupMemberQuery('');setGroupMemberResults([]);
+    setGroupManageBusy(true);
+    try{
+      const [{data:members,error:membersError},{data:own,error:ownError}]=await Promise.all([
+        supabase.from('conversation_members').select('user_id,member_role,joined_at,profiles(id,display_name,username,avatar_url)').eq('conversation_id',selected.id).order('joined_at'),
+        supabase.from('conversation_members').select('member_role').eq('conversation_id',selected.id).eq('user_id',session.user.id).maybeSingle()
+      ]);
+      if(membersError)throw membersError;if(ownError)throw ownError;
+      setGroupMemberRows(members||[]);setGroupManageAllowed(['owner','admin'].includes(own?.member_role));
+    }catch(error){setNotice('Не удалось загрузить участников: '+error.message);}
+    finally{setGroupManageBusy(false);}
+  }
+
+  useEffect(()=>{
+    let cancelled=false;
+    if(!groupManagementOpen||groupMemberQuery.trim().length<2){setGroupMemberResults([]);return;}
+    const timer=setTimeout(async()=>{
+      try{const rows=await loadPeopleDirectory(supabase,session.user.id,groupMemberQuery,0,15);if(!cancelled)setGroupMemberResults(rows.filter(p=>!groupMemberRows.some(m=>m.user_id===p.id)));}
+      catch(error){if(!cancelled)setNotice('Не удалось найти участников: '+error.message);}
+    },200);
+    return()=>{cancelled=true;clearTimeout(timer);};
+  },[groupManagementOpen,groupMemberQuery,groupMemberRows,session?.user?.id]);
+
+  async function renameCurrentGroup(){
+    const title=groupNameDraft.trim();
+    if(title.length<2||title.length>60){setNotice('Название группы должно содержать от 2 до 60 символов');return;}
+    setGroupManageBusy(true);
+    try{
+      const {error}=await supabase.from('conversations').update({title}).eq('id',selected.id);
+      if(error)throw error;
+      setSelected(previous=>({...previous,title}));
+      setChats(previous=>previous.map(chat=>chat.id===selected.id?{...chat,title}:chat));
+      setNotice('Название группы изменено');
+    }catch(error){setNotice('Не удалось изменить название: '+error.message);}
+    finally{setGroupManageBusy(false);}
+  }
+
+  async function addCurrentGroupMember(person){
+    setGroupManageBusy(true);
+    try{
+      const {error}=await supabase.from('conversation_members').insert({conversation_id:selected.id,user_id:person.id,member_role:'member'});
+      if(error)throw error;
+      await openGroupManagement();setNotice('Участник добавлен');
+    }catch(error){setNotice('Не удалось добавить участника: '+error.message);setGroupManageBusy(false);}
+  }
+
+  async function changeGroupMemberRole(userId,role){
+    setGroupManageBusy(true);
+    try{
+      const {error}=await supabase.from('conversation_members').update({member_role:role}).eq('conversation_id',selected.id).eq('user_id',userId);
+      if(error)throw error;
+      setGroupMemberRows(previous=>previous.map(row=>row.user_id===userId?{...row,member_role:role}:row));
+    }catch(error){setNotice('Не удалось изменить роль: '+error.message);}
+    finally{setGroupManageBusy(false);}
+  }
+
+  async function removeCurrentGroupMember(userId){
+    const isSelf=userId===session.user.id;
+    if(!window.confirm(isSelf?'Выйти из этой группы?':'Удалить участника из группы?'))return;
+    setGroupManageBusy(true);
+    try{
+      const {error}=await supabase.from('conversation_members').delete().eq('conversation_id',selected.id).eq('user_id',userId);
+      if(error)throw error;
+      if(isSelf){setGroupManagementOpen(false);setSelected(null);setChats(previous=>previous.filter(chat=>chat.id!==selected.id));await loadChats();}
+      else setGroupMemberRows(previous=>previous.filter(row=>row.user_id!==userId));
+    }catch(error){setNotice('Не удалось выполнить действие: '+error.message);}
+    finally{setGroupManageBusy(false);}
+  }
+
   async function createGroupChat() {
     const title = groupTitle.trim();
     const memberIds = [...new Set(groupMembers)];
@@ -1102,7 +1180,7 @@ function App() {
           <div className="web-social-grid">{profilePhotos.map(item=><button key={item.id} className="web-photo-card" onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фотография профиля'}/></button>)}{!profilePhotos.length&&<div className="social-empty">Здесь будут фотографии твоего профиля.</div>}</div>
         </div>
       </section> : activeTab==='people' ? <div className="people-page"><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p></div><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div><button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div>{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
         <div className="messages-pane" ref={messagesPaneRef} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
           {!loadingMessages && messages.length===0 && <div className="empty-messages"><div className="empty-chat-icon"><MessageCircle size={28}/></div><b>Начните общение</b><span>Напиши первое сообщение — оно появится здесь.</span></div>}
@@ -1202,6 +1280,13 @@ function App() {
       <div className="social-viewer-content"><p>{socialViewer.caption||' '}</p><div className="social-viewer-actions"><button onClick={toggleCurrentSocialLike} disabled={socialBusy} className={socialLiked?'liked':''}><Heart size={17} fill={socialLiked?'currentColor':'none'}/> {socialViewer.likeCount||0}</button>{socialViewer.kind==='photo'&&<span><MessageSquare size={16}/> {socialComments.length}</span>}</div>
       {socialViewer.kind==='photo'&&<><div className="social-comments">{socialComments.map(comment=><div key={comment.id}><b>{comment.user_id===session.user.id?'Вы':'Участник Nexura'}</b><span>{comment.content}</span></div>)}{!socialComments.length&&<small>Комментариев пока нет.</small>}</div><form className="social-comment-form" onSubmit={submitSocialComment}><input value={socialCommentDraft} onChange={event=>setSocialCommentDraft(event.target.value)} placeholder="Написать комментарий…" maxLength={1000}/><button className="primary-btn" disabled={socialBusy||!socialCommentDraft.trim()}>Отправить</button></form></>}
       </div>
+    </section></div>}
+    {groupManagementOpen && <div className="modal-backdrop" onClick={()=>setGroupManagementOpen(false)}><section className="group-modal group-management-modal" onClick={event=>event.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">УПРАВЛЕНИЕ ГРУППОЙ</div><h3>Участники</h3></div><button className="icon-button" onClick={()=>setGroupManagementOpen(false)}><X size={18}/></button></div>
+      {groupManageAllowed&&<div className="group-rename-row"><input value={groupNameDraft} onChange={event=>setGroupNameDraft(event.target.value)} maxLength={60}/><button className="primary-btn" onClick={renameCurrentGroup} disabled={groupManageBusy}>Сохранить</button></div>}
+      <div className="group-member-list">{groupMemberRows.map(row=>{const p=row.profiles||{};return <div className="group-member-manage-row" key={row.user_id}><Avatar value={p.avatar_url} name={p.display_name}/><div><b>{p.display_name||p.username||'Пользователь'}</b><small>{row.member_role==='owner'?'Создатель':row.member_role==='admin'?'Администратор':'Участник'}</small></div>{groupManageAllowed&&row.user_id!==session.user.id&&<div className="group-member-actions">{row.member_role!=='admin'?<button disabled={groupManageBusy} onClick={()=>changeGroupMemberRole(row.user_id,'admin')}>Назначить админом</button>:<button disabled={groupManageBusy} onClick={()=>changeGroupMemberRole(row.user_id,'member')}>Снять админа</button>}<button className="danger-text" disabled={groupManageBusy} onClick={()=>removeCurrentGroupMember(row.user_id)}>Удалить</button></div>}</div>;})}</div>
+      {groupManageAllowed&&<div className="group-add-area"><b>Добавить участника</b><input value={groupMemberQuery} onChange={event=>setGroupMemberQuery(event.target.value)} placeholder="Имя или @username"/><div className="group-add-results">{groupMemberResults.map(person=><button key={person.id} onClick={()=>addCurrentGroupMember(person)} disabled={groupManageBusy}><Avatar value={person.avatar_url} name={person.display_name}/><span>{person.display_name||person.username}</span><Plus size={16}/></button>)}{groupMemberQuery.trim().length>=2&&!groupMemberResults.length&&<small>Новых пользователей не найдено.</small>}</div></div>}
+      <button className="leave-group-button" onClick={()=>removeCurrentGroupMember(session.user.id)} disabled={groupManageBusy}>Покинуть группу</button>
     </section></div>}
     {advancedSettingsOpen && <div className="modal-backdrop" onClick={()=>setAdvancedSettingsOpen(false)}><section className="group-modal advanced-settings-modal" onClick={event=>event.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">УПРАВЛЕНИЕ АККАУНТОМ</div><h3>Настройки</h3></div><button className="icon-button" onClick={()=>setAdvancedSettingsOpen(false)}><X size={18}/></button></div>
