@@ -870,16 +870,39 @@ function App() {
   }
 
   async function ensureCallChannels(peerUserId) {
-    const current=callRef.current;
-    if(current.ownChannel&&current.peerChannel&&current.peerUserId===peerUserId)return;
-    if(current.ownChannel)await supabase.removeChannel(current.ownChannel);
+    let current=callRef.current;
+    if(current.peerChannel&&current.peerUserId===peerUserId)return;
     if(current.peerChannel)await supabase.removeChannel(current.peerChannel);
-    const own=supabase.channel('user:'+session.user.id,{config:{private:true,broadcast:{ack:true,self:false}}});
-    own.on('broadcast',{event:'call_signal'},({payload})=>{void receiveCallSignal(payload);});
+    let own=current.ownChannel;
+    if(!own){
+      own=supabase.channel('user:'+session.user.id,{config:{private:true,broadcast:{ack:true,self:false}}});
+      own.on('broadcast',{event:'call_signal'},({payload})=>{void receiveCallSignal(payload);});
+      callRef.current={...callRef.current,ownChannel:own};
+      await subscribeCallChannel(own);
+    }
     const peer=supabase.channel('user:'+peerUserId,{config:{private:true,broadcast:{ack:true,self:false}}});
-    await Promise.all([subscribeCallChannel(own),subscribeCallChannel(peer)]);
     callRef.current={...callRef.current,ownChannel:own,peerChannel:peer,peerUserId};
+    await subscribeCallChannel(peer);
   }
+
+  useEffect(()=>{
+    if(!session?.user?.id)return;
+    let alive=true;
+    const own=supabase.channel('user:'+session.user.id,{config:{private:true,broadcast:{ack:true,self:false}}});
+    own.on('broadcast',{event:'call_signal'},({payload})=>{if(alive)void receiveCallSignal(payload);});
+    own.subscribe(status=>{
+      if(status==='SUBSCRIBED'&&alive)callRef.current={...callRef.current,ownChannel:own};
+    });
+    return()=>{
+      alive=false;
+      const current=callRef.current;
+      if(current.peerChannel)supabase.removeChannel(current.peerChannel);
+      supabase.removeChannel(own);
+      if(current.room){current.ending=true;current.room.disconnect().catch(()=>{});}
+      (current.audioElements||[]).forEach(element=>{try{element.pause();element.remove();}catch{}});
+      callRef.current={};
+    };
+  },[session?.user?.id]);
 
   async function sendCallSignal(signal) {
     const channel=callRef.current.peerChannel;
@@ -972,9 +995,8 @@ function App() {
     current.ending=true;
     if(current.room){try{await current.room.disconnect();}catch{}}
     (current.audioElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
-    if(current.ownChannel)await supabase.removeChannel(current.ownChannel);
     if(current.peerChannel)await supabase.removeChannel(current.peerChannel);
-    callRef.current={};
+    callRef.current=current.ownChannel?{ownChannel:current.ownChannel}:{};
     setCallUi(null);setIncomingCall(null);
   }
 
