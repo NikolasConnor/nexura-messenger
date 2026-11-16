@@ -1481,8 +1481,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         } else {
                                             if (register) {
                                                 api.signUp(email.trim(), password, displayName.trim())
-                                                // A newly created account must choose its public username before entering Nexura.
-                                                usernameSetupRequired = true
+                                                // Create the profile row before allowing username submission.
+                                                val newProfile = api.myProfile()
+                                                profileName = newProfile.displayName
+                                                profileUsername = newProfile.username
+                                                usernameDraft = newProfile.username
+                                                usernameSetupRequired = newProfile.username.isBlank()
                                             } else {
                                                 api.signIn(email.trim(), password)
                                                 usernameSetupRequired = false
