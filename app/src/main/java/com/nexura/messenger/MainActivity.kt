@@ -95,6 +95,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -4486,6 +4487,10 @@ private fun AudioMessagePlayer(
     mimeType: String?
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var transcript by rememberSaveable(uri.toString()) { mutableStateOf<String?>(null) }
+    var transcribing by remember(uri) { mutableStateOf(false) }
+    var transcriptError by remember(uri) { mutableStateOf<String?>(null) }
     var playing by remember(uri) { mutableStateOf(false) }
     var loading by remember(uri) { mutableStateOf(false) }
     var durationMs by remember(uri) { mutableLongStateOf(0L) }
@@ -4593,6 +4598,59 @@ private fun AudioMessagePlayer(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(if (loading) "Загрузка…" else formatTime(positionMs), color = SecondaryText, fontSize = 10.sp)
             Text(if (durationMs > 0L) formatTime(durationMs) else "--:--", color = SecondaryText, fontSize = 10.sp)
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                enabled = !transcribing,
+                onClick = {
+                    if (transcript != null) {
+                        transcript = null
+                        transcriptError = null
+                    } else {
+                        scope.launch {
+                            transcribing = true
+                            transcriptError = null
+                            try {
+                                transcript = VoiceTranscriber.transcribe(context.applicationContext, uri)
+                                    .ifBlank { "Не удалось распознать речь в этом сообщении." }
+                            } catch (e: Exception) {
+                                transcriptError = e.message ?: "Не удалось расшифровать голосовое сообщение"
+                            } finally {
+                                transcribing = false
+                            }
+                        }
+                    }
+                },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                if (transcribing) {
+                    CircularProgressIndicator(Modifier.size(14.dp), color = Accent, strokeWidth = 2.dp)
+                    Text("  Расшифровываем…", color = Accent, fontSize = 11.sp)
+                } else {
+                    Text(if (transcript == null) "Расшифровать" else "Скрыть текст", color = Accent, fontSize = 11.sp)
+                }
+            }
+            if (transcript == null && !transcribing) {
+                Text("Офлайн · русский язык", color = SecondaryText, fontSize = 10.sp)
+            }
+        }
+        if (!transcript.isNullOrBlank()) {
+            Text(
+                transcript!!,
+                color = MainText,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 3.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0x33201A35))
+                    .padding(horizontal = 11.dp, vertical = 9.dp)
+            )
+        }
+        if (!transcriptError.isNullOrBlank()) {
+            Text(transcriptError!!, color = Danger, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
         }
     }
 }
