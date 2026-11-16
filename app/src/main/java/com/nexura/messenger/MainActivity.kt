@@ -1667,6 +1667,42 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     finally { savingProfile = false }
                                 } }, enabled = !savingProfile && profileName.isNotBlank() && profileUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$")), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                HorizontalDivider(Modifier.padding(vertical = 16.dp), color = Surface2)
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Истории и фотографии", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text("Истории исчезают через 24 часа, фото остаются в профиле", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                }
+                                Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { storyPicker.launch(arrayOf("image/*", "video/*")) }, enabled = !socialBusy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(5.dp)); Text("Добавить историю") }
+                                    OutlinedButton(onClick = { profilePhotoPublisher.launch(arrayOf("image/*")) }, enabled = !socialBusy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(5.dp)); Text("Добавить фото") }
+                                }
+                                if (socialStories.isNotEmpty()) {
+                                    Text("Мои активные истории", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp, bottom = 6.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        items(socialStories, key = { it.id }) { story ->
+                                            Column(Modifier.width(68.dp).clickable { selectedSocialStory = story }, horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Box(Modifier.size(62.dp).border(2.dp, Brush.linearGradient(listOf(Accent, Accent2)), CircleShape).padding(3.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+                                                    if (story.mediaType == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White)
+                                                    else AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                }
+                                                Text("История", color = SecondaryText, fontSize = 10.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                                if (socialPhotos.isNotEmpty()) {
+                                    Text("Фотографии профиля", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp, bottom = 6.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        items(socialPhotos, key = { it.id }) { photo ->
+                                            AsyncImage(model = photo.mediaUrl, contentDescription = "Фото профиля", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable {
+                                                selectedSocialPhoto = photo
+                                                scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.profilePhotoReaction(photo.id); socialPhotoComments = api.profilePhotoComments(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось загрузить фото" } finally { socialInteractionBusy = false } }
+                                            }, contentScale = ContentScale.Crop)
+                                        }
+                                    }
+                                }
                                 Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
                             }
@@ -2043,7 +2079,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); socialPhotos = api.profilePhotos(p.id); socialStories = api.activeStories().filter { it.userId == p.id }; val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
@@ -4628,7 +4664,6 @@ private fun NexuraBottomBar(
             val items = listOf(
                 Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline),
                 Triple("contacts", "Контакты", Icons.Default.GroupAdd),
-                Triple("social", "Истории", Icons.Default.Image),
                 Triple("search", "Поиск", Icons.Default.Search)
             )
             items.forEach { (key, label, icon) ->
@@ -4653,7 +4688,7 @@ private fun NexuraBottomBar(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Default.Settings, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
+                Icon(Icons.Default.Image, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
                 Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
         }
