@@ -283,7 +283,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var mediaViewerItems by remember { mutableStateOf(emptyList<MessageItem>()) }
     var mediaViewerIndex by remember { mutableIntStateOf(0) }
     val openChatMedia: (MessageItem) -> Unit = { mediaItem ->
-        val galleryItems = messages.filter { it.mediaKind == "image" || it.mediaKind == "video" }.sortedBy { it.createdAt }
+        val galleryItems = messages.filter { it.mediaKind == "image" || it.mediaKind == "video" || it.messageType == "image" }.sortedBy { it.createdAt }
         mediaViewerItems = galleryItems
         mediaViewerIndex = galleryItems.indexOfFirst { it.id == mediaItem.id }.coerceAtLeast(0)
         mediaViewerUri = Uri.parse(mediaItem.content)
@@ -3840,7 +3840,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         model = mediaUri,
                                                         contentDescription = "Фото",
                                                         modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp))
-                                                            .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image" },
+                                                            .clickable { openChatMedia(msg) },
                                                         contentScale = ContentScale.Crop
                                                     )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
@@ -3848,7 +3848,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }
                                                 }
                                             } else if (msg.messageType == "image") {
-                                                AsyncImage(model = msg.content, contentDescription = "Изображение", modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                                AsyncImage(model = msg.content, contentDescription = "Изображение", modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp)).clickable { openChatMedia(msg) }, contentScale = ContentScale.Crop)
                                             } else {
                                                 Text(msg.content, color = MainText, fontSize = 15.sp, lineHeight = 21.sp)
                                             }
