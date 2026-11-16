@@ -3323,7 +3323,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         viewedProfilePhotos.chunked(3).forEach { group ->
                                             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 group.forEach { photo ->
-                                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { selectedSocialPhoto = photo; socialCommentDraft = ""; scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.profilePhotoReaction(photo.id); socialPhotoComments = api.profilePhotoComments(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось загрузить комментарии" } finally { socialInteractionBusy = false } } }, contentScale = ContentScale.Crop)
+                                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
                                                 }
                                                 repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
                                             }
