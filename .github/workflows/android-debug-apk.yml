@@ -2,7 +2,7 @@ name: Nexura v0.2.0 — NEW test APK
 # Build verification for Android UX and account-identity updates.
 on:
   push:
-    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins ]
+    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins, feature/media-reliability-transcription ]
     paths:
       - "app/**"
       - "crypto-core/**"
