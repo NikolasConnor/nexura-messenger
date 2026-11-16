@@ -37,6 +37,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.NotificationManagerCompat
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
@@ -62,6 +63,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.animateItemPlacement
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -5151,7 +5153,14 @@ private fun PeopleDirectoryScreen(
         } else {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 items(users, key = { it.id }) { person ->
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp)).background(Surface1).clickable { onOpenProfile(person) }.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.fillMaxWidth().animateItemPlacement()
+                            .clip(RoundedCornerShape(17.dp)).background(Surface1)
+                            .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 420f))
+                            .clickable { onOpenProfile(person) }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Avatar(person.displayName, person.avatar)
                         Column(Modifier.weight(1f).padding(start = 11.dp, end = 8.dp)) {
                             Text(person.displayName, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
@@ -5172,14 +5181,16 @@ private fun NexuraBottomBar(selected: String, profileSelected: Boolean, onSelect
         Row(Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(Triple("settings", "Настройки", Icons.Default.Settings), Triple("contacts", "Люди", Icons.Default.GroupAdd), Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline)).forEach { (key, label, icon) ->
                 val active = selected == key && !profileSelected
-                val scale by animateFloatAsState(if (active) 1.06f else 1f, label = "nav-$key")
-                Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(if (active) Accent.copy(alpha = 0.13f) else Color.Transparent).clickable { onSelect(key) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                val scale by animateFloatAsState(if (active) 1.08f else 1f, animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f), label = "nav-$key")
+                val itemColor by animateColorAsState(if (active) Accent.copy(alpha = 0.15f) else Color.Transparent, animationSpec = spring(stiffness = 420f), label = "nav-color-$key")
+                Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(itemColor).animateContentSize(spring(dampingRatio = 0.72f, stiffness = 480f)).clickable { onSelect(key) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = scale; scaleY = scale })
                     Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
                 }
             }
-            val profileScale by animateFloatAsState(if (profileSelected) 1.06f else 1f, label = "nav-profile")
-            Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(if (profileSelected) Accent.copy(alpha = 0.13f) else Color.Transparent).clickable { onProfile() }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            val profileScale by animateFloatAsState(if (profileSelected) 1.08f else 1f, animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f), label = "nav-profile")
+            val profileColor by animateColorAsState(if (profileSelected) Accent.copy(alpha = 0.15f) else Color.Transparent, animationSpec = spring(stiffness = 420f), label = "nav-profile-color")
+            Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(profileColor).animateContentSize(spring(dampingRatio = 0.72f, stiffness = 480f)).clickable { onProfile() }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Icon(Icons.Default.Person, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = profileScale; scaleY = profileScale })
                 Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
@@ -5367,7 +5378,12 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
                 scaleY = emojiScale
             }
         )
-        Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        AnimatedContent(targetState = count, transitionSpec = {
+            (fadeIn(tween(130)) + scaleIn(initialScale = 0.82f, animationSpec = tween(150))) togetherWith
+                fadeOut(tween(90))
+        }, label = "reaction-count") { value ->
+            Text(" $value", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
