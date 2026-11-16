@@ -2144,8 +2144,30 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
     }
 
     private suspend fun resolveProfileBanner(value: String): String {
-        if (value.startsWith("social:")) return socialSignedUrl(value.removePrefix("social:"))
-        return value
+        if (!value.startsWith("social:")) return value
+
+        val path = value.removePrefix("social:").trimStart('/')
+        if (path.isBlank()) return ""
+
+        return try {
+            socialSignedUrl(path)
+        } catch (error: Exception) {
+            // A profile may still reference a Storage object that was deleted or
+            // never finished uploading. Do not let that stale banner break the
+            // entire profile screen; the empty value lets the UI show its normal
+            // placeholder and lets the owner upload a replacement.
+            val reason = error.message.orEmpty().lowercase(java.util.Locale.ROOT)
+            if (
+                reason.contains("object not found") ||
+                reason.contains("no such object") ||
+                reason.contains("not found")
+            ) {
+                signedUrlCache.remove("nexura-social-media/$path")
+                ""
+            } else {
+                throw error
+            }
+        }
     }
 
     suspend fun uploadAvatar(bytes: ByteArray, mimeType: String): String = uploadProfileImage(bytes, mimeType, "avatar")
