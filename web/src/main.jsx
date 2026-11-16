@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch } from 'lucide-react';
+import { Room, RoomEvent, Track } from 'livekit-client';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadEncryptedRecord } from './crypto/secure-store.js';
@@ -255,6 +256,9 @@ function App() {
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
   const [browserAudioState, setBrowserAudioState] = useState(sharedVoiceMeta);
+  const [callUi, setCallUi] = useState(null);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const callRef = useRef({});
   const [notificationPrefs, setNotificationPrefs] = useState({push_enabled:true,sound_enabled:true,vibration_enabled:false});
   const [browserNotificationPermission, setBrowserNotificationPermission] = useState(typeof Notification==='undefined'?'unsupported':Notification.permission);
 
@@ -854,6 +858,167 @@ function App() {
     finally{setGroupManageBusy(false);}
   }
 
+  async function subscribeCallChannel(channel) {
+    return new Promise((resolve,reject)=>{
+      let settled=false;
+      const timer=setTimeout(()=>{if(!settled){settled=true;reject(new Error('Сервер сигнализации не ответил'));}},15000);
+      channel.subscribe(status=>{
+        if(status==='SUBSCRIBED'&&!settled){settled=true;clearTimeout(timer);resolve();}
+        else if(['CHANNEL_ERROR','TIMED_OUT','CLOSED'].includes(status)&&!settled){settled=true;clearTimeout(timer);reject(new Error('Не удалось подключиться к серверу звонков: '+status));}
+      });
+    });
+  }
+
+  async function ensureCallChannels(peerUserId) {
+    const current=callRef.current;
+    if(current.ownChannel&&current.peerChannel&&current.peerUserId===peerUserId)return;
+    if(current.ownChannel)await supabase.removeChannel(current.ownChannel);
+    if(current.peerChannel)await supabase.removeChannel(current.peerChannel);
+    const own=supabase.channel('user:'+session.user.id,{config:{private:true,broadcast:{ack:true,self:false}}});
+    own.on('broadcast',{event:'call_signal'},({payload})=>{void receiveCallSignal(payload);});
+    const peer=supabase.channel('user:'+peerUserId,{config:{private:true,broadcast:{ack:true,self:false}}});
+    await Promise.all([subscribeCallChannel(own),subscribeCallChannel(peer)]);
+    callRef.current={...callRef.current,ownChannel:own,peerChannel:peer,peerUserId};
+  }
+
+  async function sendCallSignal(signal) {
+    const channel=callRef.current.peerChannel;
+    if(!channel)throw new Error('Канал звонка не подключён');
+    const result=await channel.send({type:'broadcast',event:'call_signal',payload:signal});
+    if(result!=='ok')throw new Error('Сервер сигнализации не подтвердил доставку');
+  }
+
+  async function connectCallRoom({callId,peerUserId,conversationId,sendAnswer=false}) {
+    const current=callRef.current;
+    if(current.callId!==callId||current.room)return;
+    const {data,error}=await supabase.functions.invoke('livekit-token',{
+      body:{conversation_id:conversationId,peer_user_id:peerUserId}
+    });
+    if(error)throw error;
+    if(!data?.token||!String(data.server_url||'').startsWith('wss://'))throw new Error(data?.error||'LiveKit не выдал данные для подключения');
+    const room=new Room({adaptiveStream:true,dynacast:true});
+    callRef.current={...callRef.current,room,ending:false};
+    room.on(RoomEvent.TrackSubscribed,(track)=>{
+      if(track.kind!==Track.Kind.Audio)return;
+      const element=track.attach();
+      element.autoplay=true;element.setAttribute('playsinline','');
+      document.body.appendChild(element);
+      callRef.current.audioElements=[...(callRef.current.audioElements||[]),element];
+    });
+    room.on(RoomEvent.TrackUnsubscribed,(track)=>{
+      track.detach().forEach(element=>{element.remove();});
+      callRef.current.audioElements=(callRef.current.audioElements||[]).filter(element=>element.isConnected);
+    });
+    room.on(RoomEvent.ParticipantConnected,()=>{
+      setCallUi(previous=>previous?{...previous,connected:true,status:'На связи',connectedAt:previous.connectedAt||Date.now()}:previous);
+    });
+    room.on(RoomEvent.ParticipantDisconnected,()=>{
+      if(!room.remoteParticipants.size)setCallUi(previous=>previous?{...previous,connected:false,status:'Ожидаем собеседника…'}:previous);
+    });
+    room.on(RoomEvent.Disconnected,()=>{
+      if(!callRef.current.ending)setCallUi(previous=>previous?{...previous,connected:false,status:'Связь прервана'}:previous);
+    });
+    await room.connect(data.server_url,data.token);
+    if(callRef.current.callId!==callId){await room.disconnect();return;}
+    await room.localParticipant.setMicrophoneEnabled(true);
+    setCallUi(previous=>previous?{...previous,status:room.remoteParticipants.size?'На связи':'Ожидаем собеседника…',connected:room.remoteParticipants.size>0,connectedAt:room.remoteParticipants.size?(previous.connectedAt||Date.now()):previous.connectedAt}:previous);
+    if(sendAnswer)await sendCallSignal({type:'answer',call_id:callId,from:session.user.id,to:peerUserId});
+  }
+
+  async function receiveCallSignal(signal) {
+    if(!signal||signal.to!==session.user.id||!signal.from||signal.from===session.user.id)return;
+    const type=signal.type, id=signal.call_id;
+    if(!id)return;
+    if(type==='offer'){
+      if(callRef.current.callId||incomingCall){
+        await ensureCallChannels(signal.from).catch(()=>{});
+        await sendCallSignal({type:'busy',call_id:id,from:session.user.id,to:signal.from}).catch(()=>{});
+        return;
+      }
+      try{
+        await ensureCallChannels(signal.from);
+        setIncomingCall({callId:id,peerUserId:signal.from,peerName:selected?.peerUserId===signal.from?selected.title:'Входящий вызов',conversationId:selected?.peerUserId===signal.from?selected.id:null});
+        await sendCallSignal({type:'ringing',call_id:id,from:session.user.id,to:signal.from});
+      }catch(error){setNotice('Не удалось принять сигнал звонка: '+error.message);}
+      return;
+    }
+    if(id!==callRef.current.callId)return;
+    if(type==='ringing'){setCallUi(previous=>previous?{...previous,status:'Вызов…'}:previous);return;}
+    if(type==='answer'){
+      clearTimeout(callRef.current.timeout);
+      setCallUi(previous=>previous?{...previous,status:'Соединяем…'}:previous);
+      try{await connectCallRoom({callId:id,peerUserId:callRef.current.peerUserId,conversationId:callRef.current.conversationId,sendAnswer:false});}
+      catch(error){setNotice('Не удалось подключить звонок: '+error.message);await endCall(false);}
+      return;
+    }
+    if(['end','decline','busy'].includes(type)){
+      const message=type==='busy'?'Абонент занят':type==='decline'?'Звонок отклонён':'Звонок завершён';
+      await finishCallLocal();
+      setNotice(message);
+    }
+  }
+
+  async function finishCallLocal() {
+    const current=callRef.current;
+    clearTimeout(current.timeout);
+    current.ending=true;
+    if(current.room){try{await current.room.disconnect();}catch{}}
+    (current.audioElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
+    if(current.ownChannel)await supabase.removeChannel(current.ownChannel);
+    if(current.peerChannel)await supabase.removeChannel(current.peerChannel);
+    callRef.current={};
+    setCallUi(null);setIncomingCall(null);
+  }
+
+  async function startAudioCall() {
+    if(!selected||selected.kind!=='direct'||!selected.peerUserId||callRef.current.callId||incomingCall)return;
+    try{
+      await ensureCallChannels(selected.peerUserId);
+      const callId=crypto.randomUUID();
+      callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null};
+      setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Вызов…',connected:false,muted:false});
+      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:false,sent_at:Date.now()});
+      callRef.current.timeout=setTimeout(async()=>{
+        if(callRef.current.callId!==callId)return;
+        await sendCallSignal({type:'end',call_id:callId,from:session.user.id,to:selected.peerUserId}).catch(()=>{});
+        await finishCallLocal();setNotice('Нет ответа');
+      },35000);
+    }catch(error){await finishCallLocal();setNotice('Не удалось начать звонок: '+error.message);}
+  }
+
+  async function acceptIncomingCall() {
+    const incoming=incomingCall;
+    if(!incoming)return;
+    if(!incoming.conversationId){setNotice('Открой личный чат с этим пользователем и повтори приём звонка.');return;}
+    callRef.current={...callRef.current,callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId};
+    setIncomingCall(null);
+    setCallUi({callId:incoming.callId,peerName:incoming.peerName,direction:'incoming',status:'Соединяем…',connected:false,muted:false});
+    try{await connectCallRoom({callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId,sendAnswer:true});}
+    catch(error){setNotice('Не удалось подключиться к звонку: '+error.message);await endCall(false);}
+  }
+
+  async function declineIncomingCall() {
+    const incoming=incomingCall;if(!incoming)return;
+    await ensureCallChannels(incoming.peerUserId).catch(()=>{});
+    await sendCallSignal({type:'decline',call_id:incoming.callId,from:session.user.id,to:incoming.peerUserId}).catch(()=>{});
+    await finishCallLocal();
+  }
+
+  async function endCall(notifyPeer=true) {
+    const current=callRef.current;
+    if(notifyPeer&&current.callId&&current.peerUserId){
+      await sendCallSignal({type:'end',call_id:current.callId,from:session.user.id,to:current.peerUserId}).catch(()=>{});
+    }
+    await finishCallLocal();
+  }
+
+  async function toggleCallMute() {
+    const room=callRef.current.room;if(!room)return;
+    const muted=!callUi?.muted;
+    try{await room.localParticipant.setMicrophoneEnabled(!muted);setCallUi(previous=>previous?{...previous,muted}:previous);}
+    catch(error){setNotice('Не удалось изменить микрофон: '+error.message);}
+  }
+
   async function createGroupChat() {
     const title = groupTitle.trim();
     const memberIds = [...new Set(groupMembers)];
@@ -1180,7 +1345,7 @@ function App() {
           <div className="web-social-grid">{profilePhotos.map(item=><button key={item.id} className="web-photo-card" onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фотография профиля'}/></button>)}{!profilePhotos.length&&<div className="social-empty">Здесь будут фотографии твоего профиля.</div>}</div>
         </div>
       </section> : activeTab==='people' ? <div className="people-page"><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p></div><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div>{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
         <div className="messages-pane" ref={messagesPaneRef} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
           {!loadingMessages && messages.length===0 && <div className="empty-messages"><div className="empty-chat-icon"><MessageCircle size={28}/></div><b>Начните общение</b><span>Напиши первое сообщение — оно появится здесь.</span></div>}
@@ -1267,6 +1432,8 @@ function App() {
         </form>
       </section>
     </div>}
+    {incomingCall&&<div className="modal-backdrop call-backdrop"><section className="call-modal incoming-call-modal"><div className="call-avatar"><Phone size={27}/></div><div className="eyebrow">ВХОДЯЩИЙ ЗВОНОК</div><h3>{incomingCall.peerName}</h3><p>Вам звонят в Nexura</p><div className="call-controls"><button className="call-decline" onClick={declineIncomingCall}><PhoneOff size={19}/> Отклонить</button><button className="call-accept" onClick={acceptIncomingCall}><Phone size={19}/> Принять</button></div></section></div>}
+    {callUi&&<div className="call-floating-panel"><div className="call-floating-info"><span className="call-live-dot"/><div><b>{callUi.peerName}</b><small>{callUi.status}</small></div></div><div className="call-floating-actions"><button onClick={toggleCallMute} title={callUi.muted?'Включить микрофон':'Выключить микрофон'}>{callUi.muted?<MicOff size={17}/>:<Mic size={17}/>}</button><button className="call-hangup" onClick={()=>endCall(true)} title="Завершить звонок"><PhoneOff size={17}/></button></div></div>}
     {viewedProfile && <div className="modal-backdrop profile-view-backdrop" onClick={()=>setViewedProfile(null)}><section className="web-user-profile-modal" onClick={event=>event.stopPropagation()}>
       <button className="profile-modal-close" onClick={()=>setViewedProfile(null)} aria-label="Закрыть"><X size={19}/></button>
       <div className="web-profile-cover user-cover">{viewedProfile.banner_display_url ? (viewedProfile.banner_url?.startsWith('social:')?<video src={viewedProfile.banner_display_url} autoPlay muted loop playsInline/>:<img src={viewedProfile.banner_display_url} alt="Обложка"/>) : <div className="cover-placeholder"><UserRound size={30}/></div>}</div>
