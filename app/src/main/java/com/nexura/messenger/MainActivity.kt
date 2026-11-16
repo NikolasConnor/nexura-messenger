@@ -2331,11 +2331,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     socialArchive.forEach { item ->
                                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                             if (item.mediaType == "video") {
-                                                Box(
-                                                    Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
-                                                        .clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "video" },
-                                                    contentAlignment = Alignment.Center
-                                                ) { Icon(Icons.Default.PlayArrow, "Открыть видео", tint = Color.White, modifier = Modifier.size(34.dp)) }
+                                                VideoThumbnail(
+                                                    uri = Uri.parse(item.mediaUrl),
+                                                    modifier = Modifier.size(76.dp),
+                                                    onClick = { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "video" }
+                                                )
                                             } else {
                                                 AsyncImage(model = item.mediaUrl, contentDescription = "История из архива", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
                                             }
@@ -4378,15 +4378,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
     val context = LocalContext.current
     var playbackError by remember(uri) { mutableStateOf<String?>(null) }
-    val player = remember(uri) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
-            playWhenReady = true
-            prepare()
-        }
-    }
+    val player = remember(uri) { ExoPlayer.Builder(context).build() }
 
-    DisposableEffect(player) {
+    DisposableEffect(player, uri) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 playbackError = error.localizedMessage?.takeIf { it.isNotBlank() }
@@ -4394,6 +4388,9 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
             }
         }
         player.addListener(listener)
+        player.setMediaItem(MediaItem.fromUri(uri))
+        player.prepare()
+        player.playWhenReady = true
         onDispose {
             player.removeListener(listener)
             player.release()
