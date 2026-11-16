@@ -37,6 +37,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.NotificationManagerCompat
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
@@ -87,6 +88,8 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -279,6 +282,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingDownloadFile by remember { mutableStateOf<File?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
+    var mediaViewerItems by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var mediaViewerIndex by remember { mutableIntStateOf(0) }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
@@ -299,6 +304,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var profileBio by remember { mutableStateOf("") }
     var profileAge by remember { mutableStateOf("") }
     var profilePhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var profileBannerUrl by remember { mutableStateOf("") }
+    var bannerPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var savingProfile by remember { mutableStateOf(false) }
     var showOnlineStatus by remember { mutableStateOf(true) }
     var readReceiptsEnabled by remember { mutableStateOf(true) }
@@ -340,6 +347,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
     var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var viewedProfileStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
@@ -721,6 +729,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         profilePhotoUri = uri
     }
+    val bannerPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> bannerPhotoUri = uri }
     val chatWallpaperPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -1615,6 +1624,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     TextButton(onClick = { avatarPicker.launch("image/*") }) { Text("Фото") }
                                 }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                Card(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp).animateContentSize(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                                    Column(Modifier.padding(12.dp)) {
+                                        Text("Обложка профиля", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Box(Modifier.fillMaxWidth().padding(top = 9.dp).height(126.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))).clickable { bannerPicker.launch("*/*") }, contentAlignment = Alignment.Center) {
+                                            val bannerModel: Any? = bannerPhotoUri ?: profileBannerUrl.takeIf { it.isNotBlank() }
+                                            when {
+                                                bannerPhotoUri != null && context.contentResolver.getType(bannerPhotoUri!!)?.startsWith("video/") == true -> MutedVideoBanner(bannerPhotoUri.toString(), Modifier.fillMaxSize())
+                                                isVideoCover(profileBannerUrl) -> MutedVideoBanner(profileBannerUrl, Modifier.fillMaxSize())
+                                                bannerModel != null -> AsyncImage(model = bannerModel, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                else -> Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Image, null, tint = Color.White, modifier = Modifier.size(27.dp)); Text("Добавить фото или видео без звука", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                                            }
+                                            Surface(Modifier.align(Alignment.BottomEnd).padding(8.dp), color = Color(0x99000000), shape = CircleShape) { Icon(Icons.Default.Edit, "Изменить обложку", tint = Color.White, modifier = Modifier.padding(8.dp).size(17.dp)) }
+                                        }
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Фото или видео · без звука", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                            if (profileBannerUrl.isNotBlank() || bannerPhotoUri != null) TextButton(onClick = { profileBannerUrl = ""; bannerPhotoUri = null }) { Text("Удалить", color = Danger) }
+                                            TextButton(onClick = { bannerPicker.launch("*/*") }) { Text("Заменить", color = Accent) }
+                                        }
+                                    }
+                                }
                                 Text("Имя в Nexura", color = SecondaryText, fontSize = 12.sp)
                                 OutlinedTextField(value = profileName, onValueChange = { profileName = it.take(40) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, placeholder = { Text("Ваше имя") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
                                 Text("Уникальный username", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
@@ -1637,7 +1666,17 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         if (!profileUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$"))) {
                                             throw IOException("Username обязателен: 3–24 символа, латинские буквы, цифры и _.")
                                         }
-                                        if (profilePhotoUri != null) {
+                                        if (bannerPhotoUri != null) {
+                                             val uri = bannerPhotoUri!!
+                                             val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать обложку") }
+                                             val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                                             profileBannerUrl = withContext(Dispatchers.IO) {
+                                                 if (mime.startsWith("video/")) api.uploadProfileBannerVideo(bytes, mime)
+                                                 else api.uploadProfileBanner(bytes, mime)
+                                             }
+                                             bannerPhotoUri = null
+                                         }
+                                         if (profilePhotoUri != null) {
                                             val uri = profilePhotoUri!!
                                             val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
                                             val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
@@ -1646,7 +1685,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                         val age = profileAge.toIntOrNull()
                                         if (profileAge.isNotBlank() && age == null) throw IOException("Проверьте возраст")
-                                        api.updateMyProfile(profileName, profileAvatar, profileBio, age)
+                                        api.updateMyProfile(profileName, profileAvatar, profileBio, age, profileBannerUrl)
+                                        profileBannerUrl = api.myProfile().bannerUrl
                                         if (profileUsername != usernameDraft) {
                                             api.updateMyUsername(profileUsername)
                                             usernameDraft = profileUsername
@@ -1938,10 +1978,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         AudioMiniPlayer()
                         Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                             NexuraBottomBar(
-                                selected = homeTab,
-                                profileSelected = settingsOpen,
+                                selected = if (settingsOpen) "settings" else homeTab,
+                                profileSelected = homeTab == "profile" && !settingsOpen,
                                 onSelect = { tab ->
-                                    homeTab = tab; settingsOpen = false; createGroupOpen = false
+                                    if (tab == "settings") { settingsOpen = true; createGroupOpen = false } else { homeTab = tab; settingsOpen = false; createGroupOpen = false }
                                     if (tab == "social") scope.launch {
                                         socialBusy = true
                                         try { socialStories = api.activeStories(); socialPhotos = api.profilePhotos(store.userId.orEmpty()) }
@@ -1949,7 +1989,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         finally { socialBusy = false }
                                     }
                                 },
-                                onProfile = { }
+                                onProfile = { settingsOpen = false; homeTab = "profile"; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileBannerUrl = p.bannerUrl; socialPhotos = api.profilePhotos(store.userId.orEmpty()); socialStories = api.activeStories().filter { it.userId == store.userId } } catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" } } }
                             )
                         }
                     }
@@ -2022,7 +2062,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Column(Modifier.padding(start = 11.dp)) {
                                     Text("Nexura", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
-                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
+                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else if (homeTab == "contacts") "Каталог пользователей" else if (homeTab == "profile") "Ваш профиль" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
                                 }
                             }
                             Surface(shape = CircleShape, color = Surface1) {
@@ -2032,7 +2072,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); profileBannerUrl = p.bannerUrl; bannerPhotoUri = null; val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
@@ -2203,108 +2243,72 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
+                        if (homeTab == "profile") {
+                            OwnProfileScreen(
+                                modifier = Modifier.weight(1f),
+                                name = profileName,
+                                username = profileUsername,
+                                bio = profileBio,
+                                avatar = profileAvatar,
+                                bannerUrl = profileBannerUrl,
+                                stories = socialStories,
+                                photos = socialPhotos,
+                                busy = socialBusy,
+                                onEdit = { settingsOpen = true },
+                                onAddStory = { socialCaption = ""; storyPicker.launch(arrayOf("image/*", "video/*")) },
+                                onOpenStory = { item -> mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = item.mediaType },
+                                onAddPhoto = { socialCaption = ""; profilePhotoPublisher.launch(arrayOf("image/*")) },
+                                onOpenPhoto = { item -> mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "image" }
+                            )
+                        }
                         if (homeTab == "contacts") {
-                            Column(Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Все пользователи", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
-                                        Text("Каталог зарегистрированных пользователей Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                            PeopleDirectoryScreen(
+                                modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp),
+                                users = contactsUsers,
+                                query = contactsSearch,
+                                loading = contactsLoading,
+                                hasMore = contactsHasMore,
+                                onQueryChange = { contactsSearch = it },
+                                onLoadMore = {
+                                    scope.launch {
+                                        contactsLoading = true
+                                        try {
+                                            val next = api.listUsers(contactsSearch, contactsOffset, 50)
+                                            contactsUsers = (contactsUsers + next).distinctBy { it.id }
+                                            contactsOffset += next.size
+                                            contactsHasMore = next.size == 50
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось загрузить ещё пользователей" }
+                                        finally { contactsLoading = false }
                                     }
-                                    Box(
-                                        Modifier.size(42.dp).clip(RoundedCornerShape(14.dp))
-                                            .background(Brush.linearGradient(listOf(Accent, Accent2))),
-                                        contentAlignment = Alignment.Center
-                                    ) { Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp)) }
-                                }
-                                OutlinedTextField(
-                                    value = contactsSearch,
-                                    onValueChange = { contactsSearch = it },
-                                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp),
-                                    placeholder = { Text("Поиск по имени или @username") },
-                                    singleLine = true,
-                                    leadingIcon = { Icon(Icons.Default.Search, null, tint = Accent) },
-                                    trailingIcon = {
-                                        if (contactsSearch.isNotBlank()) IconButton(onClick = { contactsSearch = "" }) {
-                                            Icon(Icons.Default.Close, "Очистить", tint = SecondaryText)
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = MainText, unfocusedTextColor = MainText,
-                                        focusedBorderColor = Accent, unfocusedBorderColor = Surface2
-                                    )
-                                )
-                                if (contactsLoading && contactsUsers.isEmpty()) {
-                                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                        CircularProgressIndicator(color = Accent)
+                                },
+                                onOpenProfile = { person ->
+                                    loadingProfile = true
+                                    scope.launch {
+                                        try {
+                                            viewedProfile = api.userProfile(person.id)
+                                            viewedPresence = api.userPresence(person.id)
+                                            viewedProfilePhotos = api.profilePhotos(person.id)
+                                            viewedProfileStories = api.activeStories().filter { it.userId == person.id }
+                                            profileMedia = emptyList()
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль пользователя" }
+                                        finally { loadingProfile = false }
                                     }
-                                } else if (contactsUsers.isEmpty()) {
-                                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(if (contactsSearch.length < 2 && contactsSearch.isNotBlank()) "Введите минимум 2 символа" else "Пользователи не найдены", color = MainText, fontWeight = FontWeight.SemiBold)
-                                            Text("Здесь появятся все аккаунты Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
-                                        }
-                                    }
-                                } else {
-                                    LazyColumn(
-                                        Modifier.weight(1f),
-                                        contentPadding = PaddingValues(bottom = 18.dp),
-                                        verticalArrangement = Arrangement.spacedBy(7.dp)
-                                    ) {
-                                        items(contactsUsers, key = { it.id }) { person ->
-                                            Row(
-                                                Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp))
-                                                    .background(Surface1).clickable {
-                                                        scope.launch {
-                                                            try {
-                                                                val chatId = api.createDirect(person.id)
-                                                                openChat(ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id))
-                                                                homeTab = "chats"
-                                                            } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
-                                                        }
-                                                    }.padding(horizontal = 12.dp, vertical = 11.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Avatar(person.displayName, person.avatar)
-                                                Column(Modifier.weight(1f).padding(start = 11.dp, end = 8.dp)) {
-                                                    Text(person.displayName, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
-                                                    Text(if (person.username.isNotBlank()) "@${person.username}" else "Пользователь Nexura", color = Accent, fontSize = 11.sp, maxLines = 1)
-                                                }
-                                                TextButton(onClick = {
-                                                    scope.launch {
-                                                        try {
-                                                            val chatId = api.createDirect(person.id)
-                                                            openChat(ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id))
-                                                            homeTab = "chats"
-                                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
-                                                    }
-                                                }) { Text("Написать", maxLines = 1) }
-                                            }
-                                        }
-                                        if (contactsHasMore) {
-                                            item {
-                                                OutlinedButton(
-                                                    onClick = {
-                                                        scope.launch {
-                                                            contactsLoading = true
-                                                            try {
-                                                                val next = api.listUsers(contactsSearch, contactsOffset, 50)
-                                                                contactsUsers = (contactsUsers + next).distinctBy { it.id }
-                                                                contactsOffset += next.size
-                                                                contactsHasMore = next.size == 50
-                                                            } catch (e: Exception) { error = e.message ?: "Не удалось загрузить ещё пользователей" }
-                                                            finally { contactsLoading = false }
-                                                        }
-                                                    },
-                                                    enabled = !contactsLoading,
-                                                    modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
-                                                    shape = RoundedCornerShape(14.dp)
-                                                ) { Text(if (contactsLoading) "Загружаем…" else "Показать ещё") }
-                                            }
-                                        }
+                                },
+                                onMessage = { person ->
+                                    scope.launch {
+                                        try {
+                                            val chatId = api.createDirect(person.id)
+                                            val refreshed = api.chats()
+                                            chats = refreshed
+                                            val chat = refreshed.firstOrNull { it.id == chatId }
+                                                ?: ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id)
+                                            if (refreshed.none { it.id == chatId }) chats = refreshed + chat
+                                            openChat(chat)
+                                            homeTab = "chats"
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть переписку" }
                                     }
                                 }
-                            }
+                            )
                         }
                         if (homeTab == "social") {
                             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -2540,13 +2544,29 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         AudioMiniPlayer()
                         NexuraBottomBar(
                             selected = homeTab,
-                            profileSelected = false,
-                            onSelect = { tab -> homeTab = tab; settingsOpen = false; createGroupOpen = false },
+                            profileSelected = homeTab == "profile",
+                            onSelect = { tab ->
+                                if (tab == "settings") {
+                                    settingsOpen = true
+                                    scope.launch {
+                                        try {
+                                            val p = api.myProfile()
+                                            profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username
+                                            profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty()
+                                            profileBannerUrl = p.bannerUrl; bannerPhotoUri = null
+                                            val privacy = api.privacySettings()
+                                            showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled
+                                            blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices()
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" }
+                                    }
+                                } else { homeTab = tab; settingsOpen = false }
+                                createGroupOpen = false
+                            },
                             onProfile = {
-                                settingsOpen = true
+                                settingsOpen = false; homeTab = "profile"
                                 error = ""; notice = ""
                                 scope.launch {
-                                    try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" } }
+                                    try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileBannerUrl = p.bannerUrl; socialPhotos = api.profilePhotos(store.userId.orEmpty()); socialStories = api.activeStories().filter { it.userId == store.userId } }
                                     catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" }
                                 }
                             }
@@ -3056,6 +3076,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 "video", "image" -> {
                                                                     mediaViewerUri = Uri.parse(item.content)
                                                                     mediaViewerType = item.mediaKind ?: "image"
+                                                                     mediaViewerItems = (chatGallery ?: messages).filter { it.mediaKind == "image" || it.mediaKind == "video" }
+                                                                     mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
                                                                     chatGallery = null
                                                                 }
                                                                 "audio" -> {
@@ -3213,81 +3235,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     viewedProfile?.let { profile ->
-                        Dialog(onDismissRequest = { viewedProfile = null; profileMedia = emptyList() }) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp),
-                                colors = CardDefaults.cardColors(containerColor = Surface1),
-                                shape = RoundedCornerShape(24.dp)
-                            ) {
-                                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                                        Text("Профиль", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart))
-                                        IconButton(onClick = { viewedProfile = null; profileMedia = emptyList() }) { Text("×", color = SecondaryText, fontSize = 24.sp) }
-                                    }
-                                    Avatar(profile.displayName, profile.avatar)
-                                    Text(profile.displayName, color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
-                                    if (profile.username.isNotBlank()) Text("@${profile.username}", color = SecondaryText, fontSize = 13.sp)
-                                    viewedPresence?.takeIf { it.isVisible }?.let { presence ->
-                                        Text(if (presence.isOnline) "● В сети" else if (presence.lastSeenAt != null) "Был(а) в ${messageTimeLabel(presence.lastSeenAt)}" else "Не в сети",
-                                            color = if (presence.isOnline) Success else SecondaryText, fontSize = 12.sp,
-                                            modifier = Modifier.padding(top = 4.dp))
-                                    }
-                                    if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
-                                    Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
-                                    if (viewedProfilePhotos.isNotEmpty()) {
-                                        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
-                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                            Text("Фотографии профиля", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                            Text(viewedProfilePhotos.size.toString(), color = SecondaryText, fontSize = 12.sp)
-                                        }
-                                        viewedProfilePhotos.chunked(3).forEach { group ->
-                                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                group.forEach { photo ->
-                                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
-                                                }
-                                                repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
-                                            }
-                                        }
-                                    }
-
-                                    OutlinedButton(onClick = { confirmBlockProfile = profile }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) {
-                                        Icon(Icons.Default.Block, null, modifier = Modifier.size(17.dp))
-                                        Spacer(Modifier.width(7.dp))
-                                        Text("Заблокировать пользователя")
-                                    }
-                                    HorizontalDivider(Modifier.padding(vertical = 16.dp), color = Surface2)
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        Text("Медиа из чата", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                        Text("${profileMedia.size}", color = SecondaryText, fontSize = 12.sp)
-                                    }
-                                    if (loadingProfile) {
-                                        CircularProgressIndicator(Modifier.padding(20.dp), color = Accent)
-                                    } else if (profileMedia.isEmpty()) {
-                                        Text("Фото и видео пока нет", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 16.dp))
-                                    } else {
-                                        profileMedia.chunked(3).forEach { group ->
-                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                group.forEach { item ->
-                                                    Box(
-                                                        Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp))
-                                                            .background(Surface2)
-                                                            .clickable {
-                                                                mediaViewerUri = Uri.parse(item.content)
-                                                                mediaViewerType = if (item.mediaKind == "video") "video" else "image"
-                                                            }
-                                                    ) {
-                                                        AsyncImage(model = item.content, contentDescription = "Открыть медиа из переписки", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                                        if (item.mediaKind == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(30.dp))
-                                                    }
-                                                }
-                                                repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
-                                            }
-                                        }
-                                    }
-                                }
+                        PeerProfileDialog(
+                            profile = profile,
+                            presence = viewedPresence,
+                            stories = viewedProfileStories,
+                            photos = viewedProfilePhotos,
+                            chatMedia = profileMedia,
+                            loading = loadingProfile,
+                            onClose = { viewedProfile = null; profileMedia = emptyList() },
+                            onBlock = { confirmBlockProfile = profile },
+                            onOpenSocialMedia = { mediaViewerUri = Uri.parse(it.mediaUrl); mediaViewerType = it.mediaType },
+                            onOpenChatMedia = { item ->
+                                mediaViewerUri = Uri.parse(item.content)
+                                mediaViewerType = if (item.mediaKind == "video") "video" else "image"
+                                mediaViewerItems = messages.filter { it.mediaKind == "image" || it.mediaKind == "video" }
+                                mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
                             }
-                        }
+                        )
                     }
                     // Keep the chat viewport below the status bar and resize it above the keyboard.
                     // The message area takes the remaining height; the composer stays at the bottom.
@@ -3320,6 +3284,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 viewedProfile = api.userProfile(peerId)
                                                 viewedPresence = api.userPresence(peerId)
                                                 profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                                viewedProfilePhotos = api.profilePhotos(peerId)
+                                                viewedProfileStories = api.activeStories().filter { it.userId == peerId }
                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
                                             finally { loadingProfile = false }
                                         }
@@ -3335,6 +3301,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             viewedProfile = api.userProfile(peerId)
                                                 viewedPresence = api.userPresence(peerId)
                                             profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                                viewedProfilePhotos = api.profilePhotos(peerId)
+                                                viewedProfileStories = api.activeStories().filter { it.userId == peerId }
                                         } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
                                         finally { loadingProfile = false }
                                     }
@@ -3743,7 +3711,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     VideoThumbnail(
                                                         uri = mediaUri,
                                                         modifier = Modifier.width(230.dp).height(150.dp),
-                                                        onClick = { mediaViewerUri = mediaUri; mediaViewerType = "video" }
+                                                        onClick = { mediaViewerUri = mediaUri; mediaViewerType = "video"; mediaViewerItems = messages.filter { it.messageType == "media" && it.encrypted && (it.mediaKind == "image" || it.mediaKind == "video") }; mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == msg.id }.coerceAtLeast(0) }
                                                     )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
                                                         Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
@@ -3787,7 +3755,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         model = mediaUri,
                                                         contentDescription = "Фото",
                                                         modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp))
-                                                            .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image" },
+                                                            .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image"; mediaViewerItems = messages.filter { it.messageType == "media" && it.encrypted && (it.mediaKind == "image" || it.mediaKind == "video") }; mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == msg.id }.coerceAtLeast(0) },
                                                         contentScale = ContentScale.Crop
                                                     )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
@@ -4360,13 +4328,38 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             )
                         }
 
-    // Global media viewer, independent of the currently selected screen.
+    // Full-screen Nexura viewer with swipe navigation through the current chat's media.
     if (mediaViewerUri != null) {
-        Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null })
-                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null }, contentScale = ContentScale.Fit)
-                IconButton(onClick = { mediaViewerUri = null }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
+        var swipeDistance = 0f
+        Dialog(onDismissRequest = { mediaViewerUri = null; mediaViewerItems = emptyList() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(mediaViewerItems, mediaViewerIndex) {
+                detectHorizontalDragGestures(
+                    onHorizontalDrag = { _, amount -> swipeDistance += amount },
+                    onDragEnd = {
+                        if (mediaViewerItems.isNotEmpty() && kotlin.math.abs(swipeDistance) > 70f) {
+                            val next = (mediaViewerIndex + if (swipeDistance < 0f) 1 else -1).coerceIn(0, mediaViewerItems.lastIndex)
+                            mediaViewerIndex = next
+                            val item = mediaViewerItems[next]
+                            mediaViewerUri = Uri.parse(item.content)
+                            mediaViewerType = item.mediaKind ?: "image"
+                        }
+                        swipeDistance = 0f
+                    }
+                )
+            }, contentAlignment = Alignment.Center) {
+                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
+                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                if (mediaViewerType != "video") {
+                    Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 16.dp, top = 30.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Фото", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        if (mediaViewerItems.isNotEmpty()) Text("${mediaViewerIndex + 1} / ${mediaViewerItems.size}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                        IconButton(onClick = { mediaViewerUri = null; mediaViewerItems = emptyList() }, modifier = Modifier.padding(start = 8.dp).background(Color(0x77000000), CircleShape)) {
+                            Icon(Icons.Default.Close, "Закрыть", tint = Color.White)
+                        }
+                    }
+                }
+                if (mediaViewerItems.size > 1) Text("Свайпните влево или вправо", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp).background(Color(0x66000000), RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 7.dp))
             }
         }
     }
@@ -4375,45 +4368,268 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 }
 
 @Composable
+private fun PeerProfileDialog(
+    profile: UserProfile,
+    presence: UserPresence?,
+    stories: List<SocialMediaItem>,
+    photos: List<SocialMediaItem>,
+    chatMedia: List<MessageItem>,
+    loading: Boolean,
+    onClose: () -> Unit,
+    onBlock: () -> Unit,
+    onOpenSocialMedia: (SocialMediaItem) -> Unit,
+    onOpenChatMedia: (MessageItem) -> Unit
+) {
+    Dialog(onDismissRequest = onClose) {
+        Card(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp),
+            colors = CardDefaults.cardColors(containerColor = Surface1),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                    Text("Профиль", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart))
+                    IconButton(onClick = onClose) { Text("×", color = SecondaryText, fontSize = 24.sp) }
+                }
+                Box(Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2)))) {
+                    if (isVideoCover(profile.bannerUrl)) MutedVideoBanner(profile.bannerUrl, Modifier.fillMaxSize())
+                    else if (profile.bannerUrl.isNotBlank()) AsyncImage(model = profile.bannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
+                Avatar(profile.displayName, profile.avatar)
+                Text(profile.displayName, color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+                if (profile.username.isNotBlank()) Text("@${profile.username}", color = SecondaryText, fontSize = 13.sp)
+                presence?.takeIf { it.isVisible }?.let { p ->
+                    Text(if (p.isOnline) "● В сети" else if (p.lastSeenAt != null) "Был(а) в ${messageTimeLabel(p.lastSeenAt)}" else "Не в сети",
+                        color = if (p.isOnline) Success else SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+                if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
+                Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                if (stories.isNotEmpty()) {
+                    HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                    Text("Истории", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(stories, key = { it.id }) { story ->
+                            Box(Modifier.size(82.dp).clip(RoundedCornerShape(12.dp)).background(Surface2).clickable { onOpenSocialMedia(story) }) {
+                                if (story.mediaType == "video") {
+                                    VideoThumbnail(Uri.parse(story.mediaUrl), Modifier.fillMaxSize()) { onOpenSocialMedia(story) }
+                                } else AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            }
+                        }
+                    }
+                }
+                if (photos.isNotEmpty()) {
+                    HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Фотографии профиля", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text(photos.size.toString(), color = SecondaryText, fontSize = 12.sp)
+                    }
+                    photos.chunked(3).forEach { group ->
+                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            group.forEach { photo ->
+                                AsyncImage(model = photo.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { onOpenSocialMedia(photo) }, contentScale = ContentScale.Crop)
+                            }
+                            repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+                OutlinedButton(onClick = onBlock, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) {
+                    Icon(Icons.Default.Block, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("Заблокировать пользователя")
+                }
+                HorizontalDivider(Modifier.padding(vertical = 16.dp), color = Surface2)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Медиа из чата", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text("${chatMedia.size}", color = SecondaryText, fontSize = 12.sp)
+                }
+                if (loading) CircularProgressIndicator(Modifier.padding(20.dp), color = Accent)
+                else if (chatMedia.isEmpty()) Text("Фото и видео пока нет", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(vertical = 16.dp))
+                else chatMedia.chunked(3).forEach { group ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        group.forEach { item ->
+                            Box(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).background(Surface2).clickable { onOpenChatMedia(item) }) {
+                                AsyncImage(model = item.content, contentDescription = "Открыть медиа из переписки", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                if (item.mediaKind == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(30.dp))
+                            }
+                        }
+                        repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun isVideoCover(value: String): Boolean =
+    value.substringBefore("?").lowercase().let { it.endsWith(".mp4") || it.endsWith(".webm") || it.endsWith(".mov") || it.endsWith(".m4v") }
+
+@Composable
 private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
     val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var playbackError by remember(uri) { mutableStateOf<String?>(null) }
+    var isPlaying by remember(uri) { mutableStateOf(true) }
+    var position by remember(uri) { mutableLongStateOf(0L) }
+    var duration by remember(uri) { mutableLongStateOf(0L) }
+    var showControls by remember(uri) { mutableStateOf(true) }
+    var dragging by remember(uri) { mutableStateOf(false) }
+    var muted by remember(uri) { mutableStateOf(false) }
+
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
-            playWhenReady = true
+            repeatMode = Player.REPEAT_MODE_OFF
             prepare()
+            playWhenReady = true
         }
     }
-
-    DisposableEffect(player) {
+    BackHandler(enabled = true, onBack = onClose)
+    DisposableEffect(player, lifecycleOwner) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                playbackError = error.localizedMessage?.takeIf { it.isNotBlank() }
-                    ?: "Формат видео не поддерживается этим устройством"
+                playbackError = error.localizedMessage?.takeIf { it.isNotBlank() } ?: "Не удалось воспроизвести видео"
+            }
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onPlaybackStateChanged(state: Int) {
+                duration = player.duration.coerceAtLeast(0L)
+                if (state == Player.STATE_READY) playbackError = null
+            }
+        }
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> if (player.playWhenReady) player.play()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> player.pause()
+                else -> Unit
             }
         }
         player.addListener(listener)
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             player.removeListener(listener)
             player.release()
         }
     }
-
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(
-            factory = { ctx ->
-                (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView)
-                    .apply { this.player = player }
-            },
-            update = { it.player = player },
-            modifier = Modifier.weight(1f).fillMaxWidth()
-        )
-        playbackError?.let {
-            Text(it, color = Color.White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+    LaunchedEffect(player) {
+        while (true) {
+            if (!dragging) position = player.currentPosition.coerceAtLeast(0L)
+            duration = player.duration.coerceAtLeast(0L)
+            delay(200)
         }
-        Row(Modifier.fillMaxWidth().padding(end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onClose) { Text("Закрыть", color = Color.White) }
+    }
+    LaunchedEffect(showControls, isPlaying) {
+        if (showControls && isPlaying) {
+            delay(2800L)
+            showControls = false
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(factory = { ctx ->
+            (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView).apply {
+                this.player = player
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                setKeepContentOnPlayerReset(true)
+            }
+        }, update = { view -> if (view.player !== player) view.player = player }, modifier = Modifier.fillMaxSize())
+        Box(Modifier.fillMaxSize().clickable { showControls = !showControls })
+        AnimatedVisibility(visible = showControls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().height(100.dp).align(Alignment.TopCenter).statusBarsPadding().background(Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent))))
+                Row(Modifier.align(Alignment.TopStart).fillMaxWidth().statusBarsPadding().padding(start = 12.dp, top = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("NEXURA", color = Color.White.copy(alpha = 0.72f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
+                        Text("Видеоплеер", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    TextButton(onClick = { muted = !muted; player.volume = if (muted) 0f else 1f; showControls = true }) {
+                        Text(if (muted) "Включить звук" else "Выключить звук", color = Color.White, fontSize = 12.sp, maxLines = 1)
+                    }
+                    IconButton(onClick = onClose, modifier = Modifier.background(Color(0x66000000), CircleShape)) { Icon(Icons.Default.Close, "Закрыть видео", tint = Color.White) }
+                }
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().imePadding().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    playbackError?.let { Text(it, color = Color(0xFFFFB4AB), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(formatNexuraTime(position), color = Color.White, fontSize = 11.sp)
+                        Slider(
+                            value = if (duration > 0L) position.coerceIn(0L, duration).toFloat() else 0f,
+                            onValueChange = { value -> dragging = true; position = value.toLong() },
+                            onValueChangeFinished = { if (duration > 0L) player.seekTo(position.coerceIn(0L, duration)); dragging = false },
+                            valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+                            enabled = duration > 0L,
+                            modifier = Modifier.weight(1f).padding(horizontal = 9.dp),
+                            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color.White.copy(alpha = 0.3f))
+                        )
+                        Text(formatNexuraTime(duration), color = Color.White, fontSize = 11.sp)
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+                        IconButton(onClick = { player.seekTo((player.currentPosition - 10_000L).coerceAtLeast(0L)); showControls = true }, modifier = Modifier.size(48.dp)) { Text("−10", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                        IconButton(onClick = { if (player.isPlaying) player.pause() else player.play(); showControls = true }, modifier = Modifier.size(52.dp).background(Accent, CircleShape)) {
+                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, if (isPlaying) "Пауза" else "Воспроизвести", tint = Color.White, modifier = Modifier.size(27.dp))
+                        }
+                        IconButton(onClick = { player.seekTo((player.currentPosition + 10_000L).coerceAtMost(duration)); showControls = true }, modifier = Modifier.size(48.dp)) { Text("+10", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+            }
+        }
+    }
+}
+private fun formatNexuraTime(milliseconds: Long): String {
+    val seconds = (milliseconds.coerceAtLeast(0L) / 1000L).toInt()
+    return "%d:%02d".format(seconds / 60, seconds % 60)
+}
+
+@Composable
+private fun MutedVideoBanner(source: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var bannerPlaybackError by remember(source) { mutableStateOf(false) }
+    val player = remember(source) {
+        ExoPlayer.Builder(context).build().apply {
+            volume = 0f
+            repeatMode = Player.REPEAT_MODE_ONE
+            setMediaItem(MediaItem.fromUri(source))
+        }
+    }
+    DisposableEffect(player, lifecycleOwner) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) { bannerPlaybackError = true }
+            override fun onRenderedFirstFrame() { bannerPlaybackError = false }
+        }
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> player.play()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> player.pause()
+                else -> Unit
+            }
+        }
+        player.addListener(listener)
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+    Box(modifier.clip(RoundedCornerShape(0.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2)))) {
+        AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx ->
+            (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView).apply {
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                setKeepContentOnPlayerReset(true)
+                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                this.player = player
+                player.prepare()
+                player.playWhenReady = true
+            }
+        }, update = { view ->
+            if (view.player !== player) view.player = player
+            if (lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) && player.playWhenReady && !player.isPlaying) player.play()
+        })
+        if (bannerPlaybackError) {
+            Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))))
         }
     }
 }
@@ -4841,60 +5057,164 @@ private fun AudioMiniPlayer() {
     }
 }
 
+
 @Composable
-private fun NexuraBottomBar(
-    selected: String,
-    profileSelected: Boolean,
-    onSelect: (String) -> Unit,
-    onProfile: () -> Unit
+private fun OwnProfileScreen(
+    modifier: Modifier = Modifier,
+    name: String,
+    username: String,
+    bio: String,
+    avatar: String,
+    bannerUrl: String,
+    stories: List<SocialMediaItem>,
+    photos: List<SocialMediaItem>,
+    busy: Boolean,
+    onEdit: () -> Unit,
+    onAddStory: () -> Unit,
+    onOpenStory: (SocialMediaItem) -> Unit,
+    onAddPhoto: () -> Unit,
+    onOpenPhoto: (SocialMediaItem) -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-        color = Surface1,
-        shape = RoundedCornerShape(24.dp),
-        shadowElevation = 12.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            val items = listOf(
-                Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline),
-                Triple("contacts", "Контакты", Icons.Default.GroupAdd),
-                Triple("social", "Истории", Icons.Default.Image),
-                Triple("search", "Поиск", Icons.Default.Search)
-            )
-            items.forEach { (key, label, icon) ->
-                val active = selected == key && !profileSelected
-                Column(
-                    modifier = Modifier.weight(1f).fillMaxHeight()
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(if (active) Accent.copy(alpha = 0.16f) else Color.Transparent)
-                        .clickable { onSelect(key) },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp))
-                    Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).animateContentSize()) {
+        Box(Modifier.fillMaxWidth().height(184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2)))) {
+            if (isVideoCover(bannerUrl)) MutedVideoBanner(bannerUrl, Modifier.fillMaxSize())
+            else if (bannerUrl.isNotBlank()) AsyncImage(model = bannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x55000000)))))
+            TextButton(onClick = onEdit, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)) { Text("Изменить профиль", color = Color.White) }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp).offset(y = (-42).dp), verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.size(94.dp).clip(CircleShape).border(4.dp, Surface1, CircleShape).background(Surface1), contentAlignment = Alignment.Center) {
+                if (avatar.startsWith("http")) AsyncImage(model = avatar, contentDescription = "Аватар профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Text(avatar.ifBlank { "🙂" }, fontSize = 38.sp)
+            }
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).offset(y = (-30).dp)) {
+            Text(name.ifBlank { "Ваш профиль" }, color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            if (username.isNotBlank()) Text("@$username", color = Accent, fontSize = 13.sp)
+            if (bio.isNotBlank()) Text(bio, color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 9.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Истории", color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                Text("${stories.size}", color = SecondaryText, fontSize = 12.sp)
+                IconButton(onClick = onAddStory, enabled = !busy) { Icon(Icons.Default.Add, "Добавить историю", tint = Accent) }
+            }
+            if (stories.isEmpty()) Text("У вас пока нет историй", color = SecondaryText, fontSize = 12.sp)
+            else LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                items(stories, key = { it.id }) { item ->
+                    Box(Modifier.size(92.dp).clip(RoundedCornerShape(15.dp)).background(Surface2).clickable { onOpenStory(item) }) {
+                        if (item.mediaType == "video") {
+                            Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.PlayArrow, "Видеоистория", tint = Color.White, modifier = Modifier.size(30.dp))
+                            }
+                        } else AsyncImage(model = item.mediaUrl, contentDescription = "Ваша история", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
                 }
             }
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight()
-                    .clip(RoundedCornerShape(17.dp))
-                    .background(if (profileSelected) Accent.copy(alpha = 0.16f) else Color.Transparent)
-                    .clickable { onProfile() },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Default.Settings, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
-                Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Фотографии", color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                Text("${photos.size}", color = SecondaryText, fontSize = 12.sp)
+                IconButton(onClick = onAddPhoto, enabled = !busy) { Icon(Icons.Default.Add, "Добавить фотографию", tint = Accent) }
+            }
+            if (photos.isEmpty()) Text("Здесь будут ваши фотографии. Нажмите +, чтобы добавить первую.", color = SecondaryText, fontSize = 12.sp)
+            else photos.chunked(3).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    row.forEach { photo -> AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(12.dp)).clickable { onOpenPhoto(photo) }, contentScale = ContentScale.Crop) }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Spacer(Modifier.height(7.dp))
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PeopleDirectoryScreen(
+    modifier: Modifier = Modifier,
+    users: List<UserItem>,
+    query: String,
+    loading: Boolean,
+    hasMore: Boolean,
+    onQueryChange: (String) -> Unit,
+    onLoadMore: () -> Unit,
+    onOpenProfile: (UserItem) -> Unit,
+    onMessage: (UserItem) -> Unit
+) {
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Люди", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
+                Text("Найдите собеседника в Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+            }
+            Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp))
+            }
+        }
+        OutlinedTextField(
+            value = query, onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp),
+            placeholder = { Text("Поиск по имени или @username") }, singleLine = true,
+            leadingIcon = { Icon(Icons.Default.Search, null, tint = Accent) },
+            trailingIcon = { if (query.isNotBlank()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Очистить", tint = SecondaryText) } },
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MainText, unfocusedTextColor = MainText, focusedBorderColor = Accent, unfocusedBorderColor = Surface2)
+        )
+        if (loading && users.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Accent) }
+        } else if (users.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (query.length < 2 && query.isNotBlank()) "Введите минимум 2 символа" else "Пользователи не найдены", color = MainText, fontWeight = FontWeight.SemiBold)
+                    Text("Здесь появятся все аккаунты Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
+                }
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                items(users, key = { it.id }) { person ->
+                    Row(
+                        Modifier.fillMaxWidth().animateItemPlacement()
+                            .clip(RoundedCornerShape(17.dp)).background(Surface1)
+                            .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 420f))
+                            .clickable { onOpenProfile(person) }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Avatar(person.displayName, person.avatar)
+                        Column(Modifier.weight(1f).padding(start = 11.dp, end = 8.dp)) {
+                            Text(person.displayName, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                            Text(if (person.username.isNotBlank()) "@${person.username}" else "Пользователь Nexura", color = Accent, fontSize = 11.sp, maxLines = 1)
+                        }
+                        TextButton(onClick = { onMessage(person) }) { Text("Написать", maxLines = 1) }
+                    }
+                }
+                if (hasMore) item { OutlinedButton(onClick = onLoadMore, enabled = !loading, modifier = Modifier.fillMaxWidth().padding(top = 5.dp), shape = RoundedCornerShape(14.dp)) { Text(if (loading) "Загружаем…" else "Показать ещё") } }
             }
         }
     }
 }
 
+@Composable
+private fun NexuraBottomBar(selected: String, profileSelected: Boolean, onSelect: (String) -> Unit, onProfile: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp), color = Surface1, shape = RoundedCornerShape(24.dp), shadowElevation = 12.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.14f))) {
+        Row(Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf(Triple("settings", "Настройки", Icons.Default.Settings), Triple("contacts", "Люди", Icons.Default.GroupAdd), Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline)).forEach { (key, label, icon) ->
+                val active = selected == key && !profileSelected
+                val scale by animateFloatAsState(if (active) 1.08f else 1f, animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f), label = "nav-$key")
+                val itemColor by animateColorAsState(if (active) Accent.copy(alpha = 0.15f) else Color.Transparent, animationSpec = spring(stiffness = 420f), label = "nav-color-$key")
+                Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(itemColor).animateContentSize(spring(dampingRatio = 0.72f, stiffness = 480f)).clickable { onSelect(key) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = scale; scaleY = scale })
+                    Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+                }
+            }
+            val profileScale by animateFloatAsState(if (profileSelected) 1.08f else 1f, animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f), label = "nav-profile")
+            val profileColor by animateColorAsState(if (profileSelected) Accent.copy(alpha = 0.15f) else Color.Transparent, animationSpec = spring(stiffness = 420f), label = "nav-profile-color")
+            Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(profileColor).animateContentSize(spring(dampingRatio = 0.72f, stiffness = 480f)).clickable { onProfile() }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Icon(Icons.Default.Person, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = profileScale; scaleY = profileScale })
+                Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+            }
+        }
+    }
+}
 private fun isRetryableOutboxFailure(error: Throwable): Boolean {
     var current: Throwable? = error
     val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
@@ -5076,7 +5396,9 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
                 scaleY = emojiScale
             }
         )
-        Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        AnimatedContent(targetState = count, label = "reaction-count") { value ->
+            Text(" $value", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

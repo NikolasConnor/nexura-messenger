@@ -1,0 +1,51 @@
+name: Nexura Web — build check
+
+on:
+  push:
+    branches:
+      - feature/nexura-profile-polish-2026-11
+    paths:
+      - "web/**"
+      - "crypto-wasm/**"
+      - ".github/workflows/nexura-web-check.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "crypto-wasm/**"
+      - ".github/workflows/nexura-web-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust and WebAssembly target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Set up wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Build shared Olm WebAssembly module
+        run: wasm-pack build crypto-wasm --target web --out-dir ../web/src/crypto/pkg
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test encrypted browser backup and recovery
+        working-directory: web
+        run: node --test src/crypto/backup.test.js
+
+      - name: Build Nexura Web
+        working-directory: web
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund --no-package-lock
+          npm run build

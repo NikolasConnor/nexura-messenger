@@ -34,7 +34,7 @@ data class SocialMediaItem(
 data class SocialPhotoComment(val id: String, val userId: String, val content: String, val createdAt: String)
 data class SocialReactionState(val count: Int, val likedByMe: Boolean)
 data class GroupMemberItem(val userId: String, val displayName: String, val username: String, val avatar: String, val role: String)
-data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
+data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null, val bannerUrl: String = "")
 data class UserItem(val id: String, val displayName: String, val avatar: String, val username: String = "")
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
 data class NotificationPreferences(
@@ -2062,7 +2062,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
 
     suspend fun myProfile(): UserProfile {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$uid&limit=1"))
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age,banner_url&id=eq.$uid&limit=1"))
         if (raw.length() == 0) {
             val authUser = JSONObject(call("/auth/v1/user", auth = true))
             val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
@@ -2078,7 +2078,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 runCatching { updateMyUsername(metadataUsername) }
                     .onSuccess { savedUsername = metadataUsername }
             }
-            return UserProfile(uid, display, savedUsername, "🙂", "", null)
+            return UserProfile(uid, display, savedUsername, "🙂", "", null, "")
         }
         val p = raw.getJSONObject(0)
         var username = p.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
@@ -2090,7 +2090,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 runCatching { updateMyUsername(metadataUsername) }.onSuccess { username = metadataUsername }
             }
         }
-        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
+        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"), resolveProfileBanner(p.optString("banner_url")))
     }
 
     private fun validateUsername(value: String) {
@@ -2115,7 +2115,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         }
     }
 
-    suspend fun updateMyProfile(displayName: String, avatar: String, bio: String = "", age: Int? = null) {
+    suspend fun updateMyProfile(displayName: String, avatar: String, bio: String = "", age: Int? = null, bannerUrl: String? = null) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (age != null && age !in 13..120) throw IOException("Возраст должен быть от 13 до 120 лет")
         val payload = JSONObject()
@@ -2123,12 +2123,13 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             .put("avatar_url", avatar)
             .put("bio", bio.trim().take(160))
             .put("age", age ?: JSONObject.NULL)
+        if (bannerUrl != null) payload.put("banner_url", bannerUrl)
         call("/rest/v1/profiles?id=eq.$uid", "PATCH", payload.toString(), prefer = "return=minimal")
     }
 
     suspend fun userProfile(userId: String): UserProfile {
         val id = normalizeUuid(userId)
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age&id=eq.$id&limit=1"))
+        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url,bio,age,banner_url&id=eq.$id&limit=1"))
         if (raw.length() == 0) throw IOException("Профиль пользователя не найден")
         val p = raw.getJSONObject(0)
         return UserProfile(
@@ -2137,29 +2138,59 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             p.optString("username"),
             p.optString("avatar_url").ifBlank { "🙂" },
             p.optString("bio"),
-            if (p.isNull("age")) null else p.optInt("age")
+            if (p.isNull("age")) null else p.optInt("age"),
+            resolveProfileBanner(p.optString("banner_url"))
         )
     }
 
-    suspend fun uploadAvatar(bytes: ByteArray, mimeType: String): String {
-        val uid = store.userId ?: throw IOException("Сессия истекла")
-        if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) throw IOException("Фото должно быть не больше 5 МБ")
-        val ext = when (mimeType.lowercase()) {
-            "image/png" -> "png"
-            "image/webp" -> "webp"
-            else -> "jpg"
+    private suspend fun resolveProfileBanner(value: String): String {
+        if (!value.startsWith("social:")) return value
+
+        val path = value.removePrefix("social:").trimStart('/')
+        if (path.isBlank()) return ""
+
+        return try {
+            socialSignedUrl(path)
+        } catch (error: Exception) {
+            // A profile may still reference a Storage object that was deleted or
+            // never finished uploading. Do not let that stale banner break the
+            // entire profile screen; the empty value lets the UI show its normal
+            // placeholder and lets the owner upload a replacement.
+            val reason = error.message.orEmpty().lowercase(java.util.Locale.ROOT)
+            if (
+                reason.contains("object not found") ||
+                reason.contains("no such object") ||
+                reason.contains("not found")
+            ) {
+                signedUrlCache.remove("nexura-social-media/$path")
+                ""
+            } else {
+                throw error
+            }
         }
-        val path = "$uid/avatar-${UUID.randomUUID()}.$ext"
-        val request = Request.Builder()
-            .url("$BASE_URL/storage/v1/object/nexura-avatars/$path")
-            .header("apikey", PUBLIC_KEY)
-            .header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
-            .header("Content-Type", mimeType)
-            .header("x-upsert", "true")
-            .post(bytes.toRequestBody(mimeType.toMediaType()))
-            .build()
+    }
+
+    suspend fun uploadAvatar(bytes: ByteArray, mimeType: String): String = uploadProfileImage(bytes, mimeType, "avatar")
+
+    suspend fun uploadProfileBanner(bytes: ByteArray, mimeType: String): String = uploadProfileImage(bytes, mimeType, "banner")
+
+    suspend fun uploadProfileBannerVideo(bytes: ByteArray, mimeType: String): String {
+        if (!mimeType.startsWith("video/")) throw IOException("Выберите видеофайл")
+        val path = uploadSocialObject(bytes, mimeType, "banners")
+        return "social:$path"
+    }
+
+    private suspend fun uploadProfileImage(bytes: ByteArray, mimeType: String, prefix: String): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) throw IOException("Изображение должно быть не больше 5 МБ")
+        val ext = when (mimeType.lowercase()) { "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }
+        val path = "$uid/$prefix-${UUID.randomUUID()}.$ext"
+        val request = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-avatars/$path")
+            .header("apikey", PUBLIC_KEY).header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
+            .header("Content-Type", mimeType).header("x-upsert", "true")
+            .post(bytes.toRequestBody(mimeType.toMediaType())).build()
         client.newCall(request).execute().use {
-            if (!it.isSuccessful) throw IOException("Не удалось загрузить фото профиля (HTTP ${it.code})")
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить изображение профиля (HTTP ${it.code})")
         }
         return "$BASE_URL/storage/v1/object/public/nexura-avatars/$path"
     }
