@@ -223,3 +223,27 @@ export async function unblockUser(supabase, userId) {
     .eq('blocker_id', user.id).eq('blocked_id', id(userId));
   if (error) throw error;
 }
+
+export async function sendCloudMessage(supabase,{conversationId,messageId,plaintext,replyToId=null,messageType='text'}) {
+  const {data:{user}}=await supabase.auth.getUser();
+  if(!user)throw new Error('Сессия истекла');
+  const clean=String(plaintext||'');
+  if(!clean.trim()||new TextEncoder().encode(clean).byteLength>12000)throw new Error('Сообщение пустое или слишком большое');
+  const row={id:id(messageId),conversation_id:id(conversationId),sender_id:user.id,content:clean,message_type:messageType};
+  if(replyToId)row.reply_to_id=id(replyToId);
+  const {data,error}=await supabase.from('messages').insert(row).select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at').single();
+  if(error)throw error;
+  return {...data,encrypted:false};
+}
+export async function editCloudMessage(supabase,messageId,newText) {
+  const clean=String(newText||'').trim();
+  if(!clean||new TextEncoder().encode(clean).byteLength>12000)throw new Error('Сообщение пустое или слишком большое');
+  const {data,error}=await supabase.from('messages').update({content:clean,edited_at:new Date().toISOString()}).eq('id',id(messageId)).select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at').single();
+  if(error)throw error;
+  return {...data,encrypted:false};
+}
+export async function updateConversationChatMode(supabase,conversationId,mode) {
+  if(!['secret','cloud'].includes(mode))throw new Error('Неизвестный режим переписки');
+  const {error}=await supabase.from('conversations').update({chat_mode:mode}).eq('id',id(conversationId));
+  if(error)throw error;
+}

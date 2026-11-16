@@ -199,3 +199,21 @@ export async function importEncryptedRecords(userId,serialized) {
   await saveEncryptedRecords(userId,entries);
   return entries.length;
 }
+
+export async function loadEncryptedRecordsByPrefix(userId,prefix) {
+  if(!userId||typeof prefix!=='string')throw new Error('Некорректный запрос защищённого хранилища');
+  const db=await openDatabase();
+  try {
+    const key=await getWrappingKey(userId);
+    const rows=await requestValue(db.transaction(RECORD_STORE,'readonly').objectStore(RECORD_STORE).getAll());
+    const result=[];
+    for(const row of rows.filter(item=>item.userId===userId&&item.recordId.startsWith(prefix)))result.push({recordId:row.recordId,value:await decryptRecord(key,userId,row)});
+    return result;
+  } finally { db.close(); }
+}
+export async function removeEncryptedRecord(userId,recordId) {
+  if(!userId||!recordId)throw new Error('Некорректная запись защищённого хранилища');
+  const db=await openDatabase();
+  try { await new Promise((resolve,reject)=>{const tx=db.transaction(RECORD_STORE,'readwrite');tx.objectStore(RECORD_STORE).delete(userId+':'+recordId);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);}); }
+  finally { db.close(); }
+}
