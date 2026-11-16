@@ -1449,8 +1449,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         } else {
                             if (register) {
                                 AuthField(displayName, { displayName = it }, "Ваше имя", "Как к вам обращаться")
-                                AuthField(registerUsername, { registerUsername = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) }, "Уникальный username", "например, nikolas_01")
-                                Text("Будет вашим адресом для поиска: @username. Только латиница, цифры и _.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
                             }
                             AuthField(email, { email = it }, "Email", "name@example.com", keyboard = ImeAction.Next)
                             OutlinedTextField(
@@ -1481,9 +1479,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 signedIn = true
                                             }
                                         } else {
-                                            if (register) api.signUp(email.trim(), password, displayName.trim(), registerUsername)
-                                            else api.signIn(email.trim(), password)
-                                            usernameSetupRequired = false
+                                            if (register) {
+                                                api.signUp(email.trim(), password, displayName.trim())
+                                                // A newly created account must choose its public username before entering Nexura.
+                                                usernameSetupRequired = true
+                                            } else {
+                                                api.signIn(email.trim(), password)
+                                                usernameSetupRequired = false
+                                            }
                                             // Successful auth methods have already validated and persisted
                                             // the session on Dispatchers.IO; do not decrypt preferences on UI.
                                             signedIn = true
@@ -1493,7 +1496,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             },
                             enabled = !busy && if (phoneMode) phone.startsWith("+") && phone.count { it.isDigit() } in 8..15 && (!smsSent || phoneCode.length in 4..8)
-                                else email.contains("@") && password.length >= 6 && (!register || (displayName.isNotBlank() && registerUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$")))),
+                                else email.contains("@") && password.length >= 6 && (!register || displayName.isNotBlank()),
                             modifier = Modifier.fillMaxWidth().padding(top = 18.dp).height(52.dp),
                             shape = RoundedCornerShape(16.dp)
                         ) { Text(if (busy) "Подождите…" else if (phoneMode) if (smsSent) "Подтвердить код" else "Получить SMS-код" else if (register) "Создать аккаунт" else "Войти", fontWeight = FontWeight.SemiBold) }
