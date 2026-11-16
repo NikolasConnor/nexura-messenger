@@ -212,6 +212,7 @@ function App() {
   const [forwardingBusy, setForwardingBusy] = useState(false);
   const composerInputRef = useRef(null);
   const [sending, setSending] = useState(false);
+  const [sendingMedia, setSendingMedia] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
   const [browserAudioState, setBrowserAudioState] = useState(sharedVoiceMeta);
@@ -643,8 +644,8 @@ function App() {
 
   async function sendAttachment(fileOverride = pendingMedia, existingMessageId = null) {
     const file = fileOverride;
-    if (!file || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
-    setSending(true); setNotice('');
+    if (!file || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sendingMedia) return;
+    setSendingMedia(true); setNotice('');
     const conversationId = selected.id;
     const messageId = existingMessageId || crypto.randomUUID();
     const createdAt = new Date().toISOString();
@@ -672,7 +673,7 @@ function App() {
     } catch(error) {
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'failed'}));
       setNotice('Не удалось отправить вложение: '+(error?.message||'ошибка'));
-    } finally { setSending(false); }
+    } finally { setSendingMedia(false); }
   }
 
   function retryMediaMessage(message) {
@@ -884,12 +885,12 @@ function App() {
         </div>
         {(replyTarget || editingMessageId) && <div className="reply-composer"><span>{editingMessageId ? 'Редактирование сообщения' : 'Ответ на: '+String(replyTarget?.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>{setReplyTarget(null);setEditingMessageId(null);setDraft('');}} aria-label="Отменить">×</button></div>}
         {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
-          {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><PendingMediaPreview file={pendingMedia}/><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sending}>{sending?'Отправка…':'Отправить'}</button></div>}
+          {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><PendingMediaPreview file={pendingMedia}/><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sendingMedia}>{sendingMedia?'Отправка…':'Отправить'}</button></div>}
           {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={cancelVoiceRecording}>Отмена</button><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
           <input ref={fileInputRef} type="file" className="visually-hidden-file"  onChange={event=>{const file=event.target.files?.[0];if(file)setPendingMedia(file);event.target.value='';}}/>
           <div className="composer-input-row">
-            <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={!e2eeReady||sending||recording||!!pendingMedia} title="Прикрепить файл" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
-            <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={!e2eeReady||sending||!!pendingMedia} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
+            <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={!e2eeReady||sendingMedia||sending||recording||!!pendingMedia} title="Прикрепить файл" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
+            <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={!e2eeReady||sendingMedia||sending||!!pendingMedia} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
             <textarea ref={composerInputRef} value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}else if(event.key==='Escape'&&(replyTarget||editingMessageId)){setReplyTarget(null);setEditingMessageId(null);setDraft('');}}} placeholder={e2eeReady ? 'Сообщение' : 'Подключаем защищённое соединение…'} maxLength={12000} rows={1} disabled={!e2eeReady || sending}/>
             <button className="send-button" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button>
           </div>
