@@ -1645,13 +1645,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(18.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.clickable { avatarPicker.launch("image/*") }) {
-                                        if (profilePhotoUri != null) AsyncImage(model = profilePhotoUri, contentDescription = "Фото профиля", modifier = Modifier.size(58.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                                    Box(
+                                        Modifier.size(78.dp).border(2.dp, Brush.linearGradient(listOf(Accent, Accent2)), CircleShape)
+                                            .padding(3.dp).clip(CircleShape).clickable { avatarPicker.launch("image/*") },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (profilePhotoUri != null) AsyncImage(model = profilePhotoUri, contentDescription = "Фото профиля", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
                                         else Avatar(profileName.ifBlank { "Ваш профиль" }, profileAvatar)
                                     }
-                                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                                        Text(profileName.ifBlank { "Ваш аккаунт Nexura" }, color = MainText, fontWeight = FontWeight.SemiBold)
-                                        Text("Нажмите на фото, чтобы изменить", color = SecondaryText, fontSize = 11.sp)
+                                    Column(Modifier.padding(start = 14.dp).weight(1f)) {
+                                        Text(profileName.ifBlank { "Ваш аккаунт Nexura" }, color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                        Text("@$profileUsername", color = Accent, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                                        Text("Нажмите на фото, чтобы изменить", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
                                     }
                                     TextButton(onClick = { avatarPicker.launch("image/*") }) { Text("Фото") }
                                 }
