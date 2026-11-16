@@ -202,7 +202,7 @@ export async function loadEncryptedRecordsByPrefix(userId, prefix) {
     const key = await getWrappingKey(userId);
     const result = [];
     for (const row of rows.filter(item => item.userId === userId && item.recordId.startsWith(prefix))) {
-      result.push([row.recordId, await decryptRecord(key, userId, row)]);
+      result.push({ recordId: row.recordId, value: await decryptRecord(key, userId, row) });
     }
     return result;
   } finally { db.close(); }
