@@ -281,6 +281,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingDownloadFile by remember { mutableStateOf<File?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
+    var mediaViewerItems by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var mediaViewerIndex by remember { mutableIntStateOf(0) }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
@@ -3127,6 +3129,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 "video", "image" -> {
                                                                     mediaViewerUri = Uri.parse(item.content)
                                                                     mediaViewerType = item.mediaKind ?: "image"
+                                                                     mediaViewerItems = (chatGallery ?: messages).filter { it.mediaKind == "image" || it.mediaKind == "video" }
+                                                                     mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
                                                                     chatGallery = null
                                                                 }
                                                                 "audio" -> {
@@ -3346,6 +3350,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             .clickable {
                                                                 mediaViewerUri = Uri.parse(item.content)
                                                                 mediaViewerType = if (item.mediaKind == "video") "video" else "image"
+                                                                 mediaViewerItems = messages.filter { it.mediaKind == "image" || it.mediaKind == "video" }
+                                                                 mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
                                                             }
                                                     ) {
                                                         AsyncImage(model = item.content, contentDescription = "Открыть медиа из переписки", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -4431,13 +4437,36 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             )
                         }
 
-    // Global media viewer, independent of the currently selected screen.
+    // Full-screen Nexura viewer with swipe navigation through the current chat's media.
     if (mediaViewerUri != null) {
-        Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null })
-                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null }, contentScale = ContentScale.Fit)
-                IconButton(onClick = { mediaViewerUri = null }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
+        var swipeDistance = 0f
+        Dialog(onDismissRequest = { mediaViewerUri = null; mediaViewerItems = emptyList() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(mediaViewerItems, mediaViewerIndex) {
+                detectHorizontalDragGestures(
+                    onHorizontalDrag = { _, amount -> swipeDistance += amount },
+                    onDragEnd = {
+                        if (mediaViewerItems.isNotEmpty() && kotlin.math.abs(swipeDistance) > 70f) {
+                            val next = (mediaViewerIndex + if (swipeDistance < 0f) 1 else -1).coerceIn(0, mediaViewerItems.lastIndex)
+                            mediaViewerIndex = next
+                            val item = mediaViewerItems[next]
+                            mediaViewerUri = Uri.parse(item.content)
+                            mediaViewerType = item.mediaKind ?: "image"
+                        }
+                        swipeDistance = 0f
+                    }
+                )
+            }, contentAlignment = Alignment.Center) {
+                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
+                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 16.dp, top = 30.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (mediaViewerType == "video") "Видео" else "Фото", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    if (mediaViewerItems.isNotEmpty()) Text("${mediaViewerIndex + 1} / ${mediaViewerItems.size}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    IconButton(onClick = { mediaViewerUri = null; mediaViewerItems = emptyList() }, modifier = Modifier.padding(start = 8.dp).background(Color(0x77000000), CircleShape)) {
+                        Icon(Icons.Default.Close, "Закрыть", tint = Color.White)
+                    }
+                }
+                if (mediaViewerItems.size > 1) Text("Свайпните влево или вправо", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp).background(Color(0x66000000), RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 7.dp))
             }
         }
     }
@@ -4449,6 +4478,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
     val context = LocalContext.current
     var playbackError by remember(uri) { mutableStateOf<String?>(null) }
+    var isPlaying by remember(uri) { mutableStateOf(true) }
+    var position by remember(uri) { mutableLongStateOf(0L) }
+    var duration by remember(uri) { mutableLongStateOf(0L) }
+    var showControls by remember(uri) { mutableStateOf(true) }
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
@@ -4456,37 +4489,64 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
             prepare()
         }
     }
-
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                playbackError = error.localizedMessage?.takeIf { it.isNotBlank() }
-                    ?: "Формат видео не поддерживается этим устройством"
+                playbackError = error.localizedMessage?.takeIf { it.isNotBlank() } ?: "Формат видео не поддерживается этим устройством"
             }
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            override fun onPlaybackStateChanged(state: Int) { duration = player.duration.coerceAtLeast(0L) }
         }
         player.addListener(listener)
-        onDispose {
-            player.removeListener(listener)
-            player.release()
+        onDispose { player.removeListener(listener); player.release() }
+    }
+    LaunchedEffect(player) {
+        while (true) {
+            position = player.currentPosition.coerceAtLeast(0L)
+            duration = player.duration.coerceAtLeast(0L)
+            kotlinx.coroutines.delay(250)
         }
     }
-
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(
-            factory = { ctx ->
-                (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView)
-                    .apply { this.player = player }
-            },
-            update = { it.player = player },
-            modifier = Modifier.weight(1f).fillMaxWidth()
-        )
-        playbackError?.let {
-            Text(it, color = Color.White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
-        }
-        Row(Modifier.fillMaxWidth().padding(end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onClose) { Text("Закрыть", color = Color.White) }
+    Box(Modifier.fillMaxSize().background(Color.Black).clickable { showControls = !showControls }) {
+        AndroidView(factory = { ctx ->
+            (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView)
+                .apply { this.player = player; useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT }
+        }, update = { it.player = player; it.useController = false }, modifier = Modifier.fillMaxSize())
+        AnimatedVisibility(visible = showControls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().height(116.dp).align(Alignment.TopCenter).background(Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent))))
+                Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 14.dp, top = 30.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("NEXURA", color = Color.White.copy(alpha = 0.72f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
+                        Text("Видеоплеер", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    IconButton(onClick = onClose, modifier = Modifier.background(Color(0x66000000), CircleShape)) { Icon(Icons.Default.Close, "Закрыть видео", tint = Color.White) }
+                }
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(horizontal = 18.dp, vertical = 18.dp)) {
+                    playbackError?.let { Text(it, color = Color(0xFFFFB4AB), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(formatNexuraTime(position), color = Color.White, fontSize = 11.sp)
+                        Slider(value = if (duration > 0L) position.coerceAtMost(duration).toFloat() else 0f,
+                            onValueChange = { value -> position = value.toLong(); player.seekTo(position) },
+                            valueRange = 0f..duration.coerceAtLeast(1L).toFloat(), modifier = Modifier.weight(1f).padding(horizontal = 9.dp),
+                            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color.White.copy(alpha = 0.3f)))
+                        Text(formatNexuraTime(duration), color = Color.White, fontSize = 11.sp)
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        IconButton(onClick = { player.seekTo((player.currentPosition - 10_000L).coerceAtLeast(0L)) }) { Text("−10", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                        IconButton(onClick = { if (player.isPlaying) player.pause() else player.play() }, modifier = Modifier.padding(horizontal = 16.dp).size(54.dp).background(Accent, CircleShape)) {
+                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, if (isPlaying) "Пауза" else "Воспроизвести", tint = Color.White, modifier = Modifier.size(29.dp))
+                        }
+                        IconButton(onClick = { player.seekTo((player.currentPosition + 10_000L).coerceAtMost(duration)) }) { Text("+10", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+            }
         }
     }
+}
+private fun formatNexuraTime(milliseconds: Long): String {
+    val seconds = (milliseconds.coerceAtLeast(0L) / 1000L).toInt()
+    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 @Composable
