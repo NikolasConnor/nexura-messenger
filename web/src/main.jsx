@@ -318,14 +318,18 @@ function App() {
   useEffect(() => {
     let active = true;
     const userId = session?.user?.id;
-    if (!userId) {
-      setChats([]);
-      setSelected(null);
-      setProfile(null);
-      return () => { active = false; };
-    }
-    // Do not leave the previous account's profile visible while the new one loads.
+    // Invalidate in-flight requests and clear account-scoped UI immediately.
+    // This prevents a fast account switch from briefly exposing the previous
+    // account's chats, profile, or decrypted message bodies.
+    chatLoadSeq.current++;
+    messageLoadSeq.current++;
+    setChats([]);
+    setSelected(null);
+    setMessages([]);
+    setMessageReactions({});
     setProfile(null);
+    if (!userId) return () => { active = false; };
+
     loadChats();
     supabase.from('profiles').select('id,display_name,username,avatar_url,bio,age')
       .eq('id', userId).maybeSingle()
