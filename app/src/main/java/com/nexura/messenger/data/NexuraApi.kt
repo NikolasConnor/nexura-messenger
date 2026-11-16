@@ -192,8 +192,8 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         return Base64.encodeToString(value, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
     }
 
-    /** Creates a Telegram OIDC Authorization Code + PKCE request for the native app. */
-    fun createTelegramAuthorizationUrl(): String {
+    /** Creates a Telegram native cross-app login request with a browser fallback. */
+    suspend fun createTelegramAuthorizationUrl(): String = withContext(Dispatchers.IO) {
         val verifier = randomUrlSafe(32)
         val challenge = Base64.encodeToString(
             MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)),
@@ -202,12 +202,32 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         val state = randomUrlSafe(24)
         store.telegramPendingState = state
         store.telegramCodeVerifier = verifier
-        return Uri.parse("https://oauth.telegram.org/auth").buildUpon()
+
+        val inAppRequestUrl = Uri.parse("https://oauth.telegram.org/crossapp").buildUpon()
+            .appendQueryParameter("client_id", TELEGRAM_CLIENT_ID)
+            .appendQueryParameter("response_type", "code")
+            .appendQueryParameter("scope", "openid profile")
+            .appendQueryParameter("redirect_uri", TELEGRAM_REDIRECT)
+            .appendQueryParameter("android_sdk", "1")
+            .appendQueryParameter("code_challenge", challenge)
+            .appendQueryParameter("code_challenge_method", "S256")
+            .build()
+        val telegramAppUrl = runCatching {
+            val request = Request.Builder().url(inAppRequestUrl.toString())
+                .header("Accept", "application/json").get().build()
+            telegramTokenClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val payload = JSONObject(response.body?.string().orEmpty())
+                payload.optString("url").takeIf { it.isNotBlank() }
+                    ?: payload.optJSONObject("result")?.optString("url")?.takeIf { it.isNotBlank() }
+            }
+        }.getOrNull()
+
+        telegramAppUrl ?: Uri.parse("https://oauth.telegram.org/auth").buildUpon()
             .appendQueryParameter("client_id", TELEGRAM_CLIENT_ID)
             .appendQueryParameter("redirect_uri", TELEGRAM_REDIRECT)
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("scope", "openid profile")
-            .appendQueryParameter("state", state)
             .appendQueryParameter("code_challenge", challenge)
             .appendQueryParameter("code_challenge_method", "S256")
             .build().toString()
