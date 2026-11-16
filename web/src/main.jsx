@@ -141,6 +141,40 @@ function AuthScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  function loginWithTelegram() {
+    setBusy(true); setError(''); setNotice('');
+    const telegram = window.Telegram?.Login;
+    if (!telegram?.auth) {
+      setBusy(false);
+      setError('Не удалось загрузить Telegram Login. Обнови страницу и попробуй ещё раз.');
+      return;
+    }
+    const nonceBytes = new Uint8Array(32);
+    window.crypto.getRandomValues(nonceBytes);
+    const nonce = Array.from(nonceBytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    try {
+      telegram.auth({ client_id: 9098453191, scope: ['profile'], lang: 'ru', nonce }, async result => {
+        try {
+          if (result?.error) throw new Error(result.error);
+          if (!result?.id_token) throw new Error('Telegram не вернул токен авторизации.');
+          const { error: authError } = await supabase.auth.signInWithIdToken({
+            provider: 'custom:telegram',
+            token: result.id_token,
+            nonce
+          });
+          if (authError) throw authError;
+        } catch (e) {
+          setError(e?.message || 'Не удалось войти через Telegram');
+        } finally {
+          setBusy(false);
+        }
+      });
+    } catch (e) {
+      setBusy(false);
+      setError(e?.message || 'Не удалось открыть окно Telegram');
+    }
+  }
+
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     try {
@@ -182,6 +216,11 @@ function AuthScreen() {
           {notice && <div className="alert success">{notice}</div>}
           <button className="primary-btn wide" disabled={busy}>{busy?'Подожди…':mode==='login'?'Войти в Nexura':'Создать аккаунт'}</button>
         </form>
+        <div className="auth-divider"><span>или</span></div>
+        <button type="button" className="telegram-login-btn wide" disabled={busy} onClick={loginWithTelegram}>
+          <span className="telegram-login-mark" aria-hidden="true">➤</span>
+          {busy ? 'Подключаем Telegram…' : 'Войти через Telegram'}
+        </button>
         <div className="auth-switch">{mode==='login'?'Впервые здесь?':'Уже есть аккаунт?'} <button onClick={()=>{setMode(mode==='login'?'register':'login');setError('');setNotice('')}}>{mode==='login'?'Создать аккаунт':'Войти'}</button></div>
         <div className="auth-note"><LockKeyhole size={14}/> Подключение защищено. Используется твой аккаунт Nexura.</div>
       </div>
