@@ -267,6 +267,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var pendingDownloadFile by remember { mutableStateOf<File?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
+    var mediaViewerQueue by remember { mutableStateOf<List<Pair<Uri, String>>>(emptyList()) }
+    var mediaViewerIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(mediaViewerUri) {
+        val current = mediaViewerUri
+        if (current != null && mediaViewerQueue.none { it.first == current }) {
+            mediaViewerQueue = listOf(current to mediaViewerType)
+            mediaViewerIndex = 0
+        }
+    }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
     var galleryCategory by remember { mutableStateOf("Все") }
     var scrollToMessageId by remember { mutableStateOf<String?>(null) }
@@ -3400,8 +3409,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp))
                                                             .background(Surface2)
                                                             .clickable {
-                                                                mediaViewerUri = Uri.parse(item.content)
-                                                                mediaViewerType = if (item.mediaKind == "video") "video" else "image"
+                                                                val visualItems = galleryItems.filter { it.mediaKind == "image" || it.mediaKind == "video" }
+                                                                mediaViewerQueue = visualItems.map { Uri.parse(it.content) to (it.mediaKind ?: "image") }
+                                                                mediaViewerIndex = visualItems.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+                                                                mediaViewerUri = mediaViewerQueue.getOrNull(mediaViewerIndex)?.first ?: Uri.parse(item.content)
+                                                                mediaViewerType = mediaViewerQueue.getOrNull(mediaViewerIndex)?.second ?: "image"
                                                             }
                                                     ) {
                                                         AsyncImage(model = item.content, contentDescription = "Открыть медиа из переписки", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -4408,10 +4420,38 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     // Global media viewer, independent of the currently selected screen.
     if (mediaViewerUri != null) {
         Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            var swipeDistance by remember { mutableFloatStateOf(0f) }
             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                 if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null })
-                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null }, contentScale = ContentScale.Fit)
-                IconButton(onClick = { mediaViewerUri = null }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
+                else AsyncImage(
+                    model = mediaViewerUri,
+                    contentDescription = "Фото на весь экран",
+                    modifier = Modifier.fillMaxSize().pointerInput(mediaViewerQueue, mediaViewerIndex) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (swipeDistance < -55f && mediaViewerIndex < mediaViewerQueue.lastIndex) {
+                                    mediaViewerIndex++
+                                    mediaViewerUri = mediaViewerQueue[mediaViewerIndex].first
+                                    mediaViewerType = mediaViewerQueue[mediaViewerIndex].second
+                                } else if (swipeDistance > 55f && mediaViewerIndex > 0) {
+                                    mediaViewerIndex--
+                                    mediaViewerUri = mediaViewerQueue[mediaViewerIndex].first
+                                    mediaViewerType = mediaViewerQueue[mediaViewerIndex].second
+                                }
+                                swipeDistance = 0f
+                            },
+                            onHorizontalDrag = { change, amount -> swipeDistance += amount; change.consume() }
+                        )
+                    },
+                    contentScale = ContentScale.Fit
+                )
+                if (mediaViewerQueue.size > 1) {
+                    Text("${mediaViewerIndex + 1} / ${mediaViewerQueue.size}", color = Color.White, fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 30.dp).background(Color(0x88000000), RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+                    if (mediaViewerIndex > 0) IconButton(onClick = { mediaViewerIndex--; mediaViewerUri = mediaViewerQueue[mediaViewerIndex].first; mediaViewerType = mediaViewerQueue[mediaViewerIndex].second }, modifier = Modifier.align(Alignment.CenterStart)) { Icon(Icons.Default.ArrowBack, "Предыдущее фото", tint = Color.White) }
+                    if (mediaViewerIndex < mediaViewerQueue.lastIndex) IconButton(onClick = { mediaViewerIndex++; mediaViewerUri = mediaViewerQueue[mediaViewerIndex].first; mediaViewerType = mediaViewerQueue[mediaViewerIndex].second }, modifier = Modifier.align(Alignment.CenterEnd)) { Icon(Icons.Default.ArrowForward, "Следующее фото", tint = Color.White) }
+                }
+                IconButton(onClick = { mediaViewerUri = null; mediaViewerQueue = emptyList(); mediaViewerIndex = 0 }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
             }
         }
     }
