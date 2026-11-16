@@ -3695,7 +3695,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             },
                                         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
                                     ) {
-                                        Column(Modifier.widthIn(max = 320.dp).graphicsLayer { translationX = swipeTranslation }) {
+                                        Column(Modifier.widthIn(max = 320.dp).fillMaxWidth().graphicsLayer { translationX = swipeTranslation }) {
                                         Column(
                                             Modifier.clip(RoundedCornerShape(
                                                 topStart = 20.dp, topEnd = 20.dp,
@@ -4381,7 +4381,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     // Global media viewer, independent of the currently selected screen.
     if (mediaViewerUri != null) {
         Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(WindowInsets.safeDrawing), contentAlignment = Alignment.Center) {
                 if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null })
                 else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null }, contentScale = ContentScale.Fit)
                 IconButton(onClick = { mediaViewerUri = null }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
@@ -4430,7 +4430,7 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
         playbackError?.let {
             Text(it, color = Color.White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
         }
-        Row(Modifier.fillMaxWidth().padding(end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.End) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = onClose) { Text("Закрыть", color = Color.White) }
         }
     }
