@@ -3473,7 +3473,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp))
                                                             .background(Surface2)
                                                             .clickable {
-                                                                val visualItems = galleryItems.filter { it.mediaKind == "image" || it.mediaKind == "video" }
+                                                                val visualItems = profileMedia.filter { it.mediaKind == "image" || it.mediaKind == "video" }
                                                                 mediaViewerQueue = visualItems.map { Uri.parse(it.content) to (it.mediaKind ?: "image") }
                                                                 mediaViewerIndex = visualItems.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
                                                                 mediaViewerUri = mediaViewerQueue.getOrNull(mediaViewerIndex)?.first ?: Uri.parse(item.content)
