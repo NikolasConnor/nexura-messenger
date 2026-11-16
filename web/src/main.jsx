@@ -475,14 +475,14 @@ function App() {
         });
         setHasOlderMessages(rawRows.length===50);
       }else{
-        setHasOlderMessages(rawRows.length===50);
+        if(!silent||rawRows.length===50)setHasOlderMessages(rawRows.length===50);
         setMessages(previous=>{
           const base=silent&&selectedChatIdRef.current===chat.id?previous:[];
           const combined=[...base,...rows,...localPending];
           return [...new Map(combined.map(item=>[item.id,item])).values()].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-500);
         });
       }
-      setMessageReactions(reactionsResult || {});
+      if(!before)setMessageReactions(reactionsResult || {});
       markConversationRead(supabase, chat.id).catch(() => {});
     } catch (error) {
       if (requestId === messageLoadSeq.current && !silent) setNotice('Не удалось открыть переписку: ' + (error?.message || 'ошибка'));
