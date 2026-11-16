@@ -801,3 +801,29 @@ export async function loadPeopleDirectory(supabase, userId, query = '', offset =
 .device-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:#34284d;color:#cbb9ff}
 .device-row>button,.blocked-user-row>button{border:1px solid #ffffff20;border-radius:9px;background:#ffffff08;color:#d4c9e5;padding:8px 10px;font-size:10px;white-space:nowrap}
 .device-row>button:disabled{opacity:.4}.settings-description{font-size:11px;line-height:1.6;color:#a89eb6;margin:0}
+
+/* Account settings: web-native privacy, notification and device controls */
+.side-tabs-expanded{grid-template-columns:repeat(4,minmax(0,1fr))}
+.side-tabs-expanded button{font-size:10px;gap:5px;padding:9px 4px}
+.web-settings-page{width:min(920px,100%);height:100%;overflow:auto;padding:34px clamp(18px,4vw,52px) 70px;display:flex;flex-direction:column;gap:18px}
+.settings-card{padding:20px 22px;border:1px solid #ffffff12;border-radius:18px;background:linear-gradient(145deg,#201a2d,#191522);box-shadow:0 12px 35px #0002}
+.settings-card-heading{display:flex;align-items:flex-start;gap:12px;margin-bottom:15px;color:#bda8ff}
+.settings-card-heading h3{margin:0;color:#f2edf9;font-size:15px}
+.settings-card-heading p{margin:5px 0 0;color:#a49ab2;font-size:11px;line-height:1.5}
+.settings-toggle{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 0;border-top:1px solid #ffffff0d;cursor:pointer}
+.settings-toggle span{display:grid;gap:4px}
+.settings-toggle b{font-size:12px;color:#eee8f7}
+.settings-toggle small{font-size:10px;color:#a49ab2;line-height:1.5}
+.settings-toggle input{width:40px;height:22px;accent-color:#a98bf4;cursor:pointer;flex:0 0 auto}
+.settings-permission{display:flex;justify-content:space-between;gap:12px;padding:10px 0 14px;color:#a49ab2;font-size:11px}
+.settings-permission b{color:#c7b6f4}
+.settings-device-current,.settings-device{display:flex;align-items:center;gap:12px;padding:13px 0;border-top:1px solid #ffffff0d}
+.device-dot{width:9px;height:9px;border-radius:50%;background:#72d7a0;box-shadow:0 0 0 4px #72d7a022}
+.settings-device-info{display:grid;gap:4px;min-width:0;flex:1}
+.settings-device-info b,.settings-device-current b{font-size:12px;color:#eee8f7}
+.settings-device-info small,.settings-device-current small{font-size:10px;color:#a49ab2;overflow-wrap:anywhere}
+.device-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#ffffff0b;color:#c4b0fa}
+.device-current-tag{font-size:10px;color:#83d8a5;background:#83d8a516;padding:5px 8px;border-radius:8px;white-space:nowrap}
+.danger-button{color:#ff9ba9!important;border-color:#ff9ba944!important}
+.settings-security-note{font-size:10px;line-height:1.6;color:#a49ab2;margin:12px 0 0}
+@media(max-width:800px){.web-settings-page{padding:22px 14px 60px}.settings-card{padding:16px}.side-tabs-expanded button{font-size:9px}}

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { loadEncryptedRecord } from './crypto/secure-store.js';
 import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch } from 'lucide-react';
@@ -247,6 +248,14 @@ function App() {
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
   const [browserAudioState, setBrowserAudioState] = useState(sharedVoiceMeta);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [privacySettings, setPrivacySettings] = useState({showOnlineStatus:true,readReceiptsEnabled:true});
+  const [notificationPrefs, setNotificationPrefs] = useState({push_enabled:true,sound_enabled:true,vibration_enabled:false});
+  const [e2eeDevices, setE2eeDevices] = useState([]);
+  const [browserDeviceId, setBrowserDeviceId] = useState('');
+  const [browserNotificationPermission, setBrowserNotificationPermission] = useState(typeof Notification==='undefined'?'unsupported':Notification.permission);
+
 
   useEffect(() => {
     if (!sharedVoiceAudio) return;
@@ -689,6 +698,87 @@ function App() {
     await loadOwnSocial();
   }
 
+  const loadAccountSettings = useCallback(async () => {
+    if (!session?.user?.id) return;
+    setSettingsLoading(true);
+    try {
+      const uid = session.user.id;
+      const [profileResult,presenceResult,notificationResult,devicesResult,bundle] = await Promise.all([
+        supabase.from('profiles').select('read_receipts_enabled').eq('id',uid).maybeSingle(),
+        supabase.from('user_presence').select('show_online_status').eq('user_id',uid).maybeSingle(),
+        supabase.from('notification_preferences').select('push_enabled,sound_enabled,vibration_enabled').eq('user_id',uid).maybeSingle(),
+        supabase.from('e2ee_devices').select('device_id,protocol,bundle_version,curve25519_key,ed25519_key,is_active').eq('user_id',uid).eq('is_active',true).order('device_id'),
+        loadEncryptedRecord(uid,'public-device').catch(()=>null)
+      ]);
+      if(profileResult.error)throw profileResult.error;
+      if(presenceResult.error)throw presenceResult.error;
+      if(notificationResult.error)throw notificationResult.error;
+      if(devicesResult.error)throw devicesResult.error;
+      setPrivacySettings({
+        showOnlineStatus:presenceResult.data?.show_online_status??true,
+        readReceiptsEnabled:profileResult.data?.read_receipts_enabled??true
+      });
+      setNotificationPrefs(notificationResult.data||{push_enabled:true,sound_enabled:true,vibration_enabled:false});
+      setE2eeDevices(devicesResult.data||[]);
+      setBrowserDeviceId(bundle?.device_id||'');
+    } catch(error) { setNotice('Не удалось загрузить настройки: '+(error?.message||'ошибка')); }
+    finally { setSettingsLoading(false); }
+  },[session?.user?.id]);
+
+  useEffect(()=>{ if(activeTab==='settings') loadAccountSettings(); },[activeTab,loadAccountSettings]);
+
+  async function savePrivacySettings(next) {
+    setSettingsBusy(true);
+    try {
+      const value={...privacySettings,...next};
+      const {error}=await supabase.rpc('update_my_privacy_settings',{
+        p_show_online_status:value.showOnlineStatus,
+        p_read_receipts_enabled:value.readReceiptsEnabled
+      });
+      if(error)throw error;
+      setPrivacySettings(value);
+      setNotice('Настройки приватности сохранены.');
+    } catch(error) { setNotice('Не удалось сохранить приватность: '+error.message); }
+    finally { setSettingsBusy(false); }
+  }
+
+  async function saveNotificationSetting(key,value) {
+    setSettingsBusy(true);
+    try {
+      if(key==='push_enabled'&&value&&typeof Notification!=='undefined'&&Notification.permission==='default') {
+        const permission=await Notification.requestPermission();
+        setBrowserNotificationPermission(permission);
+        if(permission!=='granted') throw new Error('Браузер не разрешил уведомления');
+      }
+      if(key==='push_enabled'&&value&&typeof Notification!=='undefined'&&Notification.permission==='denied') {
+        throw new Error('Уведомления запрещены в настройках браузера');
+      }
+      const next={...notificationPrefs,[key]:value};
+      const {error}=await supabase.from('notification_preferences').upsert({
+        user_id:session.user.id,...next,updated_at:new Date().toISOString()
+      },{onConflict:'user_id'});
+      if(error)throw error;
+      setNotificationPrefs(next);
+      setBrowserNotificationPermission(typeof Notification==='undefined'?'unsupported':Notification.permission);
+      setNotice('Настройки уведомлений сохранены.');
+    } catch(error) { setNotice('Не удалось изменить уведомления: '+error.message); }
+    finally { setSettingsBusy(false); }
+  }
+
+  async function revokeBrowserDevice(device) {
+    if(!device||device.device_id===browserDeviceId)return;
+    if(!window.confirm('Отозвать это E2EE-устройство? Оно больше не сможет получать новые защищённые сообщения.'))return;
+    setSettingsBusy(true);
+    try {
+      const {data,error}=await supabase.rpc('revoke_own_e2ee_device',{p_device_id:device.device_id});
+      if(error)throw error;
+      if(data!==true)throw new Error('Сервер не подтвердил отзыв устройства');
+      setE2eeDevices(previous=>previous.filter(item=>item.device_id!==device.device_id));
+      setNotice('Устройство отозвано.');
+    } catch(error) { setNotice('Не удалось отозвать устройство: '+error.message); }
+    finally { setSettingsBusy(false); }
+  }
+
   const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
 
   useEffect(() => {
@@ -1027,8 +1117,9 @@ function App() {
         <button className={activeTab==='chats'?'active':''} onClick={()=>{setActiveTab('chats');setViewedProfile(null);}}><MessageCircle size={16}/> Чаты</button>
         <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setMobileChatOpen(false);setPeopleOffset(0);setPeople([]);}}><Users size={16}/> Люди</button>
         <button className={activeTab==='profile'?'active':''} onClick={openOwnProfile}><UserRound size={16}/> Профиль</button>
+        <button className={activeTab==='settings'?'active':''} onClick={()=>{setActiveTab('settings');setSelected(null);setMobileChatOpen(false);}}><Settings size={16}/> Настройки</button>
       </div>
-      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КАТАЛОГ ПОЛЬЗОВАТЕЛЕЙ':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
+      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КАТАЛОГ ПОЛЬЗОВАТЕЛЕЙ':activeTab==='settings'?'НАСТРОЙКИ АККАУНТА':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
       <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
       <div className="chat-list">
         {activeTab==='chats' ? <>
@@ -1059,13 +1150,33 @@ function App() {
           </button>)}
           {peopleBusy && <div className="list-hint">Загружаем пользователей…</div>}
           {!peopleBusy && peopleHasMore && <button className="load-more-people" onClick={()=>loadPeople()}>{people.length?'Показать ещё':'Загрузить людей'}</button>}
-        </> : <div className="empty-list"><UserRound size={24}/><b>Профиль открыт</b><span>Управляй своими публикациями в основной области.</span></div>}
+        </> : <div className="empty-list">{activeTab==='settings'?<><Settings size={24}/><b>Настройки Nexura</b><span>Управляй приватностью и защитой аккаунта.</span></>:<><UserRound size={24}/><b>Профиль открыт</b><span>Управляй своими публикациями в основной области.</span></>}</div>}
       </div>
       <div className="sidebar-foot"><ShieldCheck size={15}/> Nexura · веб-клиент</div>
     </aside>
     <main className={'chat-area '+(mobileChatOpen?'mobile-visible':'')}>
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
-      {activeTab==='profile' ? <section className="web-profile-page">
+      {activeTab==='settings' ? <section className="web-settings-page">
+        <div className="people-page-heading"><div className="eyebrow">УПРАВЛЕНИЕ АККАУНТОМ</div><h2>Настройки</h2><p>Приватность, уведомления и безопасность твоих устройств.</p></div>
+        {settingsLoading ? <div className="list-hint">Загружаем настройки…</div> : <>
+          <section className="settings-card"><div className="settings-card-heading"><ShieldCheck size={19}/><div><h3>Приватность</h3><p>Управляй тем, что видят другие участники.</p></div></div>
+            <label className="settings-toggle"><span><b>Показывать статус «В сети»</b><small>Если отключить, другие не увидят время последнего посещения.</small></span><input type="checkbox" checked={privacySettings.showOnlineStatus} disabled={settingsBusy} onChange={e=>savePrivacySettings({showOnlineStatus:e.target.checked})}/></label>
+            <label className="settings-toggle"><span><b>Отчёты о прочтении</b><small>Собеседник увидит, когда ты прочитал сообщение.</small></span><input type="checkbox" checked={privacySettings.readReceiptsEnabled} disabled={settingsBusy} onChange={e=>savePrivacySettings({readReceiptsEnabled:e.target.checked})}/></label>
+          </section>
+          <section className="settings-card"><div className="settings-card-heading"><Bell size={19}/><div><h3>Уведомления браузера</h3><p>Работают, пока браузер или веб-приложение активно. Это не push на закрытом браузере.</p></div></div>
+            <div className="settings-permission"><span>Разрешение браузера</span><b>{browserNotificationPermission==='granted'?'Разрешено':browserNotificationPermission==='denied'?'Запрещено':browserNotificationPermission==='unsupported'?'Не поддерживается':'Не запрошено'}</b></div>
+            <label className="settings-toggle"><span><b>Уведомлять о новых сообщениях</b><small>Показывать системные уведомления в браузере.</small></span><input type="checkbox" checked={notificationPrefs.push_enabled} disabled={settingsBusy||browserNotificationPermission==='unsupported'} onChange={e=>saveNotificationSetting('push_enabled',e.target.checked)}/></label>
+            <label className="settings-toggle"><span><b>Звуковой сигнал</b><small>Включить звук для новых сообщений в активной вкладке.</small></span><input type="checkbox" checked={notificationPrefs.sound_enabled} disabled={settingsBusy} onChange={e=>saveNotificationSetting('sound_enabled',e.target.checked)}/></label>
+          </section>
+          <section className="settings-card"><div className="settings-card-heading"><LockKeyhole size={19}/><div><h3>Сквозное шифрование</h3><p>{e2eeStatus}</p></div></div>
+            <div className="settings-device-current"><span className="device-dot"/><div><b>Это браузерное устройство</b><small>{browserDeviceId?browserDeviceId.slice(0,8)+'…':'Инициализация устройства'}</small></div><span className="device-current-tag">Текущее</span></div>
+            <div className="settings-device-list">{e2eeDevices.map(device=><div className="settings-device" key={device.device_id}><div className="device-icon"><Smartphone size={18}/></div><div className="settings-device-info"><b>{device.device_id===browserDeviceId?'Текущий браузер':'Другое устройство'}</b><small>{device.protocol||'olm'} · {device.device_id.slice(0,8)}…</small><small>Отпечаток: {String(device.curve25519_key||'').slice(0,16)}…</small></div>{device.device_id===browserDeviceId?<span className="device-current-tag">Текущее</span>:<button className="secondary-btn danger-button" disabled={settingsBusy} onClick={()=>revokeBrowserDevice(device)}>Отозвать</button>}</div>)}
+            {!e2eeDevices.length&&<div className="social-empty">Активные устройства не найдены. Перезагрузи страницу после инициализации защиты.</div>}</div>
+            <p className="settings-security-note">Не отключай проверку устройств и не передавай ключи восстановления другим людям. Сообщения остаются зашифрованными отдельно для каждого устройства.</p>
+          </section>
+          <section className="settings-card"><div className="settings-card-heading"><LogOut size={19}/><div><h3>Сеанс</h3><p>{session.user.email||session.user.id}</p></div></div><button className="secondary-btn danger-button" onClick={signOut}>Выйти из Nexura</button></section>
+        </>}
+      </section> : activeTab==='profile' ? <section className="web-profile-page">
         <div className="web-profile-cover" onClick={()=>bannerInputRef.current?.click()}>
           {profile?.banner_display_url || profile?.banner_url?.startsWith('http') ? (profile.banner_url?.startsWith('social:') ? <video src={profile.banner_display_url} autoPlay muted loop playsInline/> : <img src={profile.banner_url} alt="Обложка профиля"/>) : <div className="cover-placeholder"><ImageIcon size={34}/><b>Добавь обложку профиля</b><span>Фото или видео без звука</span></div>}
           <button className="cover-edit" onClick={event=>{event.stopPropagation();bannerInputRef.current?.click();}}><Camera size={15}/> Изменить обложку</button>
