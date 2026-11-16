@@ -2052,7 +2052,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                                 Column(Modifier.padding(start = 11.dp)) {
                                     Text("Nexura", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
-                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
+                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else if (homeTab == "profile") "Ваш профиль" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
                                 }
                             }
                             Surface(shape = CircleShape, color = Surface1) {
@@ -2241,7 +2241,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     TextButton(onClick = { settingsOpen = true }, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)) { Text("Изменить профиль", color = Color.White) }
                                 }
                                 Row(Modifier.fillMaxWidth().padding(start = 20.dp).offset(y = (-42).dp), verticalAlignment = Alignment.Bottom) {
-                                    Box(Modifier.size(94.dp).clip(CircleShape).border(4.dp, Surface1, CircleShape).background(Surface1), contentAlignment = Alignment.Center) { Avatar(profileName.ifBlank { "Ваш профиль" }, profileAvatar) }
+                                    Box(Modifier.size(94.dp).clip(CircleShape).border(4.dp, Surface1, CircleShape).background(Surface1), contentAlignment = Alignment.Center) {
+                                        if (profileAvatar.startsWith("http")) AsyncImage(model = profileAvatar, contentDescription = "Аватар профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                        else Text(profileAvatar.ifBlank { "🙂" }, fontSize = 38.sp)
+                                    }
                                 }
                                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).offset(y = (-30).dp)) {
                                     Text(profileName.ifBlank { "Ваш профиль" }, color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -3820,7 +3823,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     VideoThumbnail(
                                                         uri = mediaUri,
                                                         modifier = Modifier.width(230.dp).height(150.dp),
-                                                        onClick = { mediaViewerUri = mediaUri; mediaViewerType = "video" }
+                                                        onClick = { mediaViewerUri = mediaUri; mediaViewerType = "video"; mediaViewerItems = messages.filter { it.messageType == "media" && it.encrypted && (it.mediaKind == "image" || it.mediaKind == "video") }; mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == msg.id }.coerceAtLeast(0) }
                                                     )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
                                                         Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
@@ -3864,7 +3867,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         model = mediaUri,
                                                         contentDescription = "Фото",
                                                         modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp))
-                                                            .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image" },
+                                                            .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image"; mediaViewerItems = messages.filter { it.messageType == "media" && it.encrypted && (it.mediaKind == "image" || it.mediaKind == "video") }; mediaViewerIndex = mediaViewerItems.indexOfFirst { it.id == msg.id }.coerceAtLeast(0) },
                                                         contentScale = ContentScale.Crop
                                                     )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
