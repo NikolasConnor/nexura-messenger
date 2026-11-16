@@ -4536,9 +4536,9 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
         }, update = { view -> if (view.player !== player) view.player = player }, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().clickable { showControls = !showControls })
         AnimatedVisibility(visible = showControls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-                Box(Modifier.fillMaxWidth().height(100.dp).align(Alignment.TopCenter).background(Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent))))
-                Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().height(100.dp).align(Alignment.TopCenter).statusBarsPadding().background(Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent))))
+                Row(Modifier.align(Alignment.TopStart).fillMaxWidth().statusBarsPadding().padding(start = 12.dp, top = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("NEXURA", color = Color.White.copy(alpha = 0.72f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
                         Text("Видеоплеер", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
@@ -4548,7 +4548,7 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
                     }
                     IconButton(onClick = onClose, modifier = Modifier.background(Color(0x66000000), CircleShape)) { Icon(Icons.Default.Close, "Закрыть видео", tint = Color.White) }
                 }
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().imePadding().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(horizontal = 12.dp, vertical = 8.dp)) {
                     playbackError?.let { Text(it, color = Color(0xFFFFB4AB), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(formatNexuraTime(position), color = Color.White, fontSize = 11.sp)
