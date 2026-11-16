@@ -2149,8 +2149,10 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
 
     suspend fun uploadBanner(bytes: ByteArray, mimeType: String): String {
         val uid = store.userId ?: throw IOException("Сессия истекла")
-        if (bytes.isEmpty() || bytes.size > 8 * 1024 * 1024) throw IOException("Баннер должен быть не больше 8 МБ")
-        val ext = when (mimeType.lowercase()) { "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }
+        if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) throw IOException("Баннер должен быть не больше 5 МБ")
+        val normalizedMime = mimeType.lowercase()
+        if (normalizedMime !in setOf("image/jpeg", "image/png", "image/webp")) throw IOException("Поддерживаются изображения JPEG, PNG и WebP")
+        val ext = when (normalizedMime) { "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }
         val path = "$uid/banner-${UUID.randomUUID()}.$ext"
         val request = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-avatars/$path")
             .header("apikey", PUBLIC_KEY).header("Authorization", "Bearer ${store.accessToken ?: PUBLIC_KEY}")
