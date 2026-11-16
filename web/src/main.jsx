@@ -280,6 +280,16 @@ function App() {
     return()=>{['timeupdate','loadedmetadata','play','pause'].forEach(name=>sharedVoiceAudio.removeEventListener(name,publish));sharedVoiceAudio.removeEventListener('ended',ended);window.removeEventListener('nexura:voice-state',sync);};
   }, []);
 
+  useEffect(()=>{
+    if(!session?.user?.id)return;
+    let active=true;
+    supabase.from('notification_preferences')
+      .select('push_enabled,sound_enabled,vibration_enabled')
+      .eq('user_id',session.user.id).maybeSingle()
+      .then(({data,error})=>{if(active&&!error&&data)setNotificationPrefs(data);});
+    return()=>{active=false;};
+  },[session?.user?.id]);
+
   useEffect(() => {
     let alive = true;
     supabase.auth.getSession().then(({ data }) => { if (alive) { setSession(data.session); setInitializing(false); } });
@@ -497,16 +507,31 @@ function App() {
     if (!session?.user?.id) return;
     let refreshTimer = null;
     const channel = supabase.channel('web-chat-list-' + session.user.id)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, payload => {
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(() => loadChats({ silent: true }), 350);
+        const message=payload.new;
+        if(message?.sender_id===session.user.id||!message?.conversation_id)return;
+        if(!notificationPrefs.push_enabled||typeof Notification==='undefined'||Notification.permission!=='granted'||!document.hidden)return;
+        const chat=chats.find(item=>item.id===message.conversation_id);
+        const notification=new Notification('Nexura', {
+          body:chat?'Новое сообщение от '+chat.title:'Новое сообщение',
+          tag:'nexura-chat-'+message.conversation_id,
+          silent:!notificationPrefs.sound_enabled
+        });
+        notification.onclick=()=>{
+          window.focus();
+          const target=chats.find(item=>item.id===message.conversation_id);
+          if(target){setActiveTab('chats');setSelected(target);setMobileChatOpen(true);}
+          notification.close();
+        };
       })
       .subscribe();
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer);
       supabase.removeChannel(channel);
     };
-  }, [session?.user?.id, loadChats]);
+  }, [session?.user?.id, loadChats, chats, notificationPrefs]);
 
   const loadPeople = useCallback(async ({reset = false} = {}) => {
     if (!session?.user?.id || peopleBusy) return;
