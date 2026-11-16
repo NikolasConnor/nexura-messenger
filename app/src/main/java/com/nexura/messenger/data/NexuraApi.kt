@@ -208,6 +208,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("scope", "openid profile")
             .appendQueryParameter("redirect_uri", TELEGRAM_REDIRECT)
+            .appendQueryParameter("state", state)
             .appendQueryParameter("android_sdk", "1")
             .appendQueryParameter("code_challenge", challenge)
             .appendQueryParameter("code_challenge_method", "S256")
@@ -228,6 +229,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             .appendQueryParameter("redirect_uri", TELEGRAM_REDIRECT)
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("scope", "openid profile")
+            .appendQueryParameter("state", state)
             .appendQueryParameter("code_challenge", challenge)
             .appendQueryParameter("code_challenge_method", "S256")
             .build().toString()
@@ -251,7 +253,6 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         val code = uri.getQueryParameter("code")
             ?: throw IOException("Telegram не вернул код авторизации. Начните вход заново.")
         val state = uri.getQueryParameter("state")
-            ?: throw IOException("Telegram не вернул защитный параметр state. Начните вход заново.")
         val verifier = store.consumeTelegramVerifier(state)
             ?: throw IOException("Состояние входа Telegram устарело или уже использовано. Нажмите «Продолжить с Telegram» ещё раз.")
 
