@@ -1039,7 +1039,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     LaunchedEffect(authCallback) {
         val isTelegramCallback = authCallback?.scheme == "https" &&
-            authCallback.host == "app9098453191-login.tg.dev" && authCallback.path == "/tglogin"
+            authCallback.host == "app2837682119-login.tg.dev" && authCallback.path == "/tglogin"
         val isSupabaseCallback = authCallback?.scheme == "nexura" &&
             authCallback.host == "auth" && authCallback.path == "/callback"
         if (isTelegramCallback || isSupabaseCallback) {
