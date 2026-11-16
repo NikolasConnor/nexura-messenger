@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - feature/nexura-0.6.1-media-transcription
+    paths:
+      - "app/build.gradle.kts"
+      - ".github/workflows/public-apk-release.yml"
 
 permissions:
   contents: read
@@ -104,7 +109,8 @@ jobs:
 
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs website/downloads/Nexura.apk
           sha256sum website/downloads/Nexura.apk | awk '{print $1 "  Nexura.apk"}' > website/downloads/SHA256SUMS.txt
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          test -n "$VERSION"
           printf 'Nexura version %s\nPublished from tag %s\n' "$VERSION" "$GITHUB_REF_NAME" > website/downloads/RELEASE.txt
 
       - name: Set up Rust and WebAssembly target
