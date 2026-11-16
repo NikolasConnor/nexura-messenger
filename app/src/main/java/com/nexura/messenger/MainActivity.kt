@@ -337,6 +337,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
     var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var viewedProfileStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
@@ -385,9 +386,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var trustPeerId by remember { mutableStateOf<String?>(null) }
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
     LaunchedEffect(viewedProfile?.id) {
-        val profileId = viewedProfile?.id ?: run { viewedProfilePhotos = emptyList(); return@LaunchedEffect }
-        try { viewedProfilePhotos = api.profilePhotos(profileId) }
-        catch (_: Exception) { viewedProfilePhotos = emptyList() }
+        val profileId = viewedProfile?.id ?: run { viewedProfilePhotos = emptyList(); viewedProfileStories = emptyList(); return@LaunchedEffect }
+        try {
+            viewedProfilePhotos = api.profilePhotos(profileId)
+            viewedProfileStories = api.activeStories().filter { it.userId == profileId }
+        } catch (_: Exception) { viewedProfilePhotos = emptyList(); viewedProfileStories = emptyList() }
     }
 
     LaunchedEffect(selected?.id, messages) {
@@ -3370,6 +3373,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                     if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
                                     Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                                    if (viewedProfileStories.isNotEmpty()) {
+                                        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                        Text("Истории", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                                        LazyRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                            items(viewedProfileStories, key = { it.id }) { story ->
+                                                Column(Modifier.width(68.dp).clickable { selectedSocialStory = story; scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.storyReaction(story.id) } catch (e: Exception) { error = e.message ?: "Не удалось загрузить историю" } finally { socialInteractionBusy = false } }, horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    Box(Modifier.size(62.dp).border(2.dp, Brush.linearGradient(listOf(Accent, Accent2)), CircleShape).padding(3.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+                                                        if (story.mediaType == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White)
+                                                        else AsyncImage(model = story.mediaUrl, contentDescription = "История пользователя", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                    }
+                                                    Text("История", color = SecondaryText, fontSize = 10.sp)
+                                                }
+                                            }
+                                        }
+                                    }
                                     if (viewedProfilePhotos.isNotEmpty()) {
                                         HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
