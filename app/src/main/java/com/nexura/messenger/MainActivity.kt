@@ -3901,7 +3901,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 } else if (msg.mediaKind == "video") {
                                                     Box(
                                                         Modifier.width(230.dp).height(150.dp).clip(RoundedCornerShape(12.dp))
-                                                            .background(Color.Black).clickable { mediaViewerUri = mediaUri; mediaViewerType = "video" },
+                                                            .background(Color.Black).clickable {
+                                                                val chatVisuals = messages.filter { it.messageType == "media" && it.encrypted && it.mediaKind in setOf("image", "video") }
+                                                                mediaViewerQueue = chatVisuals.map { Uri.parse(it.content) to (it.mediaKind ?: "image") }
+                                                                mediaViewerIndex = chatVisuals.indexOfFirst { it.id == msg.id }.coerceAtLeast(0)
+                                                                mediaViewerUri = mediaViewerQueue.getOrNull(mediaViewerIndex)?.first ?: mediaUri
+                                                                mediaViewerType = mediaViewerQueue.getOrNull(mediaViewerIndex)?.second ?: "video"
+                                                            },
                                                         contentAlignment = Alignment.Center
                                                     ) {
                                                         Icon(Icons.Default.PlayArrow, "Открыть видео", tint = Color.White, modifier = Modifier.size(54.dp))
@@ -3949,7 +3955,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         model = mediaUri,
                                                         contentDescription = "Фото",
                                                         modifier = Modifier.width(230.dp).heightIn(max = 250.dp).clip(RoundedCornerShape(12.dp))
-                                                            .clickable { mediaViewerUri = mediaUri; mediaViewerType = "image" },
+                                                            .clickable {
+                                                                val chatVisuals = messages.filter { it.messageType == "media" && it.encrypted && it.mediaKind in setOf("image", "video") }
+                                                                mediaViewerQueue = chatVisuals.map { Uri.parse(it.content) to (it.mediaKind ?: "image") }
+                                                                mediaViewerIndex = chatVisuals.indexOfFirst { it.id == msg.id }.coerceAtLeast(0)
+                                                                mediaViewerUri = mediaViewerQueue.getOrNull(mediaViewerIndex)?.first ?: mediaUri
+                                                                mediaViewerType = mediaViewerQueue.getOrNull(mediaViewerIndex)?.second ?: "image"
+                                                            },
                                                         contentScale = ContentScale.Crop
                                                     )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
