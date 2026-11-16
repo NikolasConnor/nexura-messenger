@@ -353,6 +353,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
     var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var viewedProfileStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
@@ -402,8 +403,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
     LaunchedEffect(viewedProfile?.id) {
         val profileId = viewedProfile?.id ?: run { viewedProfilePhotos = emptyList(); return@LaunchedEffect }
-        try { viewedProfilePhotos = api.profilePhotos(profileId) }
-        catch (_: Exception) { viewedProfilePhotos = emptyList() }
+        try {
+            viewedProfilePhotos = api.profilePhotos(profileId)
+            viewedProfileStories = api.activeStories().filter { it.userId == profileId }
+        } catch (_: Exception) { viewedProfilePhotos = emptyList(); viewedProfileStories = emptyList() }
     }
 
     LaunchedEffect(selected?.id, messages) {
@@ -3277,7 +3280,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Text("Профиль", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart))
                                         IconButton(onClick = { viewedProfile = null; profileMedia = emptyList() }) { Text("×", color = SecondaryText, fontSize = 24.sp) }
                                     }
-                                    Avatar(profile.displayName, profile.avatar)
+                                    Box(Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(Accent.copy(alpha = 0.75f), Accent2.copy(alpha = 0.65f))))) {
+                                        if (profile.banner.isNotBlank()) AsyncImage(model = profile.banner, contentDescription = "Баннер профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                        Box(Modifier.align(Alignment.BottomStart).padding(start = 14.dp)) { Avatar(profile.displayName, profile.avatar) }
+                                    }
                                     Text(profile.displayName, color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
                                     if (profile.username.isNotBlank()) Text("@${profile.username}", color = SecondaryText, fontSize = 13.sp)
                                     viewedPresence?.takeIf { it.isVisible }?.let { presence ->
@@ -3287,6 +3293,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                     if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
                                     Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                                    if (viewedProfileStories.isNotEmpty()) {
+                                        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                        Text("Истории", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                                        LazyRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(viewedProfileStories, key = { it.id }) { story ->
+                                            AsyncImage(model = story.mediaUrl, contentDescription = "История пользователя", modifier = Modifier.size(92.dp, 126.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = story.mediaType }, contentScale = ContentScale.Crop)
+                                        } }
+                                    }
                                     if (viewedProfilePhotos.isNotEmpty()) {
                                         HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
