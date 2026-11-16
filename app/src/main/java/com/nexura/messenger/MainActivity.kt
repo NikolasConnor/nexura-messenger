@@ -4430,15 +4430,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     if (mediaViewerUri != null) {
         Dialog(onDismissRequest = { mediaViewerUri = null; mediaViewerItems = emptyList() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
             var horizontalDrag by remember { mutableFloatStateOf(0f) }
+            var photoScale by remember(mediaViewerUri) { mutableFloatStateOf(1f) }
             Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(mediaViewerIndex, mediaViewerItems) {
                 detectHorizontalDragGestures(onDragEnd = {
-                    if (horizontalDrag < -70f && mediaViewerIndex < mediaViewerItems.lastIndex) { mediaViewerIndex++; val next = mediaViewerItems[mediaViewerIndex]; mediaViewerUri = Uri.parse(next.content); mediaViewerType = next.mediaKind ?: "image" }
+                    if (horizontalDrag < -70f && mediaViewerIndex < mediaViewerItems.lastIndex) { mediaViewerIndex++; val next = mediaViewerItems[mediaViewerIndex]; mediaViewerUri = Uri.parse(next.content); mediaViewerType = next.mediaKind ?: "image"; photoScale = 1f; photoScale = 1f }
                     else if (horizontalDrag > 70f && mediaViewerIndex > 0) { mediaViewerIndex--; val next = mediaViewerItems[mediaViewerIndex]; mediaViewerUri = Uri.parse(next.content); mediaViewerType = next.mediaKind ?: "image" }
                     horizontalDrag = 0f
                 }, onHorizontalDrag = { _, amount -> horizontalDrag += amount })
             }, contentAlignment = Alignment.Center) {
                 if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
-                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null; mediaViewerItems = emptyList() }, contentScale = ContentScale.Fit)
+                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = photoScale; scaleY = photoScale }.combinedClickable(onClick = { }, onDoubleClick = { photoScale = if (photoScale > 1f) 1f else 2.2f }), contentScale = ContentScale.Fit)
                 if (mediaViewerItems.size > 1) Text("${mediaViewerIndex + 1} / ${mediaViewerItems.size}", color = Color.White, fontSize = 12.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 34.dp).background(Color(0x99000000), RoundedCornerShape(20.dp)).padding(horizontal = 13.dp, vertical = 7.dp))
                 IconButton(onClick = { mediaViewerUri = null; mediaViewerItems = emptyList() }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
             }
