@@ -725,3 +725,12 @@ body{overscroll-behavior:none}
 .scheduled-item .danger-text{border:0;background:transparent;color:#ff9ba9;font-size:10px;cursor:pointer}
 
 .saved-messages-shortcut{display:flex;align-items:center;gap:10px;width:calc(100% - 24px);margin:8px 12px;padding:10px 12px;border:1px solid #a78bfa28;border-radius:11px;background:#a78bfa0c;color:#d8c9ff;text-align:left;font-size:11px;font-weight:700;transition:background .18s,border-color .18s}.saved-messages-shortcut:hover{background:#a78bfa1c;border-color:#a78bfa55}
+
+.people-tools{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:14px}
+.people-tools small{flex-basis:100%;font-size:10px;color:#a49ab2;line-height:1.5}
+.contact-matches{margin:0 0 22px;padding:15px;border:1px solid #ffffff12;border-radius:16px;background:#ffffff05}
+.contact-match-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.contact-match-item{display:flex;align-items:center;gap:9px;padding:10px;border:1px solid #ffffff0d;border-radius:12px;background:#ffffff05}
+.contact-match-item>span{display:grid;gap:3px;flex:1;min-width:0}
+.contact-match-item b{font-size:11px;color:#eee8f7}.contact-match-item small{font-size:9px;color:#a49ab2}
+.contact-match-item .avatar{width:34px;height:34px;flex:0 0 34px}
