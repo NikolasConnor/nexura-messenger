@@ -270,6 +270,7 @@ function App() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [pendingMedia, setPendingMedia] = useState([]);
+  const [sendingMediaBatch, setSendingMediaBatch] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const fileInputRef = useRef(null);
@@ -1599,11 +1600,16 @@ function App() {
   }
 
   async function sendPendingAttachments() {
-    if (!pendingMedia.length || sending) return;
+    if (!pendingMedia.length || sending || sendingMediaBatch) return;
+    setSendingMediaBatch(true);
     const batch = [...pendingMedia];
-    for (const file of batch) {
-      const sent = await sendAttachment(file);
-      if (!sent) break;
+    try {
+      for (const file of batch) {
+        const sent = await sendAttachment(file);
+        if (!sent) break;
+      }
+    } finally {
+      setSendingMediaBatch(false);
     }
   }
 
@@ -1945,14 +1951,14 @@ function App() {
               <PendingMediaPreview file={file}/>
             </div>)}</div>
             <div className="pending-attachments-footer"><small>{pendingMedia.length}/10 вложений</small>
-              <button type="button" className="primary-btn" onClick={sendPendingAttachments} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending}>{sending?'Отправка…':'Отправить '+pendingMedia.length}</button>
+              <button type="button" className="primary-btn" onClick={sendPendingAttachments} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending||sendingMediaBatch}>{sending||sendingMediaBatch?'Отправка…':'Отправить '+pendingMedia.length}</button>
             </div>
           </div>}
           {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={cancelVoiceRecording}>Отмена</button><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
           <input ref={fileInputRef} type="file" multiple className="visually-hidden-file" onChange={addPendingMediaFiles}/>
           <div className="composer-input-row">
-            <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending||recording||pendingMedia.length>=10} title="Прикрепить до 10 файлов" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
-            <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending||pendingMedia.length>0} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
+            <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending||sendingMediaBatch||recording||pendingMedia.length>=10} title="Прикрепить до 10 файлов" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
+            <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending||sendingMediaBatch||pendingMedia.length>0} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
             <textarea ref={composerInputRef} value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}else if(event.key==='Escape'&&(replyTarget||editingMessageId)){setReplyTarget(null);setEditingMessageId(null);setDraft('');}}} placeholder={e2eeReady ? 'Сообщение' : 'Подключаем защищённое соединение…'} maxLength={12000} rows={1} disabled={(!e2eeReady&&selected.chatMode!=='cloud') || sending}/>
             <button type="button" className="composer-schedule" onClick={openScheduleDialog} disabled={!draft.trim()||sending} title={scheduledCount?'Отложить отправку · в очереди: '+scheduledCount:'Отложить отправку'} aria-label="Отложить отправку"><Clock size={17}/></button>
             <button className="send-button" type="submit" disabled={(!e2eeReady&&selected.chatMode!=='cloud') || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button>
