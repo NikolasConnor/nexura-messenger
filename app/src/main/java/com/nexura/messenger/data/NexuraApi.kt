@@ -286,14 +286,17 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         val idToken = telegramPayload.optString("id_token").takeIf { it.isNotBlank() }
             ?: throw IOException("Telegram не вернул ID-токен. Попробуйте войти ещё раз.")
 
+        val idTokenGrant = JSONObject()
+            .put("provider", "custom:telegram")
+            .put("id_token", idToken)
+        telegramPayload.optString("access_token").takeIf { it.isNotBlank() }?.let {
+            idTokenGrant.put("access_token", it)
+        }
         val supabaseSession = JSONObject(
             call(
                 "/auth/v1/token?grant_type=id_token",
                 "POST",
-                JSONObject()
-                    .put("provider", "custom:telegram")
-                    .put("id_token", idToken)
-                    .toString(),
+                idTokenGrant.toString(),
                 auth = false
             )
         )
