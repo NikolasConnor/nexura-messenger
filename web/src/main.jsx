@@ -937,7 +937,15 @@ function App() {
       }
       try{
         await ensureCallChannels(signal.from);
-        setIncomingCall({callId:id,peerUserId:signal.from,peerName:selected?.peerUserId===signal.from?selected.title:'Входящий вызов',conversationId:selected?.peerUserId===signal.from?selected.id:null});
+        let conversationId=selected?.peerUserId===signal.from?selected.id:null;
+        if(!conversationId){
+          const {data,error}=await supabase.rpc('create_direct_conversation',{p_other_user_id:signal.from});
+          if(error)throw error;
+          conversationId=String(data||'').replace(/^"|"$/g,'');
+        }
+        const {data:peer,error:peerError}=await supabase.from('profiles').select('display_name,username').eq('id',signal.from).maybeSingle();
+        if(peerError)throw peerError;
+        setIncomingCall({callId:id,peerUserId:signal.from,peerName:peer?.display_name||peer?.username||'Входящий вызов',conversationId});
         await sendCallSignal({type:'ringing',call_id:id,from:session.user.id,to:signal.from});
       }catch(error){setNotice('Не удалось принять сигнал звонка: '+error.message);}
       return;
@@ -973,6 +981,9 @@ function App() {
   async function startAudioCall() {
     if(!selected||selected.kind!=='direct'||!selected.peerUserId||callRef.current.callId||incomingCall)return;
     try{
+      if(!navigator.mediaDevices?.getUserMedia)throw new Error('Браузер не поддерживает аудиозвонки');
+      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true});
+      permissionStream.getTracks().forEach(track=>track.stop());
       await ensureCallChannels(selected.peerUserId);
       const callId=crypto.randomUUID();
       callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null};
@@ -990,6 +1001,11 @@ function App() {
     const incoming=incomingCall;
     if(!incoming)return;
     if(!incoming.conversationId){setNotice('Открой личный чат с этим пользователем и повтори приём звонка.');return;}
+    try{
+      if(!navigator.mediaDevices?.getUserMedia)throw new Error('Браузер не поддерживает аудиозвонки');
+      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true});
+      permissionStream.getTracks().forEach(track=>track.stop());
+    }catch(error){setNotice('Для звонка разреши доступ к микрофону: '+error.message);return;}
     callRef.current={...callRef.current,callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId};
     setIncomingCall(null);
     setCallUi({callId:incoming.callId,peerName:incoming.peerName,direction:'incoming',status:'Соединяем…',connected:false,muted:false});
