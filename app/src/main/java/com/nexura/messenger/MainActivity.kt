@@ -3781,35 +3781,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 )
                                                 .padding(horizontal = 15.dp, vertical = 12.dp)
                                         ) {
-                                            AnimatedVisibility(
-                                                visible = reactionPickerFor == msg.id,
-                                                enter = fadeIn() + expandVertically(),
-                                                exit = fadeOut() + shrinkVertically()
-                                            ) {
-                                                Row(
-                                                    Modifier.fillMaxWidth().padding(bottom = 9.dp)
-                                                        .clip(RoundedCornerShape(22.dp))
-                                                        .background(Surface1.copy(alpha = 0.96f))
-                                                        .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(22.dp))
-                                                        .padding(horizontal = 7.dp, vertical = 6.dp),
-                                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
-                                                        AnimatedReactionPickerItem(emoji = emoji) {
-                                                            reactionPickerFor = null
-                                                            scope.launch {
-                                                                try {
-                                                                    api.toggleMessageReaction(chat.id, msg.id, emoji)
-                                                                    messageReactions = api.messageReactions(chat.id)
-                                                                } catch (e: Exception) {
-                                                                    error = e.message ?: "Не удалось поставить реакцию"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
                                             } else if (msg.securityWarning) {
@@ -4121,6 +4092,35 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 }
                                             }
                                         }
+                                            AnimatedVisibility(
+                                                visible = reactionPickerFor == msg.id,
+                                                enter = fadeIn() + expandVertically(),
+                                                exit = fadeOut() + shrinkVertically()
+                                            ) {
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 4.dp)
+                                                        .clip(RoundedCornerShape(22.dp))
+                                                        .background(Surface1.copy(alpha = 0.96f))
+                                                        .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(22.dp))
+                                                        .padding(horizontal = 7.dp, vertical = 6.dp),
+                                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
+                                                        AnimatedReactionPickerItem(emoji = emoji) {
+                                                            reactionPickerFor = null
+                                                            scope.launch {
+                                                                try {
+                                                                    api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                    messageReactions = api.messageReactions(chat.id)
+                                                                } catch (e: Exception) {
+                                                                    error = e.message ?: "Не удалось поставить реакцию"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         val reactionsForMessage = messageReactions[msg.id].orEmpty()
                                         AnimatedVisibility(
                                             visible = reactionsForMessage.isNotEmpty(),
