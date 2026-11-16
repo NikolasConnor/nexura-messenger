@@ -712,7 +712,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
                 api.publishStory(bytes, mime, socialCaption)
                 socialCaption = ""
-                socialStories = api.activeStories()
+                socialStories = api.activeStories().filter { it.userId == store.userId.orEmpty() }
                 notice = "История опубликована на 24 часа"
             } catch (e: Exception) { error = e.message ?: "Не удалось опубликовать историю" }
             finally { socialBusy = false }
