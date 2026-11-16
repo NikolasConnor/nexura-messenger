@@ -227,9 +227,28 @@ export async function unblockUser(supabase, userId) {
 export async function sendCloudMessage(supabase,{conversationId,messageId,plaintext,replyToId=null,messageType='text'}) {
   const {data:{user}}=await supabase.auth.getUser();
   if(!user)throw new Error('Сессия истекла');
-  const chatId=id(conversationId),msgId=id(messageId),clean=String(plaintext||'');
+  const clean=String(plaintext||'');
   if(!clean.trim()||new TextEncoder().encode(clean).byteLength>100000)throw new Error('Сообщение пустое или слишком большое');
-  const {data:archive,error:archiveError}=await supabase.functions.invoke('cloud-history',{body:{action:'encrypt',conversation_id:chatId,message_id:msgId,plaintext:clean}});
+  const chatId=id(conversationId),msgId=id(messageId);
+  async function verifyExisting(existing) {
+    if(!existing||existing.sender_id!==user.id||existing.conversation_id!==chatId||existing.content!=='NEXURA_CLOUD_V1'||!existing.cloud_content)
+      throw new Error('Сервер уже содержит другое сообщение с этим идентификатором');
+    const {data:decoded,error}=await supabase.functions.invoke('cloud-history',{body:{
+      action:'decrypt',conversation_id:chatId,items:[{id:msgId,cloud_content:existing.cloud_content,scope:'shared'}]
+    }});
+    if(error)throw error;
+    const plaintext=decoded?.items?.find(item=>item?.id===msgId)?.plaintext;
+    if(plaintext!==clean)throw new Error('Текст не совпадает с уже сохранённым облачным сообщением');
+    return {...existing,content:clean,encrypted:false,decrypted:true};
+  }
+  const {data:existing,error:existingError}=await supabase.from('messages')
+    .select('id,conversation_id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+    .eq('id',msgId).maybeSingle();
+  if(existingError)throw existingError;
+  if(existing)return await verifyExisting(existing);
+  const {data:archive,error:archiveError}=await supabase.functions.invoke('cloud-history',{
+    body:{action:'encrypt',conversation_id:chatId,message_id:msgId,plaintext:clean}
+  });
   if(archiveError)throw archiveError;
   if(typeof archive?.cloud_content!=='string'||!archive.cloud_content)throw new Error('Сервис облачной истории не вернул зашифрованное содержимое');
   const row={id:msgId,conversation_id:chatId,sender_id:user.id,content:'NEXURA_CLOUD_V1',cloud_content:archive.cloud_content,message_type:messageType};
@@ -237,13 +256,12 @@ export async function sendCloudMessage(supabase,{conversationId,messageId,plaint
   const {data,error}=await supabase.from('messages').upsert(row,{onConflict:'id',ignoreDuplicates:true})
     .select('id,conversation_id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at').maybeSingle();
   if(error)throw error;
-  let saved=data;
-  if(!saved){
-    const {data:existing,error:readError}=await supabase.from('messages').select('id,conversation_id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at').eq('id',msgId).eq('conversation_id',chatId).maybeSingle();
-    if(readError)throw readError;saved=existing;
-  }
-  if(!saved||saved.sender_id!==user.id||saved.content!=='NEXURA_CLOUD_V1'||saved.cloud_content!==archive.cloud_content)throw new Error('Сервер не подтвердил сохранение облачного сообщения');
-  return {...saved,content:clean,encrypted:false,decrypted:true};
+  if(data)return {...data,content:clean,encrypted:false,decrypted:true};
+  const {data:saved,error:readError}=await supabase.from('messages')
+    .select('id,conversation_id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+    .eq('id',msgId).maybeSingle();
+  if(readError)throw readError;
+  return await verifyExisting(saved);
 }
 export async function editCloudMessage(supabase,messageId,newText) {
   const clean=String(newText||'').trim();
