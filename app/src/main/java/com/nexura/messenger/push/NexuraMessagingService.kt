@@ -69,15 +69,13 @@ class NexuraMessagingService : FirebaseMessagingService() {
         )
 
         // Never expose sender names or message previews on the lock screen.
+        val messageStyle = NotificationCompat.MessagingStyle(senderName)
+            .addMessage(body, System.currentTimeMillis(), senderName)
         val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(com.nexura.messenger.R.drawable.ic_stat_nexura)
             .setContentTitle(title)
             .setContentText(body)
-            .setStyle(
-                NotificationCompat.MessagingStyle(senderName)
-                    .addMessage(body, System.currentTimeMillis(), senderName)
-                    .apply { if (isGroup) setConversationTitle(title) }
-            )
+            .setStyle(messageStyle)
             .setContentIntent(contentIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(
