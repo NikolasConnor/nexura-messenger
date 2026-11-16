@@ -1675,7 +1675,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                              }
                                              bannerPhotoUri = null
                                          }
-                                         if (profileBannerUrl.startsWith("social:")) profileBannerUrl = api.myProfile().bannerUrl
                                          if (profilePhotoUri != null) {
                                             val uri = profilePhotoUri!!
                                             val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
@@ -1686,6 +1685,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         val age = profileAge.toIntOrNull()
                                         if (profileAge.isNotBlank() && age == null) throw IOException("Проверьте возраст")
                                         api.updateMyProfile(profileName, profileAvatar, profileBio, age, profileBannerUrl)
+                                        profileBannerUrl = api.myProfile().bannerUrl
                                         if (profileUsername != usernameDraft) {
                                             api.updateMyUsername(profileUsername)
                                             usernameDraft = profileUsername
