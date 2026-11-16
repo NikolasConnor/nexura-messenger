@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
+import { loadEncryptedRecord } from './crypto/secure-store.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, sendBrowserGroupMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 import { encryptAndUploadMedia, downloadAndDecryptMedia } from './crypto/media.js';
@@ -185,6 +186,13 @@ function App() {
   const [profileEdit, setProfileEdit] = useState(false);
   const [profileEditDraft, setProfileEditDraft] = useState({display_name:'',username:'',avatar_url:'🙂',bio:'',age:''});
   const [profileEditBusy, setProfileEditBusy] = useState(false);
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState('privacy');
+  const [privacyDraft, setPrivacyDraft] = useState({showOnlineStatus:true,readReceiptsEnabled:true});
+  const [blockedUsers, setBlockedUsers] = useState([]);
+  const [e2eeDevices, setE2eeDevices] = useState([]);
+  const [browserDeviceId, setBrowserDeviceId] = useState('');
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const photoInputRef = useRef(null);
   const storyInputRef = useRef(null);
   const bannerInputRef = useRef(null);
@@ -615,6 +623,67 @@ function App() {
     finally { setSocialBusy(false); }
   }
 
+  async function openAdvancedSettings() {
+    setAdvancedSettingsOpen(true); setSettingsSection('privacy'); setSettingsBusy(true);
+    try {
+      const [profileResult,presenceResult,blocksResult,devicesResult,bundle] = await Promise.all([
+        supabase.from('profiles').select('read_receipts_enabled').eq('id',session.user.id).maybeSingle(),
+        supabase.from('user_presence').select('show_online_status').eq('user_id',session.user.id).maybeSingle(),
+        supabase.from('user_blocks').select('blocked_id,created_at').eq('blocker_id',session.user.id).order('created_at',{ascending:false}),
+        supabase.from('e2ee_devices').select('device_id,created_at,last_seen_at,protocol,bundle_version,curve25519_key,ed25519_key,is_active').eq('user_id',session.user.id).eq('is_active',true).order('created_at',{ascending:false}),
+        loadEncryptedRecord(session.user.id,'public-device')
+      ]);
+      if(profileResult.error)throw profileResult.error;
+      if(presenceResult.error)throw presenceResult.error;
+      if(blocksResult.error)throw blocksResult.error;
+      if(devicesResult.error)throw devicesResult.error;
+      setPrivacyDraft({showOnlineStatus:presenceResult.data?.show_online_status??true,readReceiptsEnabled:profileResult.data?.read_receipts_enabled??true});
+      const ids=(blocksResult.data||[]).map(row=>row.blocked_id);
+      if(ids.length){const {data,error}=await supabase.from('profiles').select('id,display_name,username,avatar_url').in('id',ids);if(error)throw error;setBlockedUsers((data||[]).map(p=>({...p,created_at:blocksResult.data.find(b=>b.blocked_id===p.id)?.created_at})));}else setBlockedUsers([]);
+      setE2eeDevices(devicesResult.data||[]);
+      setBrowserDeviceId(bundle?.device_id||'');
+    } catch(error) { setNotice('Не удалось загрузить настройки: '+error.message); }
+    finally { setSettingsBusy(false); }
+  }
+
+  async function savePrivacySettings(next) {
+    setSettingsBusy(true);
+    try {
+      const {error}=await supabase.rpc('update_my_privacy_settings',{
+        p_show_online_status:!!next.showOnlineStatus,
+        p_read_receipts_enabled:!!next.readReceiptsEnabled
+      });
+      if(error)throw error;
+      setPrivacyDraft(next); setNotice('Настройки приватности сохранены');
+    } catch(error) { setNotice('Не удалось сохранить приватность: '+error.message); }
+    finally { setSettingsBusy(false); }
+  }
+
+  async function unblockProfile(userId) {
+    if(!window.confirm('Разблокировать пользователя?'))return;
+    setSettingsBusy(true);
+    try {
+      const {error}=await supabase.from('user_blocks').delete().eq('blocker_id',session.user.id).eq('blocked_id',userId);
+      if(error)throw error;
+      setBlockedUsers(previous=>previous.filter(user=>user.id!==userId));
+    } catch(error) { setNotice('Не удалось разблокировать: '+error.message); }
+    finally { setSettingsBusy(false); }
+  }
+
+  async function revokeBrowserDevice(device) {
+    if(device.device_id===browserDeviceId){setNotice('Нельзя отозвать устройство, на котором открыты текущая сессия и ключи.');return;}
+    if(!window.confirm('Отозвать это E2EE-устройство? Оно потеряет доступ к новым сообщениям.'))return;
+    setSettingsBusy(true);
+    try {
+      const {data,error}=await supabase.rpc('revoke_own_e2ee_device',{p_device_id:device.device_id});
+      if(error)throw error;
+      if(data!==true)throw new Error('Сервер не подтвердил отзыв устройства');
+      setE2eeDevices(previous=>previous.filter(item=>item.device_id!==device.device_id));
+      setNotice('Устройство отозвано');
+    } catch(error) { setNotice('Не удалось отозвать устройство: '+error.message); }
+    finally { setSettingsBusy(false); }
+  }
+
   async function openOwnProfile() {
     setActiveTab('profile'); setViewedProfile(null);
     await loadOwnSocial();
@@ -953,7 +1022,7 @@ function App() {
   return <div className="messenger">
     <aside className={'sidebar '+(mobileChatOpen?'mobile-hidden':'')}>
       <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><div className="side-actions"><button className="icon-button" onClick={()=>setGroupOpen(true)} title="Создать группу"><Plus size={18}/></button><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div></div>
-      <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={openProfileSettings} title="Настройки профиля"><Settings size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
+      <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={openProfileSettings} title="Редактировать профиль"><Settings size={17}/></button><button className="icon-button" onClick={openAdvancedSettings} title="Настройки приватности и безопасности"><ShieldCheck size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
       <div className="side-tabs side-tabs-expanded">
         <button className={activeTab==='chats'?'active':''} onClick={()=>{setActiveTab('chats');setViewedProfile(null);}}><MessageCircle size={16}/> Чаты</button>
         <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setMobileChatOpen(false);setPeopleOffset(0);setPeople([]);}}><Users size={16}/> Люди</button>
@@ -1110,6 +1179,25 @@ function App() {
       <div className="social-viewer-content"><p>{socialViewer.caption||' '}</p><div className="social-viewer-actions"><button onClick={toggleCurrentSocialLike} disabled={socialBusy} className={socialLiked?'liked':''}><Heart size={17} fill={socialLiked?'currentColor':'none'}/> {socialViewer.likeCount||0}</button>{socialViewer.kind==='photo'&&<span><MessageSquare size={16}/> {socialComments.length}</span>}</div>
       {socialViewer.kind==='photo'&&<><div className="social-comments">{socialComments.map(comment=><div key={comment.id}><b>{comment.user_id===session.user.id?'Вы':'Участник Nexura'}</b><span>{comment.content}</span></div>)}{!socialComments.length&&<small>Комментариев пока нет.</small>}</div><form className="social-comment-form" onSubmit={submitSocialComment}><input value={socialCommentDraft} onChange={event=>setSocialCommentDraft(event.target.value)} placeholder="Написать комментарий…" maxLength={1000}/><button className="primary-btn" disabled={socialBusy||!socialCommentDraft.trim()}>Отправить</button></form></>}
       </div>
+    </section></div>}
+    {advancedSettingsOpen && <div className="modal-backdrop" onClick={()=>setAdvancedSettingsOpen(false)}><section className="group-modal advanced-settings-modal" onClick={event=>event.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">УПРАВЛЕНИЕ АККАУНТОМ</div><h3>Настройки</h3></div><button className="icon-button" onClick={()=>setAdvancedSettingsOpen(false)}><X size={18}/></button></div>
+      <div className="settings-section-tabs"><button className={settingsSection==='privacy'?'active':''} onClick={()=>setSettingsSection('privacy')}>Приватность</button><button className={settingsSection==='devices'?'active':''} onClick={()=>setSettingsSection('devices')}>Устройства</button><button className={settingsSection==='blocked'?'active':''} onClick={()=>setSettingsSection('blocked')}>Блокировки</button></div>
+      {settingsBusy&&<div className="list-hint">Обновляем настройки…</div>}
+      {settingsSection==='privacy'&&<div className="advanced-settings-content">
+        <div className="setting-toggle-row"><span><b>Показывать статус «В сети»</b><small>Другие пользователи смогут видеть, когда ты онлайн.</small></span><input type="checkbox" checked={privacyDraft.showOnlineStatus} disabled={settingsBusy} onChange={e=>savePrivacySettings({...privacyDraft,showOnlineStatus:e.target.checked})}/></div>
+        <div className="setting-toggle-row"><span><b>Отчёты о прочтении</b><small>Собеседник увидит, что ты прочитал сообщение.</small></span><input type="checkbox" checked={privacyDraft.readReceiptsEnabled} disabled={settingsBusy} onChange={e=>savePrivacySettings({...privacyDraft,readReceiptsEnabled:e.target.checked})}/></div>
+        <div className="settings-info-note"><ShieldCheck size={17}/> Изменения применяются к аккаунту Nexura и синхронизируются между устройствами.</div>
+      </div>}
+      {settingsSection==='devices'&&<div className="advanced-settings-content"><p className="settings-description">Активные устройства, которые могут получать ключи для сквозного шифрования.</p>
+        {e2eeDevices.map(device=><div className="device-row" key={device.device_id}><div className="device-icon"><ShieldCheck size={17}/></div><div><b>{device.device_id===browserDeviceId?'Этот браузер':'Устройство Nexura'}</b><small>ID: {device.device_id.slice(0,8)}… · {device.protocol||'E2EE'}</small><small>Отпечаток: {device.curve25519_key?.slice(0,12)||'—'}…</small></div><button disabled={settingsBusy||device.device_id===browserDeviceId} onClick={()=>revokeBrowserDevice(device)}>Отозвать</button></div>)}
+        {!e2eeDevices.length&&<div className="social-empty">Активные устройства не найдены.</div>}
+        <div className="settings-info-note"><LockKeyhole size={17}/> Отзыв устройства необратим. Для повторного доступа ему потребуется зарегистрировать новую криптографическую идентичность.</div>
+      </div>}
+      {settingsSection==='blocked'&&<div className="advanced-settings-content">
+        {blockedUsers.map(user=><div className="blocked-user-row" key={user.id}><Avatar value={user.avatar_url} name={user.display_name}/><div><b>{user.display_name||'Пользователь'}</b><small>{user.username?'@'+user.username:'Заблокирован'}</small></div><button disabled={settingsBusy} onClick={()=>unblockProfile(user.id)}>Разблокировать</button></div>)}
+        {!blockedUsers.length&&<div className="social-empty">Заблокированных пользователей нет.</div>}
+      </div>}
     </section></div>}
     {profileEdit && <div className="modal-backdrop" onClick={()=>setProfileEdit(false)}><section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">АККАУНТ NEXURA</div><h3>Изменить профиль</h3></div><button className="icon-button" onClick={()=>setProfileEdit(false)}><X size={18}/></button></div>
       <form className="profile-form" onSubmit={async event=>{event.preventDefault();setProfileEditBusy(true);try{const saved=await saveProfile(supabase,session.user.id,profileEditDraft);setProfile(previous=>({...previous,...saved}));setProfileEdit(false);setNotice('Профиль сохранён');}catch(error){setNotice('Не удалось сохранить профиль: '+error.message);}finally{setProfileEditBusy(false);}}}>

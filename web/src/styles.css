@@ -789,3 +789,15 @@ export async function loadPeopleDirectory(supabase, userId, query = '', offset =
   if (error) throw error;
   return data || [];
 }
+
+.settings-section-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:5px;border:1px solid var(--line);border-radius:12px;background:#100d19}
+.settings-section-tabs button{border:0;border-radius:9px;background:transparent;color:#a69bb7;padding:10px 5px;font-size:11px}.settings-section-tabs button.active{background:#302642;color:#e4d9ff}
+.advanced-settings-content{display:grid;gap:13px;max-height:55vh;overflow:auto;padding:4px 2px}
+.setting-toggle-row,.device-row,.blocked-user-row{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#211c2b}
+.setting-toggle-row>span,.device-row>div:nth-child(2),.blocked-user-row>div:nth-child(2){display:grid;gap:5px;min-width:0;flex:1}
+.setting-toggle-row b,.device-row b,.blocked-user-row b{font-size:12px}.setting-toggle-row small,.device-row small,.blocked-user-row small{font-size:10px;color:#9d93aa;line-height:1.5}
+.setting-toggle-row input{width:19px;height:19px;accent-color:#a78bfa}
+.settings-info-note{display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:12px;background:#272139;color:#b9aecb;font-size:10px;line-height:1.6}.settings-info-note svg{flex-shrink:0;color:#b69cff}
+.device-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:#34284d;color:#cbb9ff}
+.device-row>button,.blocked-user-row>button{border:1px solid #ffffff20;border-radius:9px;background:#ffffff08;color:#d4c9e5;padding:8px 10px;font-size:10px;white-space:nowrap}
+.device-row>button:disabled{opacity:.4}.settings-description{font-size:11px;line-height:1.6;color:#a89eb6;margin:0}
