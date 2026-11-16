@@ -1,7 +1,8 @@
-name: Android debug APK
+name: Nexura v0.2.0 — NEW test APK
+# Build verification for Android UX and account-identity updates.
 on:
   push:
-    branches: [ main, feature/voice-video-calls, livekit-cloud-android-studio, release/messenger-first, feature/telegram-style-cloud-chats ]
+    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins ]
     paths:
       - "app/**"
       - "crypto-core/**"
@@ -14,13 +15,15 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nexura-android-apk-${{ github.ref }}
+  group: nexura-release-v020-test-${{ github.run_id }}
   cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -45,17 +48,17 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build debug APK with native E2EE
+      - name: Build debug APK from release tag v0.2.0
         run: gradle --no-daemon assembleDebug
       - name: Verify native libraries are packaged
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
           unzip -l "$APK" | grep -E 'lib/(arm64-v8a|armeabi-v7a|x86_64)/libnexura_e2ee_jni.so'
-      - name: Upload APK
+      - name: Upload clearly marked test APK
         uses: actions/upload-artifact@v4
         with:
-          name: nexura-debug-apk
+          name: "🆕 NEXURA — НОВАЯ СБОРКА (v0.2.0)"
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

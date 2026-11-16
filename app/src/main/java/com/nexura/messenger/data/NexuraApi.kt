@@ -1,11 +1,10 @@
 package com.nexura.messenger.data
 
 import android.net.Uri
-import kotlinx.coroutines.CoroutineScope
+import android.content.Context
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -28,9 +27,21 @@ import kotlinx.coroutines.sync.withLock
 
 data class ChatItem(val id: String, val title: String, val kind: String, val updated: String?, val unreadCount: Int = 0, val avatar: String = "🙂", val peerUserId: String? = null, val chatMode: String = "cloud")
 data class MessageReaction(val emoji: String, val count: Int, val selectedByMe: Boolean)
+data class SocialMediaItem(
+    val id: String, val userId: String, val storagePath: String, val mediaType: String,
+    val caption: String, val createdAt: String, val expiresAt: String?, val mediaUrl: String
+)
+data class SocialPhotoComment(val id: String, val userId: String, val content: String, val createdAt: String)
+data class SocialReactionState(val count: Int, val likedByMe: Boolean)
+data class GroupMemberItem(val userId: String, val displayName: String, val username: String, val avatar: String, val role: String)
 data class UserProfile(val id: String, val displayName: String, val username: String, val avatar: String, val bio: String = "", val age: Int? = null)
-data class UserItem(val id: String, val displayName: String, val avatar: String)
+data class UserItem(val id: String, val displayName: String, val avatar: String, val username: String = "")
 data class PrivacySettings(val showOnlineStatus: Boolean = true, val readReceiptsEnabled: Boolean = true)
+data class NotificationPreferences(
+    val pushEnabled: Boolean = true,
+    val soundEnabled: Boolean = true,
+    val vibrationEnabled: Boolean = true
+)
 data class UserPresence(val isVisible: Boolean, val isOnline: Boolean, val lastSeenAt: String?)
 data class ContactMatch(val phone: String, val userId: String, val displayName: String, val avatar: String)
 data class MessageItem(
@@ -66,7 +77,7 @@ data class TurnIceServerConfig(
     val credential: String?
 )
 
-class NexuraApi(private val store: SessionStore) {
+class NexuraApi(private val store: SessionStore, private val appContext: Context = store.applicationContext) {
     companion object {
         const val BASE_URL = "https://lyhzawblxcvpgpjrkspc.supabase.co"
         const val PUBLIC_KEY = "sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY"
@@ -132,7 +143,13 @@ class NexuraApi(private val store: SessionStore) {
         var response = executeWithTransientRetry(initialRequest, safeToRetry)
         // Refresh an expired access token once, then retry the original request.
         // If another request already rotated the token, reuse its fresh access token.
-        if (response.code == 401 && auth) {
+        val responseError = if (response.code == 403 && auth) {
+            runCatching { response.peekBody(64L * 1024L).string() }.getOrDefault("")
+        } else ""
+        val expiredJwt = responseError.contains("\"code\"") &&
+            (responseError.contains("bad_jwt") || responseError.contains("token is expired") ||
+             responseError.contains("token has invalid claims"))
+        if ((response.code == 401 || (response.code == 403 && expiredJwt)) && auth) {
             response.close()
             refreshAfterUnauthorized(refreshTokenAtRequestStart)
             val freshToken = store.accessToken
@@ -211,9 +228,9 @@ class NexuraApi(private val store: SessionStore) {
         val redirect = java.net.URLEncoder.encode(AUTH_REDIRECT, "UTF-8")
         val result = JSONObject(call("/auth/v1/signup?redirect_to=$redirect", "POST",
             JSONObject().put("email", email).put("password", password)
-                .put("data", JSONObject().put("display_name", displayName)).toString(), auth = false))
+                .put("data", JSONObject().put("display_name", displayName.trim())).toString(), auth = false))
         if (result.has("access_token")) saveSession(result)
-        else throw IOException("Аккаунт создан. Подтвердите email по ссылке из письма, затем вернитесь в Nexura.")
+        else throw IOException("Аккаунт создан. Подтвердите email по ссылке из письма, затем вернитесь в Nexura и придумайте username.")
     }
     // EncryptedSharedPreferences performs encryption/decryption synchronously.
     // Never write session tokens on the Android main thread after a network response.
@@ -501,7 +518,10 @@ class NexuraApi(private val store: SessionStore) {
         beforeCreatedAt: String? = null,
         beforeMessageId: String? = null,
         afterMessageId: String? = null,
-        pageSize: Int = 30
+        pageSize: Int = 30,
+        targetMessageId: String? = null,
+        targetMessageIds: List<String>? = null,
+        ascending: Boolean = false
     ): List<MessageItem> {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         val afterTimestamp = afterCreatedAt?.let { java.net.URLEncoder.encode(it, "UTF-8") }
@@ -520,9 +540,14 @@ class NexuraApi(private val store: SessionStore) {
         }
         val limit = if (mediaOnly) 1000 else if (afterCreatedAt != null) 100 else pageSize.coerceIn(1, 100)
         val mediaFilter = if (mediaOnly) "&message_type=in.(media,image,file)" else ""
+        val targetFilter = when {
+            !targetMessageId.isNullOrBlank() -> "&id=eq.${normalizeUuid(targetMessageId)}"
+            !targetMessageIds.isNullOrEmpty() -> "&id=in.(${targetMessageIds.map { normalizeUuid(it) }.distinct().joinToString(",")})"
+            else -> ""
+        }
         val raw = JSONArray(call(
             "/rest/v1/messages?select=id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at" +
-                "&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.desc,id.desc&limit=$limit$afterFilter$beforeFilter$mediaFilter"
+                "&conversation_id=eq.$chatId&deleted_at=is.null&order=${if (ascending) "created_at.asc,id.asc" else "created_at.desc,id.desc"}&limit=$limit$afterFilter$beforeFilter$mediaFilter$targetFilter"
         ))
         // Decrypt the server-managed archive in one bounded request. Rows from
         // before cloud-history rollout keep their original Olm-only fallback.
@@ -1015,7 +1040,7 @@ class NexuraApi(private val store: SessionStore) {
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         runCatching { syncE2eeBackupIfEnabled(e2ee) }
-        if (inserted.length() == 1) notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId, messageId)
     }
 
     private suspend fun decryptGroupEnvelope(
@@ -1155,7 +1180,7 @@ class NexuraApi(private val store: SessionStore) {
             saved.getJSONObject(0).optString("cloud_content") != cloudContent) {
             throw IOException("Сервер не подтвердил сохранение облачного сообщения")
         }
-        if (inserted.length() == 1) notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId, messageId)
     }
 
     suspend fun sendEncryptedDirectMessage(
@@ -1324,7 +1349,7 @@ class NexuraApi(private val store: SessionStore) {
         }
         e2ee.markGroupOutboundDelivered(chatId, messageId, recipients)
         runCatching { syncE2eeBackupIfEnabled(e2ee) }
-        if (inserted.length() == 1) notifyChatPush(chatId)
+        if (inserted.length() == 1) notifyChatPush(chatId, messageId)
     }
 
 
@@ -1363,16 +1388,78 @@ class NexuraApi(private val store: SessionStore) {
         )
     }
 
-    // Push notifications must never contain message text, sender names, or media details.
-    private fun notifyChatPush(chatId: String) {
-        // Push is secondary to message persistence. Do not hold the sender UI
-        // while the Edge Function starts or waits on FCM delivery.
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                call("/functions/v1/send-chat-push", "POST",
-                    JSONObject().put("conversation_id", normalizeUuid(chatId)).toString())
-            } catch (_: Exception) { }
-        }
+    suspend fun notificationPreferences(): NotificationPreferences {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call(
+            "/rest/v1/notification_preferences?select=push_enabled,sound_enabled,vibration_enabled&user_id=eq.$uid&limit=1"
+        ))
+        if (rows.length() == 0) return saveNotificationPreferences(NotificationPreferences())
+        val row = rows.getJSONObject(0)
+        return NotificationPreferences(
+            pushEnabled = row.optBoolean("push_enabled", true),
+            soundEnabled = row.optBoolean("sound_enabled", true),
+            vibrationEnabled = row.optBoolean("vibration_enabled", true)
+        )
+    }
+
+    suspend fun saveNotificationPreferences(value: NotificationPreferences): NotificationPreferences {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val payload = JSONObject()
+            .put("user_id", uid)
+            .put("push_enabled", value.pushEnabled)
+            .put("sound_enabled", value.soundEnabled)
+            .put("vibration_enabled", value.vibrationEnabled)
+            .put("updated_at", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date()))
+        val rows = JSONArray(call(
+            "/rest/v1/notification_preferences?on_conflict=user_id",
+            "POST",
+            payload.toString(),
+            prefer = "resolution=merge-duplicates,return=representation"
+        ))
+        val row = if (rows.length() > 0) rows.getJSONObject(0) else payload
+        return NotificationPreferences(
+            pushEnabled = row.optBoolean("push_enabled", value.pushEnabled),
+            soundEnabled = row.optBoolean("sound_enabled", value.soundEnabled),
+            vibrationEnabled = row.optBoolean("vibration_enabled", value.vibrationEnabled)
+        )
+    }
+
+    suspend fun isConversationMuted(conversationId: String): Boolean {
+        val id = normalizeUuid(conversationId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val now = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=muted_until&conversation_id=eq.$id&user_id=eq.$uid&muted_until=gt.${Uri.encode(now)}&limit=1"
+        ))
+        return rows.length() > 0
+    }
+
+    suspend fun setConversationMutedUntil(conversationId: String, mutedUntil: String?) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val payload = JSONObject().put("muted_until", mutedUntil ?: JSONObject.NULL)
+        call(
+            "/rest/v1/conversation_members?conversation_id=eq.${normalizeUuid(conversationId)}&user_id=eq.$uid",
+            "PATCH",
+            payload.toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun dispatchChatPush(conversationId: String, messageId: String): JSONObject = JSONObject(call(
+        "/functions/v1/send-chat-push",
+        "POST",
+        JSONObject()
+            .put("conversation_id", normalizeUuid(conversationId))
+            .put("message_id", normalizeUuid(messageId))
+            .toString()
+    ))
+
+    // Persist delivery attempts in WorkManager so a process death or temporary network
+    // loss after message persistence does not silently discard the push request.
+    private fun notifyChatPush(chatId: String, messageId: String) {
+        com.nexura.messenger.push.PushDeliveryWorker.enqueue(appContext, chatId, messageId)
     }
 
     @Deprecated("Use sendEncryptedDirectMessage; plaintext transport is disabled in this branch.")
@@ -1490,6 +1577,29 @@ class NexuraApi(private val store: SessionStore) {
         call("/rest/v1/rpc/update_my_privacy_settings", "POST",
             JSONObject().put("p_show_online_status", showOnlineStatus)
                 .put("p_read_receipts_enabled", readReceiptsEnabled).toString())
+    }
+
+
+    suspend fun setTypingStatus(conversationId: String, typing: Boolean) {
+        val uid = store.userId ?: return
+        val chat = normalizeUuid(conversationId)
+        if (typing) {
+            call("/rest/v1/conversation_typing?on_conflict=conversation_id,user_id", "POST",
+                JSONObject().put("conversation_id", chat).put("user_id", normalizeUuid(uid))
+                    .put("updated_at", java.time.Instant.now().toString()).toString(),
+                prefer = "resolution=merge-duplicates,return=minimal")
+        } else {
+            call("/rest/v1/conversation_typing?conversation_id=eq.$chat&user_id=eq.$uid", "DELETE",
+                prefer = "return=minimal")
+        }
+    }
+
+    suspend fun isPeerTyping(conversationId: String): Boolean {
+        val uid = store.userId ?: return false
+        val chat = normalizeUuid(conversationId)
+        val cutoff = java.net.URLEncoder.encode(java.time.Instant.now().minusSeconds(9).toString(), "UTF-8")
+        val rows = JSONArray(call("/rest/v1/conversation_typing?select=user_id&conversation_id=eq.$chat&user_id=neq.$uid&updated_at=gt.$cutoff&limit=1"))
+        return rows.length() > 0
     }
 
     suspend fun updatePresenceHeartbeat() {
@@ -1676,6 +1786,14 @@ class NexuraApi(private val store: SessionStore) {
         return rows.getJSONObject(0).optString("member_role") in setOf("owner", "admin")
     }
 
+    suspend fun canPinMessages(chatId: String): Boolean {
+        val uid = store.userId ?: return false
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.${normalizeUuid(chatId)}&user_id=eq.${normalizeUuid(uid)}&limit=1"
+        ))
+        return rows.length() == 1
+    }
+
     suspend fun pinnedMessage(chatId: String): String? {
         val rows = JSONArray(call(
             "/rest/v1/conversation_pins?select=message_id&conversation_id=eq.${normalizeUuid(chatId)}&limit=1"
@@ -1695,20 +1813,29 @@ class NexuraApi(private val store: SessionStore) {
                 prefer = "resolution=merge-duplicates,return=minimal")
         }
     }
-    private suspend fun signedAttachmentUrl(path: String, bucket: String = "chat-attachments"): String {
+    private suspend fun signedAttachmentUrl(
+        path: String,
+        bucket: String = "chat-attachments",
+        expiresInSeconds: Int = 3600
+    ): String {
         val now = System.currentTimeMillis()
         val cacheKey = "$bucket/$path"
         signedUrlCache[cacheKey]?.let { cached ->
             if (cached.second > now) return cached.first
             signedUrlCache.remove(cacheKey, cached)
         }
-        val payload = JSONObject().put("expiresIn", 3600)
-        val result = JSONObject(call("/storage/v1/object/sign/$bucket/$path", "POST", payload.toString()))
+        val safeExpiry = expiresInSeconds.coerceIn(60, 7 * 24 * 60 * 60)
+        val result = JSONObject(call(
+            "/storage/v1/object/sign/$bucket/$path",
+            "POST",
+            JSONObject().put("expiresIn", safeExpiry).toString()
+        ))
         val signed = result.optString("signedURL").ifBlank { result.optString("signedUrl") }
         if (signed.isBlank()) throw IOException("Не удалось получить ссылку на медиафайл")
         val url = if (signed.startsWith("http")) signed else "$BASE_URL/storage/v1$signed"
         if (signedUrlCache.size > 500) signedUrlCache.clear()
-        signedUrlCache[cacheKey] = url to (now + 55 * 60 * 1000L)
+        val cacheLifetime = (safeExpiry - 300).coerceAtLeast(30) * 1000L
+        signedUrlCache[cacheKey] = url to (now + cacheLifetime)
         return url
     }
 
@@ -1718,7 +1845,8 @@ class NexuraApi(private val store: SessionStore) {
         encryptedMedia: EncryptedMediaFile,
         caption: String = "",
         replyToId: String? = null,
-        messageId: String = UUID.randomUUID().toString()
+        messageId: String = UUID.randomUUID().toString(),
+        sendMutex: Mutex? = null
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) throw IOException("Зашифрованный файл превышает лимит Storage")
@@ -1758,7 +1886,11 @@ class NexuraApi(private val store: SessionStore) {
         try {
             // If the POST committed but its read-back confirmation was interrupted,
             // keep the ciphertext object: deleting it could break a valid message.
-            sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media")
+            if (sendMutex != null) {
+                sendMutex.withLock { sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media") }
+            } else {
+                sendEncryptedDirectMessage(chat, e2ee, messageId, payload, replyToId, "media")
+            }
         } finally {
             encryptedMedia.file.delete()
         }
@@ -1770,7 +1902,8 @@ class NexuraApi(private val store: SessionStore) {
         encryptedMedia: EncryptedMediaFile,
         caption: String = "",
         replyToId: String? = null,
-        messageId: String = UUID.randomUUID().toString()
+        messageId: String = UUID.randomUUID().toString(),
+        sendMutex: Mutex? = null
     ) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
         if (encryptedMedia.cipherSize !in 1..(25L * 1024L * 1024L)) {
@@ -1810,7 +1943,11 @@ class NexuraApi(private val store: SessionStore) {
             .put("caption", caption.trim())
             .toString()
         try {
-            sendEncryptedGroupMessage(chat, e2ee, messageId, payload, "media", replyToId)
+            if (sendMutex != null) {
+                sendMutex.withLock { sendEncryptedGroupMessage(chat, e2ee, messageId, payload, "media", replyToId) }
+            } else {
+                sendEncryptedGroupMessage(chat, e2ee, messageId, payload, "media", replyToId)
+            }
         } finally {
             encryptedMedia.file.delete()
         }
@@ -1931,13 +2068,51 @@ class NexuraApi(private val store: SessionStore) {
             val metadata = authUser.optJSONObject("user_metadata") ?: JSONObject()
             val emailName = authUser.optString("email").substringBefore("@").takeIf { it.isNotBlank() } ?: "Пользователь"
             val display = metadata.optString("display_name").ifBlank { emailName }
+            val metadataUsername = metadata.optString("username").trim().removePrefix("@").lowercase(java.util.Locale.US)
+                .takeIf { it.matches(Regex("^[a-z][a-z0-9_]{2,23}$")) }
             call("/rest/v1/profiles", "POST",
                 JSONObject().put("id", uid).put("display_name", display).put("avatar_url", "🙂").toString(),
                 prefer = "return=minimal")
-            return UserProfile(uid, display, "", "🙂", "", null)
+            var savedUsername = ""
+            if (!metadataUsername.isNullOrBlank()) {
+                runCatching { updateMyUsername(metadataUsername) }
+                    .onSuccess { savedUsername = metadataUsername }
+            }
+            return UserProfile(uid, display, savedUsername, "🙂", "", null)
         }
         val p = raw.getJSONObject(0)
-        return UserProfile(p.optString("id"), p.optString("display_name"), p.optString("username"), p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
+        var username = p.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+        if (username.isBlank()) {
+            val authUser = runCatching { JSONObject(call("/auth/v1/user", auth = true)) }.getOrNull()
+            val metadataUsername = authUser?.optJSONObject("user_metadata")?.optString("username")
+                ?.trim()?.removePrefix("@")?.lowercase(java.util.Locale.US).orEmpty()
+            if (metadataUsername.isNotBlank()) {
+                runCatching { updateMyUsername(metadataUsername) }.onSuccess { username = metadataUsername }
+            }
+        }
+        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"))
+    }
+
+    private fun validateUsername(value: String) {
+        if (!value.matches(Regex("^[a-z][a-z0-9_]{2,23}$"))) {
+            throw IOException("Username: 3–24 символа, латинские буквы, цифры и _, начинаться должен с буквы.")
+        }
+    }
+
+    suspend fun updateMyUsername(value: String) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val username = value.trim().removePrefix("@").lowercase(java.util.Locale.US)
+        validateUsername(username)
+        try {
+            call("/rest/v1/profiles?id=eq.$uid", "PATCH",
+                JSONObject().put("username", username).toString(), prefer = "return=minimal")
+        } catch (e: Exception) {
+            val message = e.message.orEmpty().lowercase()
+            if (message.contains("23505") || message.contains("duplicate key") || message.contains("unique constraint")) {
+                throw IOException("Это имя пользователя уже занято. Выберите другое.")
+            }
+            throw e
+        }
     }
 
     suspend fun updateMyProfile(displayName: String, avatar: String, bio: String = "", age: Int? = null) {
@@ -1989,6 +2164,175 @@ class NexuraApi(private val store: SessionStore) {
         return "$BASE_URL/storage/v1/object/public/nexura-avatars/$path"
     }
 
+
+    private suspend fun uploadSocialObject(bytes: ByteArray, mimeType: String, folder: String): String {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (bytes.isEmpty() || bytes.size > 50 * 1024 * 1024) throw IOException("Файл должен быть не больше 50 МБ")
+        val ext = when (mimeType.substringAfter('/').lowercase()) {
+            "jpeg", "jpg" -> "jpg"; "png" -> "png"; "webp" -> "webp"; "heic" -> "heic"
+            "mp4" -> "mp4"; "webm" -> "webm"; "quicktime" -> "mov"
+            else -> throw IOException("Этот формат фото или видео не поддерживается")
+        }
+        val path = "$uid/$folder/${UUID.randomUUID()}.$ext"
+        val request = Request.Builder().url("$BASE_URL/storage/v1/object/nexura-social-media/$path")
+            .header("apikey", PUBLIC_KEY)
+            .header("Authorization", "Bearer ${store.accessToken ?: throw IOException("Сессия истекла")}")
+            .header("Content-Type", mimeType).header("x-upsert", "false")
+            .post(bytes.toRequestBody(mimeType.toMediaType())).build()
+        withContext(Dispatchers.IO) { client.newCall(request).execute() }.use {
+            if (!it.isSuccessful) throw IOException("Не удалось загрузить файл (HTTP ${it.code})")
+        }
+        return path
+    }
+
+    private suspend fun socialSignedUrl(path: String, story: Boolean = false): String =
+        signedAttachmentUrl(
+            path,
+            "nexura-social-media",
+            if (story) 24 * 60 * 60 else 7 * 24 * 60 * 60
+        )
+
+    suspend fun publishProfilePhoto(bytes: ByteArray, mimeType: String, caption: String = ""): SocialMediaItem {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val path = uploadSocialObject(bytes, mimeType, "photos")
+        try {
+            val row = JSONObject().put("user_id", uid).put("storage_path", path).put("caption", caption.trim().take(500))
+            val inserted = JSONArray(call("/rest/v1/profile_photos", "POST", row.toString(), prefer = "return=representation"))
+            val saved = inserted.optJSONObject(0) ?: throw IOException("Фото не сохранилось")
+            val url = socialSignedUrl(path)
+            return SocialMediaItem(saved.optString("id"), uid, path, "image", saved.optString("caption"),
+                saved.optString("created_at"), null, url)
+        } catch (e: Exception) {
+            runCatching { call("/storage/v1/object/nexura-social-media/$path", "DELETE", auth = true) }
+            throw e
+        }
+    }
+
+    suspend fun publishStory(bytes: ByteArray, mimeType: String, caption: String = ""): SocialMediaItem {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val mediaType = if (mimeType.startsWith("video/")) "video" else if (mimeType.startsWith("image/")) "image" else throw IOException("История должна быть фото или видео")
+        val path = uploadSocialObject(bytes, mimeType, "stories")
+        try {
+            val created = java.time.Instant.now()
+            val expires = created.plusSeconds(24 * 60 * 60)
+            val row = JSONObject().put("user_id", uid).put("storage_path", path).put("media_type", mediaType)
+                .put("caption", caption.trim().take(500)).put("created_at", created.toString()).put("expires_at", expires.toString())
+            val inserted = JSONArray(call("/rest/v1/user_stories", "POST", row.toString(), prefer = "return=representation"))
+            val saved = inserted.optJSONObject(0) ?: throw IOException("История не сохранилась")
+            return SocialMediaItem(saved.optString("id"), uid, path, mediaType, saved.optString("caption"),
+                saved.optString("created_at"), saved.optString("expires_at"), socialSignedUrl(path, story = true))
+        } catch (e: Exception) {
+            runCatching { call("/storage/v1/object/nexura-social-media/$path", "DELETE", auth = true) }
+            throw e
+        }
+    }
+
+    private suspend fun parseSocialRows(rows: JSONArray, stories: Boolean): List<SocialMediaItem> {
+        val result = mutableListOf<SocialMediaItem>()
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val path = row.optString("storage_path")
+            if (path.isBlank()) continue
+            result += SocialMediaItem(row.optString("id"), row.optString("user_id"), path,
+                if (stories) row.optString("media_type") else "image", row.optString("caption"),
+                row.optString("created_at"), row.optString("expires_at").takeIf { it.isNotBlank() && it != "null" },
+                socialSignedUrl(path, story = stories))
+        }
+        return result
+    }
+
+    suspend fun activeStories(): List<SocialMediaItem> {
+        val rows = JSONArray(call("/rest/v1/user_stories?select=id,user_id,storage_path,media_type,caption,created_at,expires_at&expires_at=gt.${java.net.URLEncoder.encode(java.time.Instant.now().toString(), "UTF-8")}&order=created_at.desc&limit=200"))
+        return parseSocialRows(rows, true)
+    }
+
+    suspend fun myStoryArchive(): List<SocialMediaItem> {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call("/rest/v1/user_stories?select=id,user_id,storage_path,media_type,caption,created_at,expires_at&user_id=eq.$uid&expires_at=lte.${java.net.URLEncoder.encode(java.time.Instant.now().toString(), "UTF-8")}&order=created_at.desc&limit=200"))
+        return parseSocialRows(rows, true)
+    }
+
+    suspend fun profilePhotos(userId: String): List<SocialMediaItem> {
+        val id = normalizeUuid(userId)
+        val rows = JSONArray(call("/rest/v1/profile_photos?select=id,user_id,storage_path,caption,created_at&user_id=eq.$id&order=created_at.desc&limit=100"))
+        return parseSocialRows(rows, false)
+    }
+
+    suspend fun deleteSocialMedia(item: SocialMediaItem, story: Boolean) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        if (item.userId != uid) throw IOException("Можно удалять только свои публикации")
+        val table = if (story) "user_stories" else "profile_photos"
+        call("/rest/v1/$table?id=eq.${normalizeUuid(item.id)}", "DELETE", prefer = "return=minimal")
+        call("/storage/v1/object/nexura-social-media/${item.storagePath}", "DELETE", prefer = "return=minimal")
+    }
+
+    suspend fun profilePhotoReaction(photoId: String): SocialReactionState {
+        val id = normalizeUuid(photoId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call("/rest/v1/profile_photo_likes?select=user_id&photo_id=eq.$id"))
+        var liked = false
+        for (i in 0 until rows.length()) if (rows.optJSONObject(i)?.optString("user_id") == uid) liked = true
+        return SocialReactionState(rows.length(), liked)
+    }
+
+    suspend fun toggleProfilePhotoLike(photoId: String): SocialReactionState {
+        val id = normalizeUuid(photoId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val existing = JSONArray(call("/rest/v1/profile_photo_likes?select=id&photo_id=eq.$id&user_id=eq.$uid&limit=1"))
+        if (existing.length() > 0) {
+            val likeId = existing.getJSONObject(0).optString("id")
+            call("/rest/v1/profile_photo_likes?id=eq.${normalizeUuid(likeId)}", "DELETE", prefer = "return=minimal")
+        } else {
+            call("/rest/v1/profile_photo_likes", "POST",
+                JSONObject().put("photo_id", id).put("user_id", uid).toString(), prefer = "return=minimal")
+        }
+        return profilePhotoReaction(id)
+    }
+
+    suspend fun profilePhotoComments(photoId: String): List<SocialPhotoComment> {
+        val id = normalizeUuid(photoId)
+        val rows = JSONArray(call("/rest/v1/profile_photo_comments?select=id,user_id,content,created_at&photo_id=eq.$id&order=created_at.asc&limit=200"))
+        return (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            SocialPhotoComment(row.optString("id"), row.optString("user_id"), row.optString("content"),
+                row.optString("created_at"))
+        }
+    }
+
+    suspend fun addProfilePhotoComment(photoId: String, content: String): SocialPhotoComment {
+        val id = normalizeUuid(photoId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val clean = content.trim()
+        if (clean.isBlank() || clean.length > 1000) throw IOException("Комментарий должен содержать от 1 до 1000 символов")
+        val row = JSONObject().put("photo_id", id).put("user_id", uid).put("content", clean)
+        val saved = JSONArray(call("/rest/v1/profile_photo_comments", "POST", row.toString(), prefer = "return=representation"))
+            .optJSONObject(0) ?: throw IOException("Комментарий не сохранился")
+        return SocialPhotoComment(saved.optString("id"), uid, clean, saved.optString("created_at"))
+    }
+
+    suspend fun storyReaction(storyId: String): SocialReactionState {
+        val id = normalizeUuid(storyId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val rows = JSONArray(call("/rest/v1/user_story_likes?select=user_id&story_id=eq.$id"))
+        var liked = false
+        for (i in 0 until rows.length()) if (rows.optJSONObject(i)?.optString("user_id") == uid) liked = true
+        return SocialReactionState(rows.length(), liked)
+    }
+
+    suspend fun toggleStoryLike(storyId: String): SocialReactionState {
+        val id = normalizeUuid(storyId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val existing = JSONArray(call("/rest/v1/user_story_likes?select=id&story_id=eq.$id&user_id=eq.$uid&limit=1"))
+        if (existing.length() > 0) {
+            val likeId = existing.getJSONObject(0).optString("id")
+            call("/rest/v1/user_story_likes?id=eq.${normalizeUuid(likeId)}", "DELETE", prefer = "return=minimal")
+        } else {
+            call("/rest/v1/user_story_likes", "POST",
+                JSONObject().put("story_id", id).put("user_id", uid).toString(), prefer = "return=minimal")
+        }
+        return storyReaction(id)
+    }
+
     suspend fun matchContacts(phoneNumbers: List<String>): List<ContactMatch> {
         if (phoneNumbers.isEmpty()) return emptyList()
         val numbers = JSONArray()
@@ -2005,25 +2349,31 @@ class NexuraApi(private val store: SessionStore) {
         }
     }
 
-    suspend fun findUsers(query: String): List<UserItem> {
-        val cleanQuery = query.trim()
-        if (cleanQuery.length < 2) return emptyList()
-        // Encode user input as a single PostgREST filter value. A space must be %20,
-        // not '+', because '+' is not consistently decoded as a space in raw filter expressions.
-        val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8").replace("+", "%20")
-        val raw = JSONArray(call("/rest/v1/profiles?select=id,display_name,username,avatar_url&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)&limit=20"))
+    suspend fun listUsers(query: String = "", offset: Int = 0, pageSize: Int = 50): List<UserItem> {
+        val cleanQuery = query.trim().removePrefix("@")
+        if (cleanQuery.length == 1) return emptyList()
+        val filter = if (cleanQuery.isBlank()) "" else {
+            val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8").replace("+", "%20")
+            "&or=(display_name.ilike.%25$encoded%25,username.ilike.%25$encoded%25)"
+        }
+        val limit = pageSize.coerceIn(1, 100)
+        val safeOffset = offset.coerceAtLeast(0)
+        val raw = JSONArray(call(
+            "/rest/v1/profiles?select=id,display_name,username,avatar_url&order=display_name.asc,id.asc&limit=$limit&offset=$safeOffset$filter"
+        ))
         val currentUserId = store.userId
         return (0 until raw.length()).mapNotNull { i ->
             val p = raw.optJSONObject(i) ?: return@mapNotNull null
             val id = p.optString("id").takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val username = p.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
             val name = p.optString("display_name").takeIf { it.isNotBlank() && it != "null" }
-                ?: p.optString("username").takeIf { it.isNotBlank() && it != "null" }
-                ?: "Пользователь"
+                ?: username.takeIf { it.isNotBlank() } ?: "Пользователь"
             val avatar = p.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂"
-            UserItem(id, name, avatar)
-        }.filter { it.id != currentUserId && it.id.isNotBlank() }
-            .distinctBy { it.id }
+            UserItem(id, name, avatar, username)
+        }.filter { it.id != currentUserId && it.id.isNotBlank() }.distinctBy { it.id }
     }
+
+    suspend fun findUsers(query: String): List<UserItem> = listUsers(query, 0, 20)
     private fun normalizeUuid(value: String): String {
         val raw = value.trim()
         val decoded = try {
@@ -2036,6 +2386,73 @@ class NexuraApi(private val store: SessionStore) {
             throw IOException("Сервер вернул некорректный ID чата.")
         }
         return uuid
+    }
+
+
+    suspend fun groupMembers(conversationId: String): List<GroupMemberItem> {
+        val rows = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id,member_role,joined_at,profiles(display_name,username,avatar_url)" +
+                "&conversation_id=eq.${normalizeUuid(conversationId)}&order=joined_at.asc"
+        ))
+        return (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            val profile = row.optJSONObject("profiles") ?: JSONObject()
+            val userId = row.optString("user_id")
+            if (userId.isBlank()) return@mapNotNull null
+            val username = profile.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            val name = profile.optString("display_name").takeIf { it.isNotBlank() && it != "null" }
+                ?: username.takeIf { it.isNotBlank() } ?: "Пользователь"
+            GroupMemberItem(
+                userId, name, username,
+                profile.optString("avatar_url").takeIf { it.isNotBlank() && it != "null" } ?: "🙂",
+                row.optString("member_role", "member")
+            )
+        }
+    }
+
+    suspend fun renameGroup(conversationId: String, title: String) {
+        val clean = title.trim()
+        if (clean.length !in 2..60) throw IOException("Название группы должно содержать от 2 до 60 символов")
+        call(
+            "/rest/v1/conversations?id=eq.${normalizeUuid(conversationId)}",
+            "PATCH",
+            JSONObject().put("title", clean).toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun addGroupMember(conversationId: String, userId: String) {
+        val conversation = normalizeUuid(conversationId)
+        val user = normalizeUuid(userId)
+        val existing = JSONArray(call(
+            "/rest/v1/conversation_members?select=user_id&conversation_id=eq.$conversation&user_id=eq.$user&limit=1"
+        ))
+        if (existing.length() > 0) return
+        call(
+            "/rest/v1/conversation_members",
+            "POST",
+            JSONObject().put("conversation_id", conversation).put("user_id", user)
+                .put("member_role", "member").toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun setGroupMemberRole(conversationId: String, userId: String, role: String) {
+        if (role !in setOf("admin", "member")) throw IOException("Недопустимая роль участника")
+        call(
+            "/rest/v1/conversation_members?conversation_id=eq.${normalizeUuid(conversationId)}&user_id=eq.${normalizeUuid(userId)}",
+            "PATCH",
+            JSONObject().put("member_role", role).toString(),
+            prefer = "return=minimal"
+        )
+    }
+
+    suspend fun removeGroupMember(conversationId: String, userId: String) {
+        call(
+            "/rest/v1/conversation_members?conversation_id=eq.${normalizeUuid(conversationId)}&user_id=eq.${normalizeUuid(userId)}",
+            "DELETE",
+            prefer = "return=minimal"
+        )
     }
 
     suspend fun createGroup(title: String, memberIds: List<String>): String {
@@ -2055,6 +2472,11 @@ class NexuraApi(private val store: SessionStore) {
         normalizedMembers.forEach { ids.put(it) }
         val payload = JSONObject().put("p_title", cleanTitle).put("p_member_ids", ids)
         return normalizeUuid(call("/rest/v1/rpc/create_group_conversation", "POST", payload.toString()))
+    }
+
+    suspend fun getOrCreateSavedConversation(): String {
+        val result = call("/rest/v1/rpc/get_or_create_saved_conversation", "POST", "{}")
+        return normalizeUuid(result.trim().trim('"'))
     }
 
     suspend fun createDirect(userId: String): String {

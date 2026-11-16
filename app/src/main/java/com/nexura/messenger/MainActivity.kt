@@ -6,6 +6,14 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import java.util.Calendar
+import java.util.concurrent.TimeUnit
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import android.provider.ContactsContract
 import android.telephony.PhoneNumberUtils
 import java.util.Locale
@@ -25,6 +33,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.app.NotificationManagerCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -82,7 +91,10 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
@@ -139,7 +151,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         incomingDeepLink = intent?.data
         val store = SessionStore(this)
-        val api = NexuraApi(store)
+        val api = NexuraApi(store, applicationContext)
         setContent { NexuraApp(api, store, incomingDeepLink) }
     }
 
@@ -177,6 +189,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
+    var registerUsername by remember { mutableStateOf("") }
+    var usernameDraft by remember { mutableStateOf("") }
+    var usernameSetupRequired by remember { mutableStateOf(false) }
+    var savingUsername by remember { mutableStateOf(false) }
     var register by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf("") }
     var phoneCode by remember { mutableStateOf("") }
@@ -209,9 +225,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chatSearchOpen by remember { mutableStateOf(false) }
     var chatSearchQuery by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
+    var contactsUsers by remember { mutableStateOf(emptyList<UserItem>()) }
+    var contactsSearch by remember { mutableStateOf("") }
+    var contactsLoading by remember { mutableStateOf(false) }
+    var contactsOffset by remember { mutableIntStateOf(0) }
+    var contactsHasMore by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var openingDirectUserId by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var lowDataMode by remember {
+        mutableStateOf(context.getSharedPreferences("nexura_network", Context.MODE_PRIVATE)
+            .getBoolean("low_data_mode", false))
+    }
     var homeTab by remember { mutableStateOf("chats") }
     var deviceContacts by remember { mutableStateOf(emptyList<DeviceContact>()) }
     var syncingContacts by remember { mutableStateOf(false) }
@@ -238,6 +263,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val conversationSyncMutex = remember { Mutex() }
     var sendingImage by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var peerTyping by remember { mutableStateOf(false) }
+    var pendingDownloadFile by remember { mutableStateOf<File?>(null) }
     var mediaViewerUri by remember { mutableStateOf<Uri?>(null) }
     var mediaViewerType by remember { mutableStateOf("image") }
     var chatGallery by remember { mutableStateOf<List<MessageItem>?>(null) }
@@ -255,6 +282,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceFile by remember { mutableStateOf<File?>(null) }
     var profileName by remember { mutableStateOf("") }
+    var profileUsername by remember { mutableStateOf("") }
     var profileAvatar by remember { mutableStateOf("🙂") }
     var profileBio by remember { mutableStateOf("") }
     var profileAge by remember { mutableStateOf("") }
@@ -262,6 +290,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var savingProfile by remember { mutableStateOf(false) }
     var showOnlineStatus by remember { mutableStateOf(true) }
     var readReceiptsEnabled by remember { mutableStateOf(true) }
+    var notificationPrefs by remember { mutableStateOf(NotificationPreferences()) }
+    var savingNotificationPrefs by remember { mutableStateOf(false) }
+    var currentChatMuted by remember { mutableStateOf(false) }
+    var showMuteChatDialog by remember { mutableStateOf(false) }
+    var savingChatMute by remember { mutableStateOf(false) }
     var blockedUsers by remember { mutableStateOf(emptyList<UserItem>()) }
     var ownE2eeDevices by remember { mutableStateOf(emptyList<E2eeRemoteDevice>()) }
     var deviceToRevoke by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
@@ -269,8 +302,47 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chatPresence by remember { mutableStateOf<UserPresence?>(null) }
     var confirmBlockProfile by remember { mutableStateOf<UserProfile?>(null) }
     var savingPrivacy by remember { mutableStateOf(false) }
+    val changeCurrentChatMute: (Long?) -> Unit = { durationMs ->
+        val chatId = selected?.id
+        if (chatId != null) {
+            val mutedUntil = when (durationMs) {
+                null -> null
+                Long.MAX_VALUE -> "9999-12-31T23:59:59.999Z"
+                else -> java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+                    .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                    .format(java.util.Date(System.currentTimeMillis() + durationMs))
+            }
+            savingChatMute = true
+            scope.launch {
+                try {
+                    api.setConversationMutedUntil(chatId, mutedUntil)
+                    currentChatMuted = durationMs != null
+                    showMuteChatDialog = false
+                    notice = if (durationMs == null) "Уведомления этого чата включены." else "Уведомления этого чата отключены."
+                } catch (e: Exception) {
+                    error = e.message ?: "Не удалось изменить уведомления чата"
+                } finally { savingChatMute = false }
+            }
+        }
+    }
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var socialArchiveOpen by remember { mutableStateOf(false) }
+    var socialBusy by remember { mutableStateOf(false) }
+    var socialCaption by remember { mutableStateOf("") }
+    var selectedSocialPhoto by remember { mutableStateOf<SocialMediaItem?>(null) }
+    var selectedSocialStory by remember { mutableStateOf<SocialMediaItem?>(null) }
+    var socialPhotoLikes by remember { mutableStateOf(SocialReactionState(0, false)) }
+    var socialStoryLikes by remember { mutableStateOf(SocialReactionState(0, false)) }
+    var socialPhotoComments by remember { mutableStateOf(emptyList<SocialPhotoComment>()) }
+    var socialCommentDraft by remember { mutableStateOf("") }
+    var socialReplyDraft by remember { mutableStateOf("") }
+    var socialInteractionBusy by remember { mutableStateOf(false) }
+
     var loadingProfile by remember { mutableStateOf(false) }
     var createGroupOpen by remember { mutableStateOf(false) }
     var groupTitle by remember { mutableStateOf("") }
@@ -278,6 +350,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var groupUsers by remember { mutableStateOf(emptyList<UserItem>()) }
     var selectedGroupUsers by remember { mutableStateOf(emptySet<String>()) }
     var creatingGroup by remember { mutableStateOf(false) }
+    var groupManagementOpen by remember { mutableStateOf(false) }
+    var groupManagementBusy by remember { mutableStateOf(false) }
+    var groupManagerCanEdit by remember { mutableStateOf(false) }
+    var groupMembers by remember { mutableStateOf(emptyList<GroupMemberItem>()) }
+    var groupNameDraft by remember { mutableStateOf("") }
+    var groupSearchDraft by remember { mutableStateOf("") }
+    var groupSearchResults by remember { mutableStateOf(emptyList<UserItem>()) }
+    var memberToRemove by remember { mutableStateOf<GroupMemberItem?>(null) }
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editingTarget by remember { mutableStateOf<MessageItem?>(null) }
     var forwardingTarget by remember { mutableStateOf<MessageItem?>(null) }
@@ -295,6 +375,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var trustCandidate by remember { mutableStateOf<E2eeRemoteDevice?>(null) }
     var trustPeerId by remember { mutableStateOf<String?>(null) }
     var groupTrustQueue by remember { mutableStateOf(emptyList<Pair<String, E2eeRemoteDevice>>()) }
+    LaunchedEffect(viewedProfile?.id) {
+        val profileId = viewedProfile?.id ?: run { viewedProfilePhotos = emptyList(); return@LaunchedEffect }
+        try { viewedProfilePhotos = api.profilePhotos(profileId) }
+        catch (_: Exception) { viewedProfilePhotos = emptyList() }
+    }
+
     LaunchedEffect(selected?.id, messages) {
         val chatId = selected?.id ?: return@LaunchedEffect
         messages.lastOrNull()?.let { latest ->
@@ -311,6 +397,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         runCatching { api.syncE2eeBackupIfEnabled(client) }
     }
 
+    LaunchedEffect(signedIn, selected?.id) {
+        val chatId = selected?.id
+        if (chatId == null) {
+            currentChatMuted = false
+        } else if (signedIn) {
+            while (true) {
+                currentChatMuted = runCatching { api.isConversationMuted(chatId) }.getOrDefault(false)
+                delay(60_000L)
+            }
+        }
+    }
+
     LaunchedEffect(selected?.id, store.userId) {
         context.getSharedPreferences("nexura_runtime", android.content.Context.MODE_PRIVATE)
             .edit().putString("active_chat_id", selected?.id).apply()
@@ -325,6 +423,43 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             chatWallpaperId = "midnight"
             chatWallpaperImage = null
             chatBubbleColor = Color(0xFF6945C7)
+        }
+    }
+
+    LaunchedEffect(signedIn, selected?.id) {
+        val chatId = selected?.id
+        if (signedIn && chatId != null) {
+            while (true) {
+                delay(if (lowDataMode) 60_000L else 15_000L)
+                runCatching {
+                    val latestReactions = api.messageReactions(chatId)
+                    val latestPin = api.pinnedMessage(chatId)
+                    if (selected?.id == chatId) {
+                        messageReactions = latestReactions
+                        pinnedMessageId = latestPin
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(signedIn, selected?.id) {
+        peerTyping = false
+        val chatId = selected?.id
+        if (signedIn && chatId != null) {
+            while (true) {
+                peerTyping = runCatching { api.isPeerTyping(chatId) }.getOrDefault(false)
+                delay(if (lowDataMode) 8_000L else 2_500L)
+            }
+        }
+    }
+    LaunchedEffect(signedIn, selected?.id, draft) {
+        val chatId = selected?.id ?: return@LaunchedEffect
+        if (!signedIn) return@LaunchedEffect
+        if (draft.isBlank()) runCatching { api.setTypingStatus(chatId, false) }
+        else {
+            delay(650L)
+            runCatching { api.setTypingStatus(chatId, true) }
         }
     }
 
@@ -467,10 +602,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 encrypted = withContext(Dispatchers.IO) {
                     E2eeMediaCrypto.encryptUri(context.contentResolver, uri, context.cacheDir)
                 }
+                // Upload media independently; serialize only the final E2EE envelope
+                // with text sends so simultaneous Olm ratchet operations cannot race.
                 if (chat.kind == "direct") {
-                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
+                    api.sendEncryptedMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId, messageSendMutex)
                 } else {
-                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId)
+                    api.sendEncryptedGroupMediaMessage(chat.id, client, encrypted!!, caption, replyToId, messageId, messageSendMutex)
                 }
                 uploaded = true
                 messageDelivery[messageId] = "sent"
@@ -523,6 +660,52 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         sendPickedMedia(uri)
     }
+    val downloadMediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { destination ->
+        val source = pendingDownloadFile
+        pendingDownloadFile = null
+        if (destination != null && source != null && source.exists()) {
+            scope.launch(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(destination)?.use { output ->
+                        source.inputStream().use { input -> input.copyTo(output) }
+                    } ?: throw IOException("Не удалось открыть файл для сохранения")
+                }.onSuccess {
+                    withContext(Dispatchers.Main) { notice = "Файл сохранён в выбранную папку" }
+                }.onFailure {
+                    withContext(Dispatchers.Main) { error = it.message ?: "Не удалось сохранить файл" }
+                }
+            }
+        }
+    }
+
+    val storyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            socialBusy = true
+            try {
+                val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать файл") }
+                val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                api.publishStory(bytes, mime, socialCaption)
+                socialCaption = ""
+                socialStories = api.activeStories()
+                notice = "История опубликована на 24 часа"
+            } catch (e: Exception) { error = e.message ?: "Не удалось опубликовать историю" }
+            finally { socialBusy = false }
+        }
+    }
+    val profilePhotoPublisher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            socialBusy = true
+            try {
+                val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
+                val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                api.publishProfilePhoto(bytes, mime, socialCaption)
+                socialCaption = ""
+                socialPhotos = api.profilePhotos(store.userId.orEmpty())
+                notice = "Фотография добавлена в профиль"
+            } catch (e: Exception) { error = e.message ?: "Не удалось добавить фотографию" }
+            finally { socialBusy = false }
+        }
+    }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         profilePhotoUri = uri
     }
@@ -547,18 +730,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 else -> true
             }
         }
-        .sortedWith(compareByDescending<ChatItem> { favoriteChatIds.contains(it.id) }.thenByDescending { it.updated.orEmpty() })
+        .sortedWith(compareByDescending<ChatItem> { it.title == "⭐ Избранное" }.thenByDescending { favoriteChatIds.contains(it.id) }.thenByDescending { it.updated.orEmpty() })
 
     fun loadChats() {
         scope.launch {
             busy = true
             try {
                 val latestChats = api.chats()
-                chats = latestChats
+                val savedChatId = api.getOrCreateSavedConversation()
+                val withSavedChat = if (latestChats.any { it.id == savedChatId }) latestChats else {
+                    latestChats + ChatItem(savedChatId, "⭐ Избранное", "group", null, avatar = "⭐", chatMode = "cloud")
+                }
+                chats = withSavedChat
                 // ChatItem intentionally contains no server-side plaintext preview: message bodies are E2EE.
                 // Seed each row from this account's encrypted-at-rest local message cache.
                 val cachedPreviews = withContext(Dispatchers.IO) {
-                    latestChats.mapNotNull { chat ->
+                    withSavedChat.mapNotNull { chat ->
                         localCache.readMessages(store.userId.orEmpty(), chat.id)
                             .maxWithOrNull(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
                             ?.let { chat.id to chatMessagePreview(it, store.userId.orEmpty()) }
@@ -566,7 +753,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 chatPreviews.clear()
                 cachedPreviews.forEach { (chatId, preview) -> chatPreviews[chatId] = preview }
-                withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
+                withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), withSavedChat) }
                 error = ""
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось загрузить чаты"
@@ -598,6 +785,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     withContext(Dispatchers.IO) {
                         secureClient!!.savePendingOutgoing(chat.id, messageId, text, replyToId, createdAt)
                     }
+                } else if (lowDataMode) {
+                    withContext(Dispatchers.IO) {
+                        store.savePendingCloudMessage(messageId, chat.id, text, replyToId)
+                    }
                 }
                 var delivered = false
                 var lastFailure: Exception? = null
@@ -628,6 +819,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 if (delivered) {
                     messageDelivery[messageId] = "sent"
                     failedMessageRetries.remove(messageId)
+                    if (chat.chatMode == "cloud") {
+                        withContext(Dispatchers.IO) { store.removePendingCloudMessage(messageId) }
+                    }
                     // Only secret chats advance Olm ratchets and need E2EE backup sync.
                     if (chat.chatMode == "secret") {
                         runCatching { api.syncE2eeBackupIfEnabled(secureClient!!) }
@@ -651,7 +845,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
 
-    fun openChat(chat: ChatItem) {
+    fun openChat(chat: ChatItem, jumpToMessageId: String? = null) {
         selected?.let { previous -> chatDrafts[previous.id] = draft }
         selected = chat
         peerReadReceiptAt = null
@@ -664,6 +858,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         messageReactions = emptyMap()
         pinnedMessageId = null
         canManagePins = false
+        scrollToMessageId = null
         replyTarget = null
         chatSearchOpen = false
         chatSearchQuery = ""
@@ -704,6 +899,14 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val loadedMessages = withContext(Dispatchers.IO) {
                     api.messages(activeChat.id, e2eeClient, pageSize = 20)
                 }
+                val jumpMessages = if (!jumpToMessageId.isNullOrBlank()) withContext(Dispatchers.IO) {
+                    val target = api.messages(activeChat.id, e2eeClient, targetMessageId = jumpToMessageId).firstOrNull()
+                    if (target == null) emptyList() else {
+                        val before = api.messages(activeChat.id, e2eeClient, beforeCreatedAt = target.createdAt, pageSize = 30)
+                        val after = api.messages(activeChat.id, e2eeClient, afterCreatedAt = target.createdAt, pageSize = 30)
+                        (before + after + target).distinctBy { it.id }
+                    }
+                } else emptyList()
                 val pendingForChat = withContext(Dispatchers.IO) {
                     e2eeClient?.pendingOutgoingMessages().orEmpty().filter { it.conversationId == activeChat.id }
                 }
@@ -716,8 +919,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     )
                 }
                 // Prefer freshly decrypted server rows, while retaining older cached pages.
-                messages = (loadedMessages + cachedMessages + pendingItems).distinctBy { it.id }
+                messages = (loadedMessages + cachedMessages + pendingItems + jumpMessages).distinctBy { it.id }
                     .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                if (jumpMessages.isNotEmpty()) scrollToMessageId = jumpToMessageId
                 withContext(Dispatchers.IO) {
                     localCache.saveMessages(store.userId.orEmpty(), chat.id, messages)
                 }
@@ -735,7 +939,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 val metadata = kotlinx.coroutines.coroutineScope {
                     val reactionsJob = async { runCatching { api.messageReactions(chat.id) }.getOrDefault(emptyMap()) }
                     val pinnedJob = async { runCatching { api.pinnedMessage(chat.id) }.getOrNull() }
-                    val manageJob = async { runCatching { api.canManageConversation(chat.id) }.getOrDefault(false) }
+                    val manageJob = async { runCatching { api.canPinMessages(chat.id) }.getOrDefault(false) }
                     val receiptJob = async {
                         runCatching { api.peerReadReceiptAt(chat.id, chat.peerUserId) }.getOrNull()
                     }
@@ -765,6 +969,40 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
 
+    fun scheduleDraft(chat: ChatItem) {
+        val text = draft.trim()
+        if (text.isBlank()) { notice = "Сначала напишите текст сообщения"; return }
+        val now = Calendar.getInstance()
+        DatePickerDialog(context, { _, year, month, day ->
+            val chosen = Calendar.getInstance().apply {
+                set(Calendar.YEAR, year); set(Calendar.MONTH, month); set(Calendar.DAY_OF_MONTH, day)
+                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }
+            TimePickerDialog(context, { _, hour, minute ->
+                chosen.set(Calendar.HOUR_OF_DAY, hour); chosen.set(Calendar.MINUTE, minute)
+                if (chosen.timeInMillis <= System.currentTimeMillis() + 10_000L) {
+                    error = "Выберите время хотя бы на 10 секунд позже"
+                } else {
+                    val scheduled = SessionStore.ScheduledText(
+                        UUID.randomUUID().toString(), chat.id, text, replyTarget?.id, chosen.timeInMillis
+                    )
+                    store.saveScheduledText(scheduled)
+                    val request = OneTimeWorkRequestBuilder<ScheduledMessageWorker>()
+                        .setInputData(workDataOf(ScheduledMessageWorker.KEY_SCHEDULED_ID to scheduled.id))
+                        .setInitialDelay((scheduled.sendAtMillis - System.currentTimeMillis()).coerceAtLeast(0L), TimeUnit.MILLISECONDS)
+                        .build()
+                    WorkManager.getInstance(context).enqueueUniqueWork(
+                        "nexura-scheduled-${scheduled.id}", ExistingWorkPolicy.KEEP, request
+                    )
+                    draft = ""; chatDrafts[chat.id] = ""; replyTarget = null
+                    notice = "Сообщение запланировано на " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(chosen.time)
+                }
+            }, now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), android.text.format.DateFormat.is24HourFormat(context)).show()
+        }, now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH)).apply {
+            datePicker.minDate = System.currentTimeMillis()
+        }.show()
+    }
+
     fun sendSecureMessage(chat: ChatItem, text: String, replyToId: String?) {
         if (text.isBlank()) return
         if (chat.chatMode != "cloud" && chat.chatMode != "secret") {
@@ -793,6 +1031,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             error = ""
             try {
                 api.consumeAuthCallback(authCallback)
+                usernameSetupRequired = false
                 signedIn = !store.accessToken.isNullOrBlank()
                 notice = "Добро пожаловать в Nexura!"
             } catch (e: Exception) {
@@ -815,12 +1054,44 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    LaunchedEffect(signedIn, usernameSetupRequired, homeTab, contactsSearch) {
+        if (signedIn && homeTab == "contacts" && !usernameSetupRequired) {
+            delay(250L)
+            contactsLoading = true
+            try {
+                val page = api.listUsers(contactsSearch, 0, 50)
+                contactsUsers = page
+                contactsOffset = page.size
+                contactsHasMore = page.size == 50
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось загрузить пользователей"
+            } finally { contactsLoading = false }
+        }
+    }
+
+    // Private social media URLs are time-limited. Re-sign them whenever the
+    // social screen is opened or the user switches between active stories/archive.
+    LaunchedEffect(signedIn, homeTab, socialArchiveOpen) {
+        if (signedIn && homeTab == "social") {
+            socialBusy = true
+            try {
+                if (socialArchiveOpen) socialArchive = api.myStoryArchive()
+                else socialStories = api.activeStories()
+                socialPhotos = api.profilePhotos(store.userId.orEmpty())
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось обновить фотографии и истории"
+            } finally {
+                socialBusy = false
+            }
+        }
+    }
+
     LaunchedEffect(signedIn) {
         if (signedIn) {
             launch {
                 while (true) {
                     if (context.getSharedPreferences("nexura_runtime", Context.MODE_PRIVATE).getBoolean("activity_visible", false)) runCatching { api.updatePresenceHeartbeat() }
-                    delay(60_000L)
+                    delay(if (lowDataMode) 180_000L else 60_000L)
                 }
             }
             try {
@@ -851,10 +1122,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 } else null
                 if (localE2eeClient != null) e2eeClient = localE2eeClient
 
-                api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                val ownProfile = api.myProfile() // Create a profile row for accounts that have not opened settings yet.
+                profileName = ownProfile.displayName
+                profileUsername = ownProfile.username
+                usernameDraft = ownProfile.username
+                usernameSetupRequired = ownProfile.username.isBlank()
                 val initialPrivacy = api.privacySettings()
                 showOnlineStatus = initialPrivacy.showOnlineStatus
                 readReceiptsEnabled = initialPrivacy.readReceiptsEnabled
+                notificationPrefs = try { api.notificationPreferences() } catch (_: Exception) { NotificationPreferences() }
+                context.getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE).edit()
+                    .putBoolean("sound_enabled", notificationPrefs.soundEnabled)
+                    .putBoolean("vibration_enabled", notificationPrefs.vibrationEnabled)
+                    .apply()
                 val latestChats = api.chats()
                 chats = latestChats
                 withContext(Dispatchers.IO) { localCache.saveChats(store.userId.orEmpty(), latestChats) }
@@ -939,7 +1219,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         e2eeStatus = "Защита обновлена · $available ключей"
                         retryDelay = 120_000L
-                        delay(120_000L)
+                        delay(if (lowDataMode) 600_000L else 120_000L)
                     } catch (e: Exception) {
                         // Keep the failure visible so users know why key replenishment failed.
                         e2eeStatus = "Не удалось обновить ключи: ${e.message ?: "ошибка сети или сервера"}"
@@ -1054,6 +1334,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    // Retry cloud-mode text messages from the encrypted local queue after connectivity returns.
+    // The same UUID is reused, so a timeout after server acceptance cannot create duplicates.
+    LaunchedEffect(signedIn, chats, lowDataMode) {
+        if (signedIn) {
+            while (true) {
+                delay(if (lowDataMode) 30_000L else 12_000L)
+                val queued = withContext(Dispatchers.IO) { store.pendingCloudMessages() }
+                queued.forEach { item ->
+                    val target = chats.firstOrNull { it.id == item.chatId && it.chatMode == "cloud" }
+                    if (target != null && messageDelivery[item.id] != "sending" && messageDelivery[item.id] != "sent") {
+                        dispatchSecureMessage(target, item.id, item.text, item.replyToId)
+                    }
+                }
+            }
+        }
+    }
+
     // Keep messages and the chat list responsive; optimize the work, not refresh frequency.
     LaunchedEffect(signedIn, selected?.id) {
         if (signedIn) {
@@ -1061,7 +1358,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             var lastReceiptRefresh = 0L
             while (true) {
                 val currentChat = selected
-                delay(if (currentChat != null && realtimeConnected) 20_000L else if (currentChat != null) retryDelay else maxOf(20_000L, retryDelay))
+                delay(if (lowDataMode) {
+                    if (currentChat != null) 60_000L else 180_000L
+                } else if (currentChat != null && realtimeConnected) 20_000L else if (currentChat != null) retryDelay else maxOf(20_000L, retryDelay))
                 try {
                     if (currentChat != null) {
                         val lastTimestamp = lastSyncedMessageTimestamp
@@ -1086,7 +1385,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
                         }
-                    } else if (System.currentTimeMillis() - lastReceiptRefresh >= 60_000L) {
+                    } else if (System.currentTimeMillis() - lastReceiptRefresh >= if (lowDataMode) 180_000L else 60_000L) {
                         val latestChats = api.chats()
                         chats = latestChats
                         withContext(Dispatchers.IO) {
@@ -1144,13 +1443,26 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
                         ) { Text("Продолжить с Google", fontWeight = FontWeight.SemiBold) }
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
+                                val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=custom%3Atelegram&redirect_to=$redirect"
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            },
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
+                        ) { Text("Продолжить с Telegram", fontWeight = FontWeight.SemiBold) }
                         Text("или войдите по электронной почте", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 22.dp, bottom = 8.dp))
                         if (phoneMode) {
                             AuthField(phone, { phone = it; smsSent = false }, "Номер телефона", "+49 123 456789", keyboard = ImeAction.Next)
                             if (smsSent) AuthField(phoneCode, { phoneCode = it.filter(Char::isDigit).take(8) }, "Код из SMS", "Введите код")
                             Text("Используйте международный формат номера", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                         } else {
-                            if (register) AuthField(displayName, { displayName = it }, "Ваше имя", "Как к вам обращаться")
+                            if (register) {
+                                AuthField(displayName, { displayName = it }, "Ваше имя", "Как к вам обращаться")
+                            }
                             AuthField(email, { email = it }, "Email", "name@example.com", keyboard = ImeAction.Next)
                             OutlinedTextField(
                                 value = password, onValueChange = { password = it },
@@ -1176,11 +1488,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 notice = "Код отправлен на $phone"
                                             } else {
                                                 api.verifyPhoneCode(phone, phoneCode)
+                                                usernameSetupRequired = false
                                                 signedIn = true
                                             }
                                         } else {
-                                            if (register) api.signUp(email.trim(), password, displayName.trim())
-                                            else api.signIn(email.trim(), password)
+                                            if (register) {
+                                                api.signUp(email.trim(), password, displayName.trim())
+                                                // Create the profile row before allowing username submission.
+                                                val newProfile = api.myProfile()
+                                                profileName = newProfile.displayName
+                                                profileUsername = newProfile.username
+                                                usernameDraft = newProfile.username
+                                                usernameSetupRequired = newProfile.username.isBlank()
+                                            } else {
+                                                api.signIn(email.trim(), password)
+                                                usernameSetupRequired = false
+                                            }
                                             // Successful auth methods have already validated and persisted
                                             // the session on Dispatchers.IO; do not decrypt preferences on UI.
                                             signedIn = true
@@ -1225,6 +1548,50 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Text("Защищённое пространство для ваших разговоров", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 18.dp))
                     }
                 }
+                signedIn && usernameSetupRequired -> {
+                    Column(
+                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF17102A), Bg)))
+                            .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 36.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(Modifier.size(72.dp).clip(RoundedCornerShape(24.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+                            Text("@", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text("Создайте username", color = MainText, fontSize = 27.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 22.dp))
+                        Text("Это уникальное имя будет видно другим пользователям и поможет находить вас в Nexura. Продолжить без него нельзя.", color = SecondaryText, fontSize = 14.sp, modifier = Modifier.padding(top = 9.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        OutlinedTextField(
+                            value = usernameDraft,
+                            onValueChange = { usernameDraft = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) },
+                            modifier = Modifier.fillMaxWidth().padding(top = 22.dp),
+                            singleLine = true,
+                            leadingIcon = { Text("@", color = Accent, fontWeight = FontWeight.Bold) },
+                            placeholder = { Text("username") },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = authFieldColors()
+                        )
+                        Text("3–24 символа · латиница, цифры и _ · первая буква — латинская", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
+                        if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    savingUsername = true; error = ""
+                                    try {
+                                        api.updateMyUsername(usernameDraft)
+                                        profileUsername = usernameDraft.trim().removePrefix("@").lowercase(java.util.Locale.US)
+                                        usernameDraft = profileUsername
+                                        usernameSetupRequired = false
+                                        notice = "Username @${profileUsername} сохранён."
+                                    } catch (e: Exception) { error = e.message ?: "Не удалось сохранить username" }
+                                    finally { savingUsername = false }
+                                }
+                            },
+                            enabled = !savingUsername && usernameDraft.matches(Regex("^[a-z][a-z0-9_]{2,23}$")),
+                            modifier = Modifier.fillMaxWidth().padding(top = 20.dp).height(52.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) { Text(if (savingUsername) "Проверяем и сохраняем…" else "Продолжить") }
+                    }
+                }
                 selected == null && settingsOpen -> {
                     Column(Modifier.fillMaxSize()) {
                         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
@@ -1249,6 +1616,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("Имя в Nexura", color = SecondaryText, fontSize = 12.sp)
                                 OutlinedTextField(value = profileName, onValueChange = { profileName = it.take(40) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, placeholder = { Text("Ваше имя") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                Text("Уникальный username", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                                OutlinedTextField(value = profileUsername, onValueChange = { profileUsername = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, leadingIcon = { Text("@", color = Accent) }, placeholder = { Text("username") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                Text("Username обязателен: 3–24 символа, латиница, цифры и _. Его можно менять, но нельзя удалить.", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
                                 Text("Аватар", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp, bottom = 7.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙").forEach { emoji ->
@@ -1263,6 +1633,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Button(onClick = { scope.launch {
                                     savingProfile = true; error = ""; notice = ""
                                     try {
+                                        if (!profileUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$"))) {
+                                            throw IOException("Username обязателен: 3–24 символа, латинские буквы, цифры и _.")
+                                        }
                                         if (profilePhotoUri != null) {
                                             val uri = profilePhotoUri!!
                                             val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
@@ -1273,13 +1646,149 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         val age = profileAge.toIntOrNull()
                                         if (profileAge.isNotBlank() && age == null) throw IOException("Проверьте возраст")
                                         api.updateMyProfile(profileName, profileAvatar, profileBio, age)
+                                        if (profileUsername != usernameDraft) {
+                                            api.updateMyUsername(profileUsername)
+                                            usernameDraft = profileUsername
+                                        }
                                         notice = "Профиль сохранён."
                                     } catch (e: Exception) { error = e.message ?: "Не удалось сохранить профиль" }
                                     finally { savingProfile = false }
-                                } }, enabled = !savingProfile && profileName.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
+                                } }, enabled = !savingProfile && profileName.isNotBlank() && profileUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$")), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
+                            }
+                        }
+                        Text("УВЕДОМЛЕНИЯ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Push-уведомления", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text("Сообщения приходят, даже когда Nexura закрыта.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(
+                                        checked = notificationPrefs.pushEnabled,
+                                        enabled = !savingNotificationPrefs,
+                                        onCheckedChange = { enabled ->
+                                            val previous = notificationPrefs
+                                            notificationPrefs = previous.copy(pushEnabled = enabled)
+                                            savingNotificationPrefs = true
+                                            scope.launch {
+                                                try {
+                                                    notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                                                    notice = if (enabled) "Push-уведомления включены." else "Push-уведомления выключены."
+                                                } catch (e: Exception) {
+                                                    notificationPrefs = previous
+                                                    error = e.message ?: "Не удалось сохранить уведомления"
+                                                } finally { savingNotificationPrefs = false }
+                                            }
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val systemNotificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            if (systemNotificationsEnabled) "Уведомления Android разрешены" else "Уведомления заблокированы Android",
+                                            color = if (systemNotificationsEnabled) Success else Danger,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text("Проверьте разрешение системы и настройки канала.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    TextButton(onClick = {
+                                        val settingsIntent = if (Build.VERSION.SDK_INT >= 26) {
+                                            Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                        } else {
+                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                                .setData(Uri.parse("package:${context.packageName}"))
+                                        }
+                                        context.startActivity(settingsIntent)
+                                    }) { Text("Открыть") }
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Звук", color = MainText, fontWeight = FontWeight.Medium)
+                                        Text("Звуковой сигнал для новых сообщений.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(
+                                        checked = notificationPrefs.soundEnabled,
+                                        enabled = !savingNotificationPrefs,
+                                        onCheckedChange = { enabled ->
+                                            val previous = notificationPrefs
+                                            notificationPrefs = previous.copy(soundEnabled = enabled)
+                                            savingNotificationPrefs = true
+                                            scope.launch {
+                                                try {
+                                                    notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                                                    context.getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE).edit().putBoolean("sound_enabled", enabled).apply()
+                                                    notice = "Настройка звука сохранена."
+                                                } catch (e: Exception) {
+                                                    notificationPrefs = previous
+                                                    error = e.message ?: "Не удалось сохранить звук"
+                                                } finally { savingNotificationPrefs = false }
+                                            }
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Surface2)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Вибрация", color = MainText, fontWeight = FontWeight.Medium)
+                                        Text("Вибрация при получении сообщения.", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    Switch(
+                                        checked = notificationPrefs.vibrationEnabled,
+                                        enabled = !savingNotificationPrefs,
+                                        onCheckedChange = { enabled ->
+                                            val previous = notificationPrefs
+                                            notificationPrefs = previous.copy(vibrationEnabled = enabled)
+                                            savingNotificationPrefs = true
+                                            scope.launch {
+                                                try {
+                                                    notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                                                    context.getSharedPreferences("nexura_notification_settings", Context.MODE_PRIVATE).edit().putBoolean("vibration_enabled", enabled).apply()
+                                                    notice = "Настройка вибрации сохранена."
+                                                } catch (e: Exception) {
+                                                    notificationPrefs = previous
+                                                    error = e.message ?: "Не удалось сохранить вибрацию"
+                                                } finally { savingNotificationPrefs = false }
+                                            }
+                                        }
+                                    )
+                                }
+                                Text("Отдельный чат можно заглушить из меню этого чата.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+                            }
+                        }
+                        Text("СЕТЬ И ТРАФИК", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Режим 2G / слабый интернет", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            "Меньше фоновых запросов. Текстовые сообщения сохраняются на устройстве и отправляются автоматически, когда связь восстановится.",
+                                            color = SecondaryText, fontSize = 11.sp
+                                        )
+                                    }
+                                    Switch(
+                                        checked = lowDataMode,
+                                        onCheckedChange = { enabled ->
+                                            lowDataMode = enabled
+                                            context.getSharedPreferences("nexura_network", Context.MODE_PRIVATE)
+                                                .edit().putBoolean("low_data_mode", enabled).apply()
+                                            notice = if (enabled) "Включён режим слабого интернета." else "Обычный режим сети включён."
+                                        }
+                                    )
+                                }
+                                if (lowDataMode) {
+                                    Text("РЕЖИМ ВКЛЮЧЁН · синхронизация экономит трафик", color = Success, fontSize = 10.sp,
+                                        modifier = Modifier.padding(top = 10.dp), fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                         Text("ПРИВАТНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1429,8 +1938,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                             NexuraBottomBar(
                                 selected = homeTab,
-                                profileSelected = true,
-                                onSelect = { tab -> homeTab = tab; settingsOpen = false; createGroupOpen = false },
+                                profileSelected = settingsOpen,
+                                onSelect = { tab ->
+                                    homeTab = tab; settingsOpen = false; createGroupOpen = false
+                                    if (tab == "social") scope.launch {
+                                        socialBusy = true
+                                        try { socialStories = api.activeStories(); socialPhotos = api.profilePhotos(store.userId.orEmpty()) }
+                                        catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщество" }
+                                        finally { socialBusy = false }
+                                    }
+                                },
                                 onProfile = { }
                             )
                         }
@@ -1481,14 +1998,30 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 selected == null -> {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (lowDataMode) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp)
+                                    .clip(RoundedCornerShape(14.dp)).background(Surface1)
+                                    .clickable { settingsOpen = true }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("◉", color = Success, fontSize = 16.sp)
+                                Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                                    Text("Режим слабого интернета включён", color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("Экономия трафика · очередь сообщений активна", color = SecondaryText, fontSize = 10.sp)
+                                }
+                                Text("Изменить", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth().padding(top = if (lowDataMode) 10.dp else 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(23.dp))
                                 }
                                 Column(Modifier.padding(start = 11.dp)) {
                                     Text("Nexura", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
-                                    Text("Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
+                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
                                 }
                             }
                             Surface(shape = CircleShape, color = Surface1) {
@@ -1498,7 +2031,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
@@ -1673,92 +2206,184 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Column(Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("Контакты", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
-                                        Text("Люди, с которыми можно общаться в Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                                        Text("Все пользователи", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
+                                        Text("Каталог зарегистрированных пользователей Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
                                     }
                                     Box(
                                         Modifier.size(42.dp).clip(RoundedCornerShape(14.dp))
                                             .background(Brush.linearGradient(listOf(Accent, Accent2))),
                                         contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp))
-                                    }
+                                    ) { Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp)) }
                                 }
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Surface1),
-                                    shape = RoundedCornerShape(22.dp),
-                                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-                                ) {
-                                    Column(Modifier.padding(16.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Refresh, null, tint = Accent, modifier = Modifier.size(19.dp))
-                                            Text("Синхронизация контактов", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 9.dp))
+                                OutlinedTextField(
+                                    value = contactsSearch,
+                                    onValueChange = { contactsSearch = it },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp),
+                                    placeholder = { Text("Поиск по имени или @username") },
+                                    singleLine = true,
+                                    leadingIcon = { Icon(Icons.Default.Search, null, tint = Accent) },
+                                    trailingIcon = {
+                                        if (contactsSearch.isNotBlank()) IconButton(onClick = { contactsSearch = "" }) {
+                                            Icon(Icons.Default.Close, "Очистить", tint = SecondaryText)
                                         }
-                                        Text(
-                                            "Найдём знакомых из адресной книги, которые уже зарегистрированы. Номера не отображаются в профиле.",
-                                            color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 7.dp)
-                                        )
-                                        Button(
-                                            onClick = {
-                                                if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED) syncContacts()
-                                                else contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-                                            },
-                                            enabled = !syncingContacts,
-                                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp),
-                                            shape = RoundedCornerShape(15.dp)
-                                        ) {
-                                            Text(if (syncingContacts) "Синхронизируем…" else if (contactsSynced) "Обновить контакты" else "Найти знакомых")
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MainText, unfocusedTextColor = MainText,
+                                        focusedBorderColor = Accent, unfocusedBorderColor = Surface2
+                                    )
+                                )
+                                if (contactsLoading && contactsUsers.isEmpty()) {
+                                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = Accent)
+                                    }
+                                } else if (contactsUsers.isEmpty()) {
+                                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(if (contactsSearch.length < 2 && contactsSearch.isNotBlank()) "Введите минимум 2 символа" else "Пользователи не найдены", color = MainText, fontWeight = FontWeight.SemiBold)
+                                            Text("Здесь появятся все аккаунты Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
                                         }
                                     }
-                                }
-                                if (contactsError.isNotBlank()) Text(contactsError, color = if (contactsSynced) SecondaryText else Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
-                                if (contactsSynced) {
-                                    val registered = deviceContacts.count { it.match != null }
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                } else {
+                                    LazyColumn(
+                                        Modifier.weight(1f),
+                                        contentPadding = PaddingValues(bottom = 18.dp),
+                                        verticalArrangement = Arrangement.spacedBy(7.dp)
                                     ) {
-                                        Column(
-                                            Modifier.weight(1f).clip(RoundedCornerShape(15.dp)).background(Surface1).padding(12.dp)
-                                        ) {
-                                            Text("$registered", color = Success, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                                            Text("В Nexura", color = SecondaryText, fontSize = 11.sp)
-                                        }
-                                        Column(
-                                            Modifier.weight(1f).clip(RoundedCornerShape(15.dp)).background(Surface1).padding(12.dp)
-                                        ) {
-                                            Text("${deviceContacts.size - registered}", color = MainText, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                                            Text("Можно пригласить", color = SecondaryText, fontSize = 11.sp)
-                                        }
-                                    }
-                                    LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp)) {
-                                        items(deviceContacts, key = { it.phone }) { person ->
+                                        items(contactsUsers, key = { it.id }) { person ->
                                             Row(
-                                                Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                                    .clip(RoundedCornerShape(17.dp)).background(Surface1)
-                                                    .padding(horizontal = 12.dp, vertical = 11.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if (person.match != null) Avatar(person.match.displayName, person.match.avatar) else Avatar(person.name, "👤")
-                                                Column(Modifier.weight(1f).padding(start = 11.dp, end = 4.dp)) {
-                                                    Text(person.match?.displayName ?: person.name, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
-                                                    Text(if (person.match != null) "Уже в Nexura" else "Ещё не зарегистрирован", color = if (person.match != null) Success else SecondaryText, fontSize = 11.sp)
-                                                }
-                                                if (person.match != null) {
-                                                    TextButton(onClick = {
+                                                Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp))
+                                                    .background(Surface1).clickable {
                                                         scope.launch {
                                                             try {
-                                                                val id = api.createDirect(person.match.userId)
-                                                                openChat(ChatItem(id, person.match.displayName, "direct", null, avatar = person.match.avatar))
+                                                                val chatId = api.createDirect(person.id)
+                                                                openChat(ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id))
                                                                 homeTab = "chats"
                                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
                                                         }
-                                                    }) { Text("Написать", maxLines = 1) }
-                                                } else TextButton(onClick = { inviteContact(person) }) { Text("Пригласить", maxLines = 1) }
+                                                    }.padding(horizontal = 12.dp, vertical = 11.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Avatar(person.displayName, person.avatar)
+                                                Column(Modifier.weight(1f).padding(start = 11.dp, end = 8.dp)) {
+                                                    Text(person.displayName, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                                                    Text(if (person.username.isNotBlank()) "@${person.username}" else "Пользователь Nexura", color = Accent, fontSize = 11.sp, maxLines = 1)
+                                                }
+                                                TextButton(onClick = {
+                                                    scope.launch {
+                                                        try {
+                                                            val chatId = api.createDirect(person.id)
+                                                            openChat(ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id))
+                                                            homeTab = "chats"
+                                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть чат" }
+                                                    }
+                                                }) { Text("Написать", maxLines = 1) }
+                                            }
+                                        }
+                                        if (contactsHasMore) {
+                                            item {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        scope.launch {
+                                                            contactsLoading = true
+                                                            try {
+                                                                val next = api.listUsers(contactsSearch, contactsOffset, 50)
+                                                                contactsUsers = (contactsUsers + next).distinctBy { it.id }
+                                                                contactsOffset += next.size
+                                                                contactsHasMore = next.size == 50
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось загрузить ещё пользователей" }
+                                                            finally { contactsLoading = false }
+                                                        }
+                                                    },
+                                                    enabled = !contactsLoading,
+                                                    modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
+                                                    shape = RoundedCornerShape(14.dp)
+                                                ) { Text(if (contactsLoading) "Загружаем…" else "Показать ещё") }
                                             }
                                         }
                                     }
-                                } else Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
+                        if (homeTab == "social") {
+                            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Сообщество", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                                        Text("Истории и фотографии пользователей", color = SecondaryText, fontSize = 12.sp)
+                                    }
+                                    TextButton(onClick = { socialArchiveOpen = !socialArchiveOpen }) {
+                                        Text(if (socialArchiveOpen) "К историям" else "Архив", color = Accent)
+                                    }
+                                }
+                                OutlinedTextField(value = socialCaption, onValueChange = { socialCaption = it.take(500) },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp), placeholder = { Text("Подпись к публикации") },
+                                    shape = RoundedCornerShape(14.dp), colors = authFieldColors(), maxLines = 2)
+                                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = { storyPicker.launch(arrayOf("image/*", "video/*")) }, enabled = !socialBusy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("＋ История") }
+                                    OutlinedButton(onClick = { profilePhotoPublisher.launch(arrayOf("image/*")) }, enabled = !socialBusy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("＋ Фото в профиль") }
+                                }
+                                if (socialBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp), color = Accent)
+                                if (socialArchiveOpen) {
+                                    Text("Архив историй · только вы", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
+                                    if (socialArchive.isEmpty()) Text("Истории старше 24 часов появятся здесь. Архив виден только вам.", color = SecondaryText, fontSize = 12.sp)
+                                    socialArchive.forEach { item ->
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            if (item.mediaType == "video") {
+                                                Box(
+                                                    Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
+                                                        .clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "video" },
+                                                    contentAlignment = Alignment.Center
+                                                ) { Icon(Icons.Default.PlayArrow, "Открыть видео", tint = Color.White, modifier = Modifier.size(34.dp)) }
+                                            } else {
+                                                AsyncImage(model = item.mediaUrl, contentDescription = "История из архива", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                            }
+                                            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                                Text(item.caption.ifBlank { "История" }, color = MainText, fontWeight = FontWeight.SemiBold)
+                                                Text("Архив · только вам", color = SecondaryText, fontSize = 11.sp)
+                                            }
+                                            TextButton(onClick = { scope.launch { try { api.deleteSocialMedia(item, true); socialArchive = socialArchive.filterNot { it.id == item.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить историю" } } }) { Text("Удалить", color = Danger) }
+                                        }
+                                    }
+                                } else {
+                                    Text("Активные истории", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
+                                    if (socialStories.isEmpty()) Text("Пока нет историй. Опубликуйте первую!", color = SecondaryText, fontSize = 12.sp)
+                                    socialStories.forEach { item ->
+                                        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                if (item.mediaType == "video") {
+                                                    Box(
+                                                        Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
+                                                            .clickable { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } },
+                                                        contentAlignment = Alignment.Center
+                                                    ) { Icon(Icons.Default.PlayArrow, "Открыть видеоисторию", tint = Color.White, modifier = Modifier.size(34.dp)) }
+                                                } else {
+                                                    AsyncImage(model = item.mediaUrl, contentDescription = "Открыть историю", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } }, contentScale = ContentScale.Crop)
+                                                }
+                                                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                                                    Text(if (item.userId == store.userId) "Ваша история" else "История пользователя", color = MainText, fontWeight = FontWeight.SemiBold)
+                                                    Text(item.caption.ifBlank { if (item.mediaType == "video") "Видео" else "Фото" }, color = SecondaryText, fontSize = 11.sp)
+                                                }
+                                            }
+                                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                TextButton(onClick = { scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.toggleStoryLike(item.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) { Text("♥  Лайк", color = Accent) }
+                                                if (item.userId != store.userId) TextButton(onClick = { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } }) { Text("Ответить в личку", color = Accent) }
+                                            }
+                                        }
+                                    }
+                                }
+                                Text("Фотографии в профиле", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
+                                if (socialPhotos.isEmpty()) Text("Ваши фотографии будут храниться в профиле, пока вы сами их не удалите.", color = SecondaryText, fontSize = 12.sp)
+                                socialPhotos.forEach { item ->
+                                    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            AsyncImage(model = item.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                            Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(item.caption.ifBlank { "Фотография" }, color = MainText, fontWeight = FontWeight.SemiBold) }
+                                            TextButton(onClick = { scope.launch { try { api.deleteSocialMedia(item, false); socialPhotos = socialPhotos.filterNot { it.id == item.id } } catch (e: Exception) { error = e.message ?: "Не удалось удалить фото" } } }) { Text("Удалить", color = Danger) }
+                                        }
+                                        TextButton(onClick = { selectedSocialPhoto = item; socialCommentDraft = ""; scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.profilePhotoReaction(item.id); socialPhotoComments = api.profilePhotoComments(item.id) } catch (e: Exception) { error = e.message ?: "Не удалось загрузить комментарии" } finally { socialInteractionBusy = false } } }) { Text("♥  Лайк и комментарии", color = Accent) }
+                                    }
+                                }
                             }
                         }
                         if (homeTab == "search") {
@@ -1850,7 +2475,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         ) {
                             item { FilterChip(selected = chatListFilter == "all", onClick = { chatListFilter = "all" }, label = { Text("Все чаты") }) }
                             item { FilterChip(selected = chatListFilter == "unread", onClick = { chatListFilter = "unread" }, label = { Text("Непрочитанные") }) }
-                            item { FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранное") }) }
+                            item { FilterChip(selected = chatListFilter == "favorites", onClick = { chatListFilter = "favorites" }, label = { Text("Избранные чаты") }) }
                         }
                         if (error.isNotBlank()) Text(error, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         if (visibleChats.isEmpty()) {
@@ -1887,7 +2512,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
-                                                Text(chatPreviews[chat.id] ?: if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp).weight(1f), maxLines = 1)
+                                                Text(chatPreviews[chat.id] ?: if (chat.title == "⭐ Избранное") "Личные заметки и сохранённые сообщения" else if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp).weight(1f), maxLines = 1)
                                                 if (chat.unreadCount > 0) {
                                                     Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
                                                         Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -1920,7 +2545,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 settingsOpen = true
                                 error = ""; notice = ""
                                 scope.launch {
-                                    try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" } }
+                                    try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" } }
                                     catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" }
                                 }
                             }
@@ -2095,6 +2720,174 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         )
                     }
                     val chat = selected!!
+                    if (groupManagementOpen && chat.kind == "group") {
+                        AlertDialog(
+                            onDismissRequest = { if (!groupManagementBusy) groupManagementOpen = false },
+                            containerColor = Surface1,
+                            title = { Text("Управление группой", color = MainText, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    if (groupManagerCanEdit) {
+                                        Text("Название группы", color = SecondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        OutlinedTextField(
+                                            value = groupNameDraft,
+                                            onValueChange = { groupNameDraft = it.take(60) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(14.dp),
+                                            colors = authFieldColors()
+                                        )
+                                        Button(
+                                            enabled = !groupManagementBusy && groupNameDraft.trim().length in 2..60 && groupNameDraft.trim() != chat.title,
+                                            onClick = {
+                                                scope.launch {
+                                                    groupManagementBusy = true
+                                                    try {
+                                                        api.renameGroup(chat.id, groupNameDraft)
+                                                        val updated = chat.copy(title = groupNameDraft.trim())
+                                                        selected = updated
+                                                        chats = chats.map { if (it.id == chat.id) updated else it }
+                                                        notice = "Название группы обновлено"
+                                                    } catch (e: Exception) { error = e.message ?: "Не удалось изменить название группы" }
+                                                    finally { groupManagementBusy = false }
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text("Сохранить название") }
+                                        HorizontalDivider(color = Surface2)
+                                        Text("Добавить участников", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            OutlinedTextField(
+                                                value = groupSearchDraft,
+                                                onValueChange = { groupSearchDraft = it; groupSearchResults = emptyList() },
+                                                modifier = Modifier.weight(1f),
+                                                singleLine = true,
+                                                placeholder = { Text("Имя или username") },
+                                                shape = RoundedCornerShape(14.dp),
+                                                colors = authFieldColors()
+                                            )
+                                            IconButton(
+                                                enabled = groupSearchDraft.trim().length >= 2 && !groupManagementBusy,
+                                                onClick = {
+                                                    scope.launch {
+                                                        groupManagementBusy = true
+                                                        try { groupSearchResults = api.findUsers(groupSearchDraft).filter { user -> groupMembers.none { it.userId == user.id } } }
+                                                        catch (e: Exception) { error = e.message ?: "Не удалось найти пользователей" }
+                                                        finally { groupManagementBusy = false }
+                                                    }
+                                                }
+                                            ) { Icon(Icons.Default.Search, "Найти", tint = Accent) }
+                                        }
+                                        groupSearchResults.forEach { person ->
+                                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Avatar(person.displayName, person.avatar)
+                                                Text(person.displayName, color = MainText, modifier = Modifier.weight(1f).padding(start = 9.dp), fontSize = 13.sp)
+                                                TextButton(
+                                                    enabled = !groupManagementBusy && groupMembers.size < 50,
+                                                    onClick = {
+                                                        scope.launch {
+                                                            groupManagementBusy = true
+                                                            try {
+                                                                api.addGroupMember(chat.id, person.id)
+                                                                groupMembers = api.groupMembers(chat.id)
+                                                                groupSearchResults = groupSearchResults.filterNot { it.id == person.id }
+                                                                notice = "Участник добавлен"
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось добавить участника" }
+                                                            finally { groupManagementBusy = false }
+                                                        }
+                                                    }
+                                                ) { Text("Добавить") }
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider(color = Surface2)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Участники", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                        Text("${groupMembers.size}/50", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    if (groupManagementBusy && groupMembers.isEmpty()) {
+                                        CircularProgressIndicator(color = Accent, modifier = Modifier.size(22.dp))
+                                    } else groupMembers.forEach { member ->
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Avatar(member.displayName, member.avatar)
+                                            Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                                                Text(member.displayName + if (member.userId == store.userId) " (вы)" else "", color = MainText, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                Text(
+                                                    when (member.role) { "owner" -> "Владелец"; "admin" -> "Администратор"; else -> "Участник" },
+                                                    color = if (member.role == "admin" || member.role == "owner") Accent else SecondaryText,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                            if (groupManagerCanEdit && member.role != "owner") {
+                                                TextButton(
+                                                    enabled = !groupManagementBusy,
+                                                    onClick = {
+                                                        scope.launch {
+                                                            groupManagementBusy = true
+                                                            try {
+                                                                api.setGroupMemberRole(chat.id, member.userId, if (member.role == "admin") "member" else "admin")
+                                                                groupMembers = api.groupMembers(chat.id)
+                                                            } catch (e: Exception) { error = e.message ?: "Не удалось изменить роль" }
+                                                            finally { groupManagementBusy = false }
+                                                        }
+                                                    }
+                                                ) { Text(if (member.role == "admin") "Снять админа" else "Админ") }
+                                                if (member.userId != store.userId) TextButton(
+                                                    enabled = !groupManagementBusy,
+                                                    onClick = { memberToRemove = member }
+                                                ) { Text("Удалить", color = Danger) }
+                                            }
+                                        }
+                                    }
+                                    if (groupManagementBusy) Text("Сохраняем изменения…", color = SecondaryText, fontSize = 11.sp)
+                                }
+                            },
+                            confirmButton = { TextButton(onClick = { groupManagementOpen = false }) { Text("Готово") } }
+                        )
+                    }
+                    if (memberToRemove != null) {
+                        val targetMember = memberToRemove!!
+                        AlertDialog(
+                            onDismissRequest = { if (!groupManagementBusy) memberToRemove = null },
+                            containerColor = Surface1,
+                            title = { Text("Удалить участника?", color = MainText) },
+                            text = { Text("Участник «${targetMember.displayName}» больше не сможет читать новые сообщения группы.", color = SecondaryText) },
+                            confirmButton = {
+                                TextButton(enabled = !groupManagementBusy, onClick = {
+                                    scope.launch {
+                                        groupManagementBusy = true
+                                        try {
+                                            api.removeGroupMember(chat.id, targetMember.userId)
+                                            groupMembers = api.groupMembers(chat.id)
+                                            memberToRemove = null
+                                            notice = "Участник удалён из группы"
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось удалить участника" }
+                                        finally { groupManagementBusy = false }
+                                    }
+                                }) { Text("Удалить", color = Danger) }
+                            },
+                            dismissButton = { TextButton(onClick = { memberToRemove = null }, enabled = !groupManagementBusy) { Text("Отмена") } }
+                        )
+                    }
+                    if (showMuteChatDialog) {
+                        AlertDialog(
+                            onDismissRequest = { if (!savingChatMute) showMuteChatDialog = false },
+                            containerColor = Surface1,
+                            title = { Text("Отключить уведомления", color = MainText, fontWeight = FontWeight.Bold) },
+                            text = { Text("Выбери, как долго не получать push из этого чата. Остальные чаты продолжат присылать уведомления.", color = SecondaryText) },
+                            confirmButton = {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(60L * 60L * 1000L) }) { Text("На 1 час") }
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(8L * 60L * 60L * 1000L) }) { Text("На 8 часов") }
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(48L * 60L * 60L * 1000L) }) { Text("На 2 дня") }
+                                    TextButton(enabled = !savingChatMute, onClick = { changeCurrentChatMute(Long.MAX_VALUE) }) { Text("Навсегда") }
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showMuteChatDialog = false }, enabled = !savingChatMute) { Text("Отмена") }
+                            }
+                        )
+                    }
                     if (showChatModeDialog) {
                         AlertDialog(
                             onDismissRequest = { if (!changingChatMode) showChatModeDialog = false },
@@ -2329,40 +3122,87 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                     }
-                    if (mediaViewerUri != null) {
-                        Dialog(
-                            onDismissRequest = { mediaViewerUri = null },
-                            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-                        ) {
-                            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                                if (mediaViewerType == "video") {
-                                    AndroidView(
-                                        factory = { ctx ->
-                                            VideoView(ctx).apply {
-                                                val playerControls = MediaController(ctx)
-                                                playerControls.setAnchorView(this)
-                                                setMediaController(playerControls)
-                                                setVideoURI(mediaViewerUri)
-                                                setOnPreparedListener { player -> player.isLooping = false; start() }
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    AsyncImage(
-                                        model = mediaViewerUri,
-                                        contentDescription = "Фото на весь экран",
-                                        modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null },
-                                        contentScale = ContentScale.Fit
-                                    )
+                    if (selectedSocialPhoto != null) {
+                        val photo = selectedSocialPhoto!!
+                        AlertDialog(
+                            onDismissRequest = { if (!socialInteractionBusy) selectedSocialPhoto = null },
+                            title = { Text("Фотография") },
+                            text = {
+                                Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография публикации", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                    if (photo.caption.isNotBlank()) Text(photo.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.toggleProfilePhotoLike(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
+                                            Text(if (socialPhotoLikes.likedByMe) "♥  Лайк " + socialPhotoLikes.count else "♡  Лайк " + socialPhotoLikes.count, color = if (socialPhotoLikes.likedByMe) Accent else MainText)
+                                        }
+                                        Text("Комментарии · " + socialPhotoComments.size, color = SecondaryText, fontSize = 12.sp)
+                                    }
+                                    socialPhotoComments.forEach { comment ->
+                                        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(10.dp)).background(Surface1).padding(9.dp)) {
+                                            Text(if (comment.userId == store.userId) "Вы" else "Пользователь", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(comment.content, color = MainText, fontSize = 13.sp)
+                                        }
+                                    }
+                                    if (socialPhotoComments.isEmpty()) Text("Пока нет комментариев. Будьте первым!", color = SecondaryText, fontSize = 12.sp)
+                                    OutlinedTextField(value = socialCommentDraft, onValueChange = { socialCommentDraft = it.take(1000) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = { Text("Написать комментарий…") }, maxLines = 3, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
                                 }
-                                IconButton(
-                                    onClick = { mediaViewerUri = null },
-                                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp)
-                                        .background(Color(0x99000000), CircleShape)
-                                ) { Text("×", color = Color.White, fontSize = 28.sp) }
-                            }
-                        }
+                            },
+                            confirmButton = {
+                                TextButton(enabled = socialCommentDraft.isNotBlank() && !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { api.addProfilePhotoComment(photo.id, socialCommentDraft); socialCommentDraft = ""; socialPhotoComments = api.profilePhotoComments(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось отправить комментарий" } finally { socialInteractionBusy = false } } }) { Text("Отправить") }
+                            },
+                            dismissButton = { TextButton(onClick = { selectedSocialPhoto = null }) { Text("Закрыть") } }
+                        )
+                    }
+                    if (selectedSocialStory != null) {
+                        val story = selectedSocialStory!!
+                        AlertDialog(
+                            onDismissRequest = { if (!socialInteractionBusy) selectedSocialStory = null },
+                            title = { Text("История") },
+                            text = {
+                                Column {
+                                    if (story.mediaType == "video") {
+                                        Box(
+                                            Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(14.dp)).background(Surface2)
+                                                .clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "video" },
+                                            contentAlignment = Alignment.Center
+                                        ) { Icon(Icons.Default.PlayArrow, "Воспроизвести видеоисторию", tint = Color.White, modifier = Modifier.size(56.dp)) }
+                                    } else {
+                                        AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                    }
+                                    if (story.caption.isNotBlank()) Text(story.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.toggleStoryLike(story.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
+                                            Text(if (socialStoryLikes.likedByMe) "♥  Лайк " + socialStoryLikes.count else "♡  Лайк " + socialStoryLikes.count, color = if (socialStoryLikes.likedByMe) Accent else MainText)
+                                        }
+                                        Text("История исчезнет через 24 часа", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                    if (story.userId != store.userId) {
+                                        OutlinedTextField(value = socialReplyDraft, onValueChange = { socialReplyDraft = it.take(1000) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = { Text("Ответить автору в личку…") }, maxLines = 3, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                if (story.userId != store.userId) TextButton(enabled = socialReplyDraft.isNotBlank() && !socialInteractionBusy, onClick = {
+                                    scope.launch {
+                                        socialInteractionBusy = true
+                                        try {
+                                            val chatId = api.createDirect(story.userId)
+                                            val refreshed = api.chats()
+                                            chats = refreshed
+                                            val chat = refreshed.firstOrNull { it.id == chatId }
+                                                ?: ChatItem(chatId, "Пользователь", "direct", null, peerUserId = story.userId)
+                                            if (refreshed.none { it.id == chatId }) chats = refreshed + chat
+                                            openChat(chat)
+                                            draft = "↩ Ответ на историю: " + story.caption.ifBlank { if (story.mediaType == "video") "видео" else "фото" } + "\n" + socialReplyDraft.trim()
+                                            selectedSocialStory = null
+                                            homeTab = "chats"
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть личный чат" }
+                                        finally { socialInteractionBusy = false }
+                                    }
+                                }) { Text("Перейти в личку") }
+                            },
+                            dismissButton = { TextButton(onClick = { selectedSocialStory = null }) { Text("Закрыть") } }
+                        )
                     }
                     if (trustCandidate != null && trustPeerId != null) {
                         val remote = trustCandidate!!
@@ -2473,6 +3313,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                     if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
                                     Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                                    if (viewedProfilePhotos.isNotEmpty()) {
+                                        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Фотографии профиля", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                            Text(viewedProfilePhotos.size.toString(), color = SecondaryText, fontSize = 12.sp)
+                                        }
+                                        viewedProfilePhotos.chunked(3).forEach { group ->
+                                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                group.forEach { photo ->
+                                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Открыть фотографию профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(10.dp)).clickable { selectedSocialPhoto = photo; socialCommentDraft = ""; scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.profilePhotoReaction(photo.id); socialPhotoComments = api.profilePhotoComments(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось загрузить комментарии" } finally { socialInteractionBusy = false } } }, contentScale = ContentScale.Crop)
+                                                }
+                                                repeat(3 - group.size) { Spacer(Modifier.weight(1f)) }
+                                            }
+                                        }
+                                    }
+
                                     OutlinedButton(onClick = { confirmBlockProfile = profile }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger)) {
                                         Icon(Icons.Default.Block, null, modifier = Modifier.size(17.dp))
@@ -2563,10 +3419,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                 }
                             }) {
-                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
+                                Text(chat.title + if (currentChatMuted) "  🔕" else "", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1)
                                 val presence = chatPresence?.takeIf { it.isVisible }
                                 Text(
                                     when {
+                                        chat.title == "⭐ Избранное" -> "Личное пространство · видно только вам"
                                         chat.kind == "group" -> "Групповой чат"
                                         presence?.isOnline == true -> "● В сети"
                                         presence?.lastSeenAt != null -> "Был(а) в ${messageTimeLabel(presence.lastSeenAt)}"
@@ -2586,6 +3443,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     onDismissRequest = { showChatOptionsMenu = false },
                                     modifier = Modifier.background(Surface1)
                                 ) {
+                                    if (chat.title != "⭐ Избранное") {
+                                        DropdownMenuItem(
+                                            text = { Text(if (currentChatMuted) "Включить уведомления" else "Отключить уведомления") },
+                                            leadingIcon = { Icon(Icons.Default.Notifications, null, tint = if (currentChatMuted) Success else SecondaryText) },
+                                            onClick = {
+                                                showChatOptionsMenu = false
+                                                if (currentChatMuted) changeCurrentChatMute(null) else showMuteChatDialog = true
+                                            }
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = { Text(if (chat.chatMode == "secret") "Переключить на облачный чат" else "Переключить на секретный чат") },
                                         leadingIcon = { Icon(if (chat.chatMode == "secret") Icons.Default.ChatBubbleOutline else Icons.Default.Lock, null) },
@@ -2671,6 +3538,28 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             }
                                         }
                                     )
+                                    if (chat.kind == "group" && chat.title != "⭐ Избранное") {
+                                        DropdownMenuItem(
+                                            text = { Text("Участники и настройки группы") },
+                                            leadingIcon = { Icon(Icons.Default.GroupAdd, null, tint = Accent) },
+                                            onClick = {
+                                                showChatOptionsMenu = false
+                                                groupNameDraft = chat.title
+                                                groupSearchDraft = ""
+                                                groupSearchResults = emptyList()
+                                                groupManagementOpen = true
+                                                groupManagerCanEdit = false
+                                                scope.launch {
+                                                    groupManagementBusy = true
+                                                    try {
+                                                        groupMembers = api.groupMembers(chat.id)
+                                                        groupManagerCanEdit = api.canManageConversation(chat.id)
+                                                    } catch (e: Exception) { error = e.message ?: "Не удалось загрузить участников группы" }
+                                                    finally { groupManagementBusy = false }
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2705,9 +3594,36 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text("📌", fontSize = 16.sp)
-                                Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                Column(Modifier.weight(1f).padding(start = 8.dp).clickable(enabled = pinnedMessageId != null) {
+                                    val targetId = pinnedMessageId ?: return@clickable
+                                    scope.launch {
+                                        try {
+                                            chatSearchQuery = ""
+                                            val target = api.messages(chat.id, e2eeClient, targetMessageId = targetId).firstOrNull()
+                                                ?: throw IOException("Закреплённое сообщение больше недоступно")
+                                            // Load the closest page on each side of the pinned row.
+                                            val before = api.messages(
+                                                chat.id, e2eeClient,
+                                                beforeCreatedAt = target.createdAt,
+                                                beforeMessageId = target.id,
+                                                pageSize = 30
+                                            )
+                                            val after = api.messages(
+                                                chat.id, e2eeClient,
+                                                afterCreatedAt = target.createdAt,
+                                                afterMessageId = target.id,
+                                                pageSize = 30,
+                                                ascending = true
+                                            )
+                                            messages = (before + target + after).distinctBy { it.id }
+                                                .sortedWith(compareBy<MessageItem> { it.createdAt }.thenBy { it.id })
+                                            hasMoreMessages = before.size >= 30
+                                            scrollToMessageId = target.id
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось перейти к закреплённому сообщению" }
+                                    }
+                                }) {
                                     Text("Закреплённое сообщение", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                    Text(pinned?.content?.take(90) ?: "Откройте чат, чтобы загрузить сообщение", color = MainText, fontSize = 12.sp, maxLines = 1)
+                                    Text(pinned?.content?.take(90) ?: "Нажмите, чтобы перейти к сообщению", color = MainText, fontSize = 12.sp, maxLines = 1)
                                 }
                                 if (canManagePins) {
                                     TextButton(onClick = {
@@ -2780,17 +3696,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                 }
                                 LaunchedEffect(chat.id, visibleMessages.size, chatSearchQuery, scrollToMessageId) {
-                                    if (suppressNextAutoScroll) {
+                                    val requestedTarget = scrollToMessageId
+                                    if (suppressNextAutoScroll && requestedTarget == null) {
                                         suppressNextAutoScroll = false
                                     } else if (visibleMessages.isNotEmpty()) {
-                                        val targetIndex = scrollToMessageId?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
-                                        // Avoid expensive fling animation on every sync, especially on low-memory phones.
-                                        if (lowRamDevice) {
-                                            messageListState.scrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
-                                        } else {
-                                            messageListState.animateScrollToItem(if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex)
+                                        if (suppressNextAutoScroll) suppressNextAutoScroll = false
+                                        val targetIndex = requestedTarget?.let { id -> visibleMessages.indexOfFirst { it.id == id } } ?: -1
+                                        // Never fall back to the newest message during an explicit jump.
+                                        if (requestedTarget != null && targetIndex < 0) return@LaunchedEffect
+                                        val destination = if (targetIndex >= 0) targetIndex else visibleMessages.lastIndex
+                                        if (lowRamDevice) messageListState.scrollToItem(destination)
+                                        else messageListState.animateScrollToItem(destination)
+                                        if (targetIndex >= 0) {
+                                            // Clearing the request changes this effect's key. Suppress
+                                            // that follow-up pass so it does not jump back to newest.
+                                            suppressNextAutoScroll = true
+                                            scrollToMessageId = null
                                         }
-                                        if (targetIndex >= 0) scrollToMessageId = null
                                         initialScrollCompleted = true
                                     }
                                 }
@@ -2834,49 +3756,20 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             },
                                         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
                                     ) {
+                                        Column(Modifier.widthIn(max = 320.dp).graphicsLayer { translationX = swipeTranslation }) {
                                         Column(
-                                            Modifier.widthIn(max = 320.dp).graphicsLayer { translationX = swipeTranslation }
-                                                .clip(RoundedCornerShape(
-                                                    topStart = 20.dp, topEnd = 20.dp,
-                                                    bottomStart = if (mine) 20.dp else 6.dp,
-                                                    bottomEnd = if (mine) 6.dp else 20.dp
-                                                )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                            Modifier.clip(RoundedCornerShape(
+                                                topStart = 20.dp, topEnd = 20.dp,
+                                                bottomStart = if (mine) 20.dp else 6.dp,
+                                                bottomEnd = if (mine) 6.dp else 20.dp
+                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
-                                                    onLongClick = { reactionPickerFor = null; openMessageMenu = msg.id }
+                                                    onLongClick = { openMessageMenu = null; reactionPickerFor = msg.id }
                                                 )
                                                 .padding(horizontal = 15.dp, vertical = 12.dp)
                                         ) {
-                                            AnimatedVisibility(
-                                                visible = reactionPickerFor == msg.id,
-                                                enter = fadeIn() + expandVertically(),
-                                                exit = fadeOut() + shrinkVertically()
-                                            ) {
-                                                Row(
-                                                    Modifier.fillMaxWidth().padding(bottom = 9.dp)
-                                                        .clip(RoundedCornerShape(22.dp))
-                                                        .background(Surface1.copy(alpha = 0.96f))
-                                                        .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(22.dp))
-                                                        .padding(horizontal = 7.dp, vertical = 6.dp),
-                                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
-                                                        AnimatedReactionPickerItem(emoji = emoji) {
-                                                            reactionPickerFor = null
-                                                            scope.launch {
-                                                                try {
-                                                                    api.toggleMessageReaction(chat.id, msg.id, emoji)
-                                                                    messageReactions = api.messageReactions(chat.id)
-                                                                } catch (e: Exception) {
-                                                                    error = e.message ?: "Не удалось поставить реакцию"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
                                             if (msg.encrypted) {
                                                 Text("🔒 Зашифровано E2EE", color = Success, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
                                             } else if (msg.securityWarning) {
@@ -3051,6 +3944,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             leadingIcon = { Text("↩", color = Accent, fontSize = 18.sp) },
                                                             onClick = { replyTarget = msg; openMessageMenu = null }
                                                         )
+                                                        if (msg.encrypted && !msg.securityWarning && msg.messageType in setOf("text", "media") && chat.title != "⭐ Избранное") {
+                                                            DropdownMenuItem(
+                                                                text = { Text("В Избранное") },
+                                                                leadingIcon = { Icon(Icons.Default.Star, null, tint = Accent) },
+                                                                onClick = {
+                                                                    val savedChat = chats.firstOrNull { it.title == "⭐ Избранное" }
+                                                                    openMessageMenu = null
+                                                                    if (savedChat == null) {
+                                                                        error = "Чат «Избранное» ещё не создан. Обновите список чатов."
+                                                                    } else {
+                                                                        forwardingTarget = msg
+                                                                        forwardingSelectedChatIds = setOf(savedChat.id)
+                                                                        forwardingSearch = ""
+                                                                    }
+                                                                }
+                                                            )
+                                                        }
                                                         if (msg.encrypted && !msg.securityWarning && msg.messageType in setOf("text", "media") && chats.any { it.id != chat.id }) {
                                                             DropdownMenuItem(
                                                                 text = { Text("Переслать") },
@@ -3073,6 +3983,22 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 openMessageMenu = null
                                                             }
                                                         )
+                                                        if (msg.messageType == "media" && msg.encrypted && !msg.securityWarning) {
+                                                            DropdownMenuItem(
+                                                                text = { Text("Скачать на устройство") },
+                                                                leadingIcon = { Icon(Icons.Default.Download, null, tint = Accent) },
+                                                                onClick = {
+                                                                    openMessageMenu = null
+                                                                    try {
+                                                                        val localUri = Uri.parse(msg.content)
+                                                                        val localFile = File(localUri.path ?: throw IOException("Файл медиа недоступен"))
+                                                                        if (!localFile.exists()) throw IOException("Файл ещё не загружен. Обновите чат и повторите.")
+                                                                        pendingDownloadFile = localFile
+                                                                        downloadMediaLauncher.launch(msg.mediaFileName?.takeIf { it.isNotBlank() } ?: "Nexura_media")
+                                                                    } catch (e: Exception) { error = e.message ?: "Не удалось подготовить файл" }
+                                                                }
+                                                            )
+                                                        }
                                                         HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
                                                         Text(
                                                             "РЕАКЦИЯ",
@@ -3154,17 +4080,47 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }}
                                                 }
                                             }
-                                            val reactionsForMessage = messageReactions[msg.id].orEmpty()
+                                        }
                                             AnimatedVisibility(
-                                                visible = reactionsForMessage.isNotEmpty(),
+                                                visible = reactionPickerFor == msg.id,
                                                 enter = fadeIn() + expandVertically(),
                                                 exit = fadeOut() + shrinkVertically()
                                             ) {
                                                 Row(
-                                                    Modifier.fillMaxWidth().padding(top = 7.dp),
-                                                    horizontalArrangement = Arrangement.Start,
+                                                    Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 4.dp)
+                                                        .clip(RoundedCornerShape(22.dp))
+                                                        .background(Surface1.copy(alpha = 0.96f))
+                                                        .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(22.dp))
+                                                        .padding(horizontal = 7.dp, vertical = 6.dp),
+                                                    horizontalArrangement = Arrangement.SpaceEvenly,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
+                                                    listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
+                                                        AnimatedReactionPickerItem(emoji = emoji) {
+                                                            reactionPickerFor = null
+                                                            scope.launch {
+                                                                try {
+                                                                    api.toggleMessageReaction(chat.id, msg.id, emoji)
+                                                                    messageReactions = api.messageReactions(chat.id)
+                                                                } catch (e: Exception) {
+                                                                    error = e.message ?: "Не удалось поставить реакцию"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        val reactionsForMessage = messageReactions[msg.id].orEmpty()
+                                        AnimatedVisibility(
+                                            visible = reactionsForMessage.isNotEmpty(),
+                                            enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.92f),
+                                            exit = fadeOut() + shrinkVertically()
+                                        ) {
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(top = 4.dp, start = 5.dp, end = 5.dp),
+                                                horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
                                                     reactionsForMessage.forEach { reaction ->
                                                         AnimatedReactionChip(
                                                             emoji = reaction.emoji,
@@ -3242,6 +4198,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.Bottom
                             ) {
+                                if (peerTyping) {
+                                    Text("Печатает…", color = Accent, fontSize = 11.sp,
+                                        modifier = Modifier.padding(start = 4.dp, end = 3.dp, bottom = 5.dp))
+                                }
                                 IconButton(
                                     onClick = { mediaPicker.launch(arrayOf("*/*")) },
                                     enabled = !sendingImage && !recordingVoice,
@@ -3289,7 +4249,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
                                     })
                                 )
-                                Spacer(Modifier.width(7.dp))
+                                Spacer(Modifier.width(2.dp))
+                                IconButton(
+                                    onClick = { scheduleDraft(chat) },
+                                    enabled = draft.isNotBlank() && !recordingVoice,
+                                    modifier = Modifier.size(40.dp).align(Alignment.Bottom)
+                                ) { Icon(Icons.Default.Schedule, "Отложить отправку", tint = if (draft.isNotBlank()) Accent else SecondaryText) }
+                                Spacer(Modifier.width(3.dp))
                                 val hasOutgoingContent = draft.isNotBlank() || pendingMediaUri != null
                                 val sendButtonScale by animateFloatAsState(
                                     targetValue = if (hasOutgoingContent || recordingVoice) 1.06f else 1f,
@@ -3309,7 +4275,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             stopVoiceRecording(chat)
                                         }
                                     },
-                                    enabled = !sendingImage,
+                                    enabled = !sendingImage || draft.isNotBlank(),
                                     modifier = Modifier.size(46.dp)
                                         .graphicsLayer { scaleX = sendButtonScale; scaleY = sendButtonScale }
                                         .clip(CircleShape)
@@ -3319,7 +4285,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         )
                                         .align(Alignment.Bottom)
                                 ) {
-                                    if (sendingImage) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
+                                    if (sendingImage && draft.isBlank()) CircularProgressIndicator(Modifier.size(19.dp), color = Bg, strokeWidth = 2.dp)
                                     else if (hasOutgoingContent) Icon(Icons.Default.Send, "Отправить", tint = Bg, modifier = Modifier.size(21.dp))
                                     else Icon(
                                         if (recordingVoice) Icons.Default.Stop else Icons.Default.Mic,
@@ -3391,7 +4357,59 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         )
     }
+    // Global media viewer, independent of the currently selected screen.
+    if (mediaViewerUri != null) {
+        Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null })
+                else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize().clickable { mediaViewerUri = null }, contentScale = ContentScale.Fit)
+                IconButton(onClick = { mediaViewerUri = null }, modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp).background(Color(0x99000000), CircleShape)) { Text("×", color = Color.White, fontSize = 28.sp) }
+            }
+        }
+    }
+
 }
+}
+
+@Composable
+private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
+    var videoView by remember(uri) { mutableStateOf<VideoView?>(null) }
+    var durationMs by remember(uri) { mutableIntStateOf(0) }
+    var positionMs by remember(uri) { mutableIntStateOf(0) }
+    var isPlaying by remember(uri) { mutableStateOf(false) }
+    var ready by remember(uri) { mutableStateOf(false) }
+    var playbackError by remember(uri) { mutableStateOf(false) }
+    AndroidView(factory = { ctx ->
+        VideoView(ctx).apply {
+            setBackgroundColor(android.graphics.Color.BLACK)
+            setVideoURI(uri)
+            setOnPreparedListener { player -> durationMs = player.duration.coerceAtLeast(0); ready = true; start(); isPlaying = true }
+            setOnCompletionListener { isPlaying = false; positionMs = durationMs }
+            setOnErrorListener { _, _, _ -> playbackError = true; isPlaying = false; true }
+            videoView = this
+        }
+    }, update = { view -> if (videoView !== view) videoView = view }, modifier = Modifier.fillMaxSize())
+    LaunchedEffect(uri, isPlaying, ready) {
+        while (ready && isPlaying) { videoView?.let { positionMs = it.currentPosition.coerceAtLeast(0) }; delay(350) }
+    }
+    DisposableEffect(uri) { onDispose { videoView?.runCatching { stopPlayback() }; videoView = null } }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        if (!ready && !playbackError) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Accent)
+        if (playbackError) Text("Не удалось воспроизвести видео", color = Color.White, modifier = Modifier.align(Alignment.Center))
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000)))).padding(start = 18.dp, end = 18.dp, top = 34.dp, bottom = 22.dp)) {
+            Slider(value = if (durationMs > 0) positionMs.toFloat().coerceIn(0f, durationMs.toFloat()) else 0f, onValueChange = { positionMs = it.toInt() }, onValueChangeFinished = { videoView?.seekTo(positionMs) }, valueRange = 0f..durationMs.coerceAtLeast(1).toFloat(), enabled = ready, colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color.White.copy(alpha = 0.35f)))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { videoView?.let { view -> if (view.isPlaying) { view.pause(); isPlaying = false } else { if (positionMs >= durationMs && durationMs > 0) view.seekTo(0); view.start(); isPlaying = true } } }, enabled = ready) { Text(if (isPlaying) "Ⅱ" else "▶", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold) }
+                Text(formatVideoTime(positionMs) + " / " + formatVideoTime(durationMs), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                TextButton(onClick = onClose) { Text("Готово", color = Color.White) }
+            }
+        }
+    }
+}
+
+private fun formatVideoTime(milliseconds: Int): String {
+    val seconds = milliseconds.coerceAtLeast(0) / 1000
+    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 @Composable
@@ -3598,6 +4616,7 @@ private fun NexuraBottomBar(
             val items = listOf(
                 Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline),
                 Triple("contacts", "Контакты", Icons.Default.GroupAdd),
+                Triple("social", "Истории", Icons.Default.Image),
                 Triple("search", "Поиск", Icons.Default.Search)
             )
             items.forEach { (key, label, icon) ->
@@ -3649,8 +4668,21 @@ private fun isRetryableOutboxFailure(error: Throwable): Boolean {
 }
 
 private fun messageTimeLabel(value: String): String {
-    val time = value.substringAfter("T", "").take(5)
-    return if (time.length == 5) time else value.take(16).replace("T", " ")
+    // Presence timestamps are stored in UTC; render them in this device's
+    // current timezone so travel and automatic timezone changes are respected.
+    return runCatching {
+        val instant = java.time.Instant.parse(value)
+        java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(instant)
+    }.getOrElse {
+        runCatching {
+            val instant = java.time.OffsetDateTime.parse(value).toInstant()
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+                .withZone(java.time.ZoneId.systemDefault())
+                .format(instant)
+        }.getOrElse { value.take(16).replace("T", " ") }
+    }
 }
 
 private fun chatTimeLabel(value: String?): String {
@@ -3711,26 +4743,13 @@ private fun chatMessagePreview(message: MessageItem, ownUserId: String): String 
 private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
     var pressed by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pressed) when (emoji) {
-            "❤️" -> 1.34f
-            "👍" -> 1.22f
-            "😂" -> 1.30f
-            "😮" -> 1.38f
-            "😢" -> 1.20f
-            else -> 1.32f
-        } else 1f,
-        animationSpec = spring(dampingRatio = 0.34f, stiffness = 430f),
+        targetValue = if (pressed) 1.28f else 1f,
+        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
         label = "reaction-picker-scale"
     )
     val rotation by animateFloatAsState(
-        targetValue = if (pressed) when (emoji) {
-            "❤️" -> 360f
-            "😂" -> 14f
-            "😢" -> -12f
-            "🔥" -> 9f
-            else -> 0f
-        } else 0f,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = 360f),
+        targetValue = 0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
         label = "reaction-picker-rotation"
     )
     val lift by animateFloatAsState(
@@ -3740,7 +4759,7 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
     )
     LaunchedEffect(pressed) {
         if (pressed) {
-            delay(430)
+            delay(150)
             onClick()
             pressed = false
         }
@@ -3761,9 +4780,14 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
 private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
     var pulse by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pulse || selected) 1.08f else 1f,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = 500f),
+        targetValue = if (pulse) 1.18f else 1f,
+        animationSpec = spring(dampingRatio = 0.46f, stiffness = 520f),
         label = "reaction-chip-scale"
+    )
+    val emojiScale by animateFloatAsState(
+        targetValue = if (pulse) 1.28f else 1f,
+        animationSpec = spring(dampingRatio = 0.42f, stiffness = 560f),
+        label = "reaction-chip-emoji-scale"
     )
     val chipColor by animateColorAsState(
         targetValue = if (selected) Accent.copy(alpha = 0.30f) else Surface2,
@@ -3771,26 +4795,18 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         label = "reaction-chip-color"
     )
     val emojiRotation by animateFloatAsState(
-        targetValue = if (pulse) when (emoji) {
-            "❤️" -> 24f
-            "👍" -> -18f
-            "😂" -> 16f
-            "😮" -> 22f
-            "😢" -> -16f
-            "🔥" -> 14f
-            else -> 12f
-        } else 0f,
-        animationSpec = spring(dampingRatio = 0.30f, stiffness = 420f),
+        targetValue = 0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
         label = "reaction-emoji-rotation"
     )
     val emojiLift by animateFloatAsState(
-        targetValue = if (pulse) -5f else 0f,
-        animationSpec = spring(dampingRatio = 0.28f, stiffness = 460f),
+        targetValue = if (pulse) -2f else 0f,
+        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
         label = "reaction-emoji-lift"
     )
     LaunchedEffect(pulse) {
         if (pulse) {
-            delay(220)
+            delay(300)
             pulse = false
         }
     }
@@ -3809,8 +4825,8 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
             modifier = Modifier.graphicsLayer {
                 rotationZ = emojiRotation
                 translationY = emojiLift * density
-                scaleX = if (pulse) 1.16f else 1f
-                scaleY = if (pulse) 1.16f else 1f
+                scaleX = emojiScale
+                scaleY = emojiScale
             }
         )
         Text(" $count", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
