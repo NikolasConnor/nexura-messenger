@@ -22,7 +22,9 @@ import java.io.IOException
 import org.json.JSONObject
 import android.os.Build
 import android.net.Uri
-import android.widget.VideoView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import android.media.MediaRecorder
 import android.media.MediaPlayer
 import java.io.File
@@ -4479,37 +4481,36 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
 @Composable
 private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
-    var videoView by remember(uri) { mutableStateOf<VideoView?>(null) }
-    var durationMs by remember(uri) { mutableIntStateOf(0) }
-    var positionMs by remember(uri) { mutableIntStateOf(0) }
-    var isPlaying by remember(uri) { mutableStateOf(false) }
-    var ready by remember(uri) { mutableStateOf(false) }
-    var playbackError by remember(uri) { mutableStateOf(false) }
-    AndroidView(factory = { ctx ->
-        VideoView(ctx).apply {
-            setBackgroundColor(android.graphics.Color.BLACK)
-            setVideoURI(uri)
-            setOnPreparedListener { player -> durationMs = player.duration.coerceAtLeast(0); ready = true; start(); isPlaying = true }
-            setOnCompletionListener { isPlaying = false; positionMs = durationMs }
-            setOnErrorListener { _, _, _ -> playbackError = true; isPlaying = false; true }
-            videoView = this
+    val context = LocalContext.current
+    val player = remember(uri) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(uri))
+            playWhenReady = true
+            prepare()
         }
-    }, update = { view -> if (videoView !== view) videoView = view }, modifier = Modifier.fillMaxSize())
-    LaunchedEffect(uri, isPlaying, ready) {
-        while (ready && isPlaying) { videoView?.let { positionMs = it.currentPosition.coerceAtLeast(0) }; delay(350) }
     }
-    DisposableEffect(uri) { onDispose { videoView?.runCatching { stopPlayback() }; videoView = null } }
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (!ready && !playbackError) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Accent)
-        if (playbackError) Text("Не удалось воспроизвести видео", color = Color.White, modifier = Modifier.align(Alignment.Center))
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000)))).padding(start = 18.dp, end = 18.dp, top = 34.dp, bottom = 22.dp)) {
-            Slider(value = if (durationMs > 0) positionMs.toFloat().coerceIn(0f, durationMs.toFloat()) else 0f, onValueChange = { positionMs = it.toInt() }, onValueChangeFinished = { videoView?.seekTo(positionMs) }, valueRange = 0f..durationMs.coerceAtLeast(1).toFloat(), enabled = ready, colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color.White.copy(alpha = 0.35f)))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { videoView?.let { view -> if (view.isPlaying) { view.pause(); isPlaying = false } else { if (positionMs >= durationMs && durationMs > 0) view.seekTo(0); view.start(); isPlaying = true } } }, enabled = ready) { Text(if (isPlaying) "Ⅱ" else "▶", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold) }
-                Text(formatVideoTime(positionMs) + " / " + formatVideoTime(durationMs), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = onClose) { Text("Готово", color = Color.White) }
-            }
-        }
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    controllerAutoShow = true
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    setShutterBackgroundColor(android.graphics.Color.BLACK)
+                }
+            },
+            update = { view -> if (view.player !== player) view.player = player },
+            modifier = Modifier.fillMaxSize()
+        )
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 12.dp)
+                .background(Color(0x99000000), CircleShape)
+        ) { Icon(Icons.Default.Close, "Закрыть видео", tint = Color.White) }
     }
 }
 
