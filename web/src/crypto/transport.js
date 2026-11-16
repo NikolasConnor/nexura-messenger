@@ -235,9 +235,19 @@ export async function sendBrowserDirectMessage(supabase, {
     ['outbox:' + msgId, { conversationId: chatId, messageId: msgId, envelope, state: 'pending' }],
     ['sent:' + msgId, plaintext]
   ]);
+  // Keep an encrypted shared recovery copy so the user's other devices can
+  // restore history even if an older client targeted only one device.
+  let cloudContent = null;
+  try {
+    const { data, error } = await supabase.functions.invoke('cloud-history', {
+      body: { action: 'encrypt', conversation_id: chatId, message_id: msgId, plaintext }
+    });
+    if (!error && typeof data?.cloud_content === 'string' && data.cloud_content) cloudContent = data.cloud_content;
+  } catch { /* E2EE delivery must remain available if cloud recovery is offline. */ }
   const payload = {
     id: msgId, conversation_id: chatId, sender_id: uid,
     message_type: messageType, content: envelope,
+    ...(cloudContent ? { cloud_content: cloudContent } : {}),
     ...(replyToId ? { reply_to_id: uuid(replyToId, 'reply') } : {})
   };
   const { data: inserted, error: insertError } = await supabase.from('messages')
