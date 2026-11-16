@@ -835,7 +835,7 @@ function App() {
         supabase.from('profiles').select('read_receipts_enabled').eq('id',session.user.id).maybeSingle(),
         supabase.from('user_presence').select('show_online_status').eq('user_id',session.user.id).maybeSingle(),
         supabase.from('user_blocks').select('blocked_id,created_at').eq('blocker_id',session.user.id).order('created_at',{ascending:false}),
-        supabase.from('e2ee_devices').select('device_id,created_at,last_seen_at,protocol,bundle_version,curve25519_key,ed25519_key,is_active').eq('user_id',session.user.id).eq('is_active',true).order('created_at',{ascending:false}),
+        supabase.from('e2ee_devices').select('device_id,created_at,protocol,bundle_version,curve25519_key,ed25519_key,is_active').eq('user_id',session.user.id).eq('is_active',true).order('created_at',{ascending:false}),
         loadEncryptedRecord(session.user.id,'public-device'),
         supabase.from('notification_preferences').select('push_enabled,sound_enabled,vibration_enabled').eq('user_id',session.user.id).maybeSingle(),
         supabase.from('e2ee_web_state_backups').select('updated_at').eq('user_id',session.user.id).maybeSingle()
