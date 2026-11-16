@@ -1038,14 +1038,21 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     }
 
     LaunchedEffect(authCallback) {
-        if (authCallback?.scheme == "nexura" && authCallback.host == "auth" && authCallback.path == "/callback") {
+        val isTelegramCallback = authCallback?.scheme == "https" &&
+            authCallback.host == "app9098453191-login.tg.dev" && authCallback.path == "/tglogin"
+        val isSupabaseCallback = authCallback?.scheme == "nexura" &&
+            authCallback.host == "auth" && authCallback.path == "/callback"
+        if (isTelegramCallback || isSupabaseCallback) {
             busy = true
             error = ""
+            notice = ""
             try {
-                api.consumeAuthCallback(authCallback)
+                if (isTelegramCallback) api.consumeTelegramCallback(authCallback!!)
+                else api.consumeAuthCallback(authCallback!!)
                 usernameSetupRequired = false
                 signedIn = !store.accessToken.isNullOrBlank()
-                notice = "Добро пожаловать в Nexura!"
+                if (signedIn) notice = "Добро пожаловать в Nexura!"
+                else throw IOException("Вход не завершён: сессия не сохранена.")
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось завершить вход"
             } finally { busy = false }
@@ -1447,10 +1454,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Text("Твоё пространство для общения", color = SecondaryText, fontSize = 15.sp, modifier = Modifier.padding(top = 5.dp, bottom = 28.dp))
                         OutlinedButton(
                             onClick = {
-                                val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
-                                val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=custom%3Atelegram&redirect_to=$redirect"
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                error = ""
+                                notice = ""
+                                try {
+                                    val url = api.createTelegramAuthorizationUrl()
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                } catch (e: Exception) {
+                                    error = e.message ?: "Не удалось открыть Telegram"
+                                }
                             },
+                            enabled = !busy,
                             modifier = Modifier.fillMaxWidth().height(52.dp),
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
