@@ -11,6 +11,7 @@ import { encryptAndUploadMedia, downloadAndDecryptMedia } from './crypto/media.j
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY';
+const WEB_AUTH_REDIRECT = 'https://nikolasconnor.github.io/nexura-messenger/';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   realtime: { params: { eventsPerSecond: 5 } }
@@ -135,7 +136,7 @@ function AuthScreen() {
       if (mode === 'register') {
         const { data, error: authError } = await supabase.auth.signUp({
           email: email.trim(), password,
-          options: { data: { display_name: displayName.trim() }, emailRedirectTo: window.location.origin + window.location.pathname }
+          options: { data: { display_name: displayName.trim() }, emailRedirectTo: WEB_AUTH_REDIRECT }
         });
         if (authError) throw authError;
         if (!data.session) setNotice('Аккаунт создан. Подтвердите email по ссылке из письма, затем войдите.');
