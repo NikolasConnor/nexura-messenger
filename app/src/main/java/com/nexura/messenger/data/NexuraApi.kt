@@ -86,8 +86,8 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         const val PUBLIC_KEY = "sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY"
         const val AUTH_REDIRECT = "nexura://auth/callback"
         // Telegram Login OIDC client registered for Nexura in BotFather.
-        const val TELEGRAM_CLIENT_ID = "9098453191"
-        const val TELEGRAM_REDIRECT = "https://app9098453191-login.tg.dev/tglogin"
+        const val TELEGRAM_CLIENT_ID = "2837682119"
+        const val TELEGRAM_REDIRECT = "https://app2837682119-login.tg.dev/tglogin"
         private val JSON = "application/json; charset=utf-8".toMediaType()
     }
     private val client = OkHttpClient.Builder()
@@ -237,7 +237,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
      * request to oauth.telegram.org/token that previously consumed the OAuth state on timeout.
      */
     suspend fun consumeTelegramCallback(uri: Uri) {
-        if (uri.scheme != "https" || uri.host != "app9098453191-login.tg.dev" || uri.path != "/tglogin") {
+        if (uri.scheme != "https" || uri.host != "app2837682119-login.tg.dev" || uri.path != "/tglogin") {
             throw IOException("Получена неизвестная ссылка авторизации Telegram.")
         }
         val providerError = uri.getQueryParameter("error")
