@@ -162,3 +162,62 @@ export async function clearLocalCryptoState(userId) {
     });
   } finally { db.close(); }
 }
+
+
+// Export decrypted record values only into the caller's in-memory snapshot.
+// The caller must encrypt the snapshot with the recovery-code backup module
+// before uploading it; raw IndexedDB ciphertext is bound to this browser key.
+export async function exportEncryptedRecords(userId) {
+  if (!userId) throw new Error('Не указан пользователь для резервной копии');
+  const db = await openDatabase();
+  try {
+    const rows = await requestValue(db.transaction(RECORD_STORE, 'readonly').objectStore(RECORD_STORE).getAll());
+    const key = await getWrappingKey(userId);
+    const ownRows = rows.filter(row => row.userId === userId);
+    const entries = [];
+    for (const row of ownRows) {
+      entries.push([row.recordId, await decryptRecord(key, userId, row)]);
+    }
+    return entries;
+  } finally { db.close(); }
+}
+
+export async function importEncryptedRecords(userId, snapshot) {
+  if (!userId || !Array.isArray(snapshot)) throw new Error('Некорректная резервная копия');
+  const validEntries = snapshot.filter(entry =>
+    Array.isArray(entry) && entry.length === 2 &&
+    typeof entry[0] === 'string' && entry[0].length > 0
+  );
+  if (validEntries.length !== snapshot.length) throw new Error('Резервная копия содержит некорректные записи');
+  if (validEntries.length === 0) throw new Error('Резервная копия пуста');
+  await saveEncryptedRecords(userId, validEntries);
+  return validEntries.length;
+}
+
+export async function loadEncryptedRecordsByPrefix(userId, prefix) {
+  if (!userId || typeof prefix !== 'string') throw new Error('Некорректный запрос криптографического хранилища');
+  const db = await openDatabase();
+  try {
+    const rows = await requestValue(db.transaction(RECORD_STORE, 'readonly').objectStore(RECORD_STORE).getAll());
+    const key = await getWrappingKey(userId);
+    const result = [];
+    for (const row of rows.filter(item => item.userId === userId && item.recordId.startsWith(prefix))) {
+      result.push([row.recordId, await decryptRecord(key, userId, row)]);
+    }
+    return result;
+  } finally { db.close(); }
+}
+
+export async function removeEncryptedRecord(userId, recordId) {
+  if (!userId || !recordId) return;
+  const db = await openDatabase();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(RECORD_STORE, 'readwrite');
+      tx.objectStore(RECORD_STORE).delete(userId + ':' + recordId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error || new Error('Не удалось удалить криптографическую запись'));
+      tx.onabort = () => reject(tx.error || new Error('Удаление криптографической записи отменено'));
+    });
+  } finally { db.close(); }
+}
