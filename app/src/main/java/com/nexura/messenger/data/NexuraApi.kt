@@ -199,8 +199,6 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)),
             Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
         )
-        val state = randomUrlSafe(24)
-        store.telegramPendingState = state
         store.telegramCodeVerifier = verifier
 
         val inAppRequestUrl = Uri.parse("https://oauth.telegram.org/crossapp").buildUpon()
@@ -228,7 +226,6 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             .appendQueryParameter("redirect_uri", TELEGRAM_REDIRECT)
             .appendQueryParameter("response_type", "code")
             .appendQueryParameter("scope", "openid profile")
-            .appendQueryParameter("state", state)
             .appendQueryParameter("code_challenge", challenge)
             .appendQueryParameter("code_challenge_method", "S256")
             .build().toString()
@@ -246,15 +243,13 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         val providerError = uri.getQueryParameter("error")
         if (!providerError.isNullOrBlank()) {
             withContext(Dispatchers.IO) {
-                store.telegramPendingState = null
                 store.telegramCodeVerifier = null
             }
             throw IOException(uri.getQueryParameter("error_description") ?: "Telegram отменил вход: $providerError")
         }
         val code = uri.getQueryParameter("code")
             ?: throw IOException("Telegram не вернул код авторизации. Начните вход заново.")
-        val state = uri.getQueryParameter("state")
-        val verifier = withContext(Dispatchers.IO) { store.consumeTelegramVerifier(state) }
+        val verifier = withContext(Dispatchers.IO) { store.consumeTelegramVerifier() }
             ?: throw IOException("Состояние входа Telegram устарело или уже использовано. Нажмите «Продолжить с Telegram» ещё раз.")
 
         val tokenRequest = Request.Builder()
