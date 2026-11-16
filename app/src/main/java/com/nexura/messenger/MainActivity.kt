@@ -342,6 +342,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var viewedProfileStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var storyHighlights by remember { mutableStateOf(emptyList<Pair<UserProfile, SocialMediaItem>>()) }
     var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialArchiveOpen by remember { mutableStateOf(false) }
@@ -1110,6 +1111,20 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             } finally {
                 socialBusy = false
             }
+        }
+    }
+
+    LaunchedEffect(signedIn, homeTab) {
+        if (signedIn && homeTab == "chats") {
+            runCatching {
+                val grouped = api.activeStories().groupBy { it.userId }
+                val highlights = mutableListOf<Pair<UserProfile, SocialMediaItem>>()
+                for ((userId, items) in grouped) {
+                    val profile = runCatching { api.userProfile(userId) }.getOrNull() ?: continue
+                    highlights += profile to (items.firstOrNull() ?: continue)
+                }
+                storyHighlights = highlights
+            }.onFailure { error = it.message ?: "Не удалось загрузить истории" }
         }
     }
 
@@ -2100,6 +2115,31 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         if (homeTab == "chats") {
+                            if (storyHighlights.isNotEmpty()) {
+                                Text("Истории", color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp, bottom = 7.dp))
+                                LazyRow(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    item {
+                                        Column(Modifier.width(64.dp).clickable { settingsOpen = true; scope.launch { runCatching { val p = api.myProfile(); socialPhotos = api.profilePhotos(p.id); socialStories = api.activeStories().filter { it.userId == p.id } } } }, horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Box(Modifier.size(58.dp).border(2.dp, Accent.copy(alpha = 0.7f), CircleShape).padding(3.dp).clip(CircleShape).background(Surface1), contentAlignment = Alignment.Center) {
+                                                Avatar(profileName.ifBlank { "Вы" }, profileAvatar)
+                                                Box(Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(14.dp)) }
+                                            }
+                                            Text("Моя история", color = SecondaryText, fontSize = 10.sp, maxLines = 1)
+                                        }
+                                    }
+                                    items(storyHighlights, key = { it.second.id }) { (profile, story) ->
+                                        Column(Modifier.width(64.dp).clickable {
+                                            selectedSocialStory = story
+                                            scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.storyReaction(story.id) } catch (e: Exception) { error = e.message ?: "Не удалось открыть историю" } finally { socialInteractionBusy = false } }
+                                        }, horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Box(Modifier.size(58.dp).border(2.dp, Brush.linearGradient(listOf(Accent, Accent2)), CircleShape).padding(3.dp).clip(CircleShape).background(Surface1), contentAlignment = Alignment.Center) {
+                                                Avatar(profile.displayName, profile.avatar)
+                                            }
+                                            Text(profile.displayName, color = SecondaryText, fontSize = 10.sp, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
                             OutlinedTextField(
                                 value = chatFilter,
                                 onValueChange = { chatFilter = it },
