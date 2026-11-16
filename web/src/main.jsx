@@ -112,6 +112,23 @@ function AuthScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  async function startOAuth(provider) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: window.location.origin + window.location.pathname,
+          scopes: provider === 'custom:telegram' ? 'openid profile' : 'email profile'
+        }
+      });
+      if (authError) throw authError;
+    } catch (e) {
+      setError(e.message || 'Не удалось начать вход');
+      setBusy(false);
+    }
+  }
+
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     try {
@@ -145,6 +162,15 @@ function AuthScreen() {
       <div className="auth-card">
         <div className="mobile-brand"><span className="brand-mark"><MessageCircle size={21}/></span>Nexura</div>
         <div className="auth-heading"><div className="eyebrow">РАДЫ ТЕБЯ ВИДЕТЬ</div><h2>{mode === 'login' ? 'С возвращением' : 'Создать аккаунт'}</h2><p>{mode === 'login' ? 'Войди, чтобы продолжить общение.' : 'Заполни данные, чтобы присоединиться к Nexura.'}</p></div>
+        <div className="auth-provider-buttons">
+          <button type="button" className="provider-btn google-provider" onClick={() => startOAuth('google')} disabled={busy}>
+            <span className="google-mark" aria-hidden="true">G</span><span>Продолжить с Google</span>
+          </button>
+          <button type="button" className="provider-btn telegram-provider" onClick={() => startOAuth('custom:telegram')} disabled={busy}>
+            <Send size={17}/><span>Продолжить с Telegram</span>
+          </button>
+        </div>
+        <div className="auth-divider"><span>или по электронной почте</span></div>
         <form onSubmit={submit} className="auth-form">
           {mode === 'register' && <label>Как тебя называть<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Твоё имя" required autoComplete="name"/></label>}
           <label>Email<div className="input-wrap"><Mail size={17}/><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@example.com" required autoComplete="email"/></div></label>
