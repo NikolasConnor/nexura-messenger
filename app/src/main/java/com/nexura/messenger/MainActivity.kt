@@ -428,7 +428,19 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     LaunchedEffect(signedIn, selected?.id) {
         val chatId = selected?.id
+        messageReactions = emptyMap()
+        pinnedMessageId = null
         if (signedIn && chatId != null) {
+            // Load immediately when a chat opens; don't leave reactions blank
+            // for the first 15 seconds (or 60 seconds in low-data mode).
+            runCatching {
+                val latestReactions = api.messageReactions(chatId)
+                val latestPin = api.pinnedMessage(chatId)
+                if (selected?.id == chatId) {
+                    messageReactions = latestReactions
+                    pinnedMessageId = latestPin
+                }
+            }
             while (true) {
                 delay(if (lowDataMode) 60_000L else 15_000L)
                 runCatching {
