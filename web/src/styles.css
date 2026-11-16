@@ -850,3 +850,27 @@ body{overscroll-behavior:none}
 @media(max-width:800px){
  .web-mobile-back{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;margin:0 0 12px;padding:9px 12px;border:1px solid #ffffff18;border-radius:10px;background:#ffffff08;color:#d8c9e8;font-size:11px;cursor:pointer;}
 }
+
+
+/* Stories feed controls and responsive rail */
+.stories-feed-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.stories-feed-actions .social-add-button{min-height:38px}
+.stories-feed-row{min-width:0;min-height:190px;align-items:stretch}
+.stories-feed-card{display:flex;flex-direction:column;min-width:0}
+.stories-feed-media{flex:1 0 150px;min-height:150px}
+.stories-feed-author{min-width:0}
+.stories-feed-author span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.stories-feed-empty{flex:1 0 min(100%,280px);min-width:min(100%,280px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.stories-feed-empty .social-empty{width:100%;min-height:110px}
+.stories-feed-actions button:disabled{opacity:.55;cursor:wait}
+@media(max-width:800px){
+ .stories-feed-actions{width:100%;justify-content:flex-start}
+ .stories-feed-actions .social-add-button{flex:1 1 auto}
+ .stories-feed-row{min-height:180px;gap:10px}
+ .stories-feed-card{flex-basis:clamp(118px,38vw,148px)}
+ .stories-feed-media{flex-basis:145px;min-height:145px}
+}
+@media(max-width:420px){
+ .stories-feed-actions{display:grid;grid-template-columns:1fr 1fr}
+ .stories-feed-actions .social-add-button{padding:9px 7px;font-size:10px}
+}
