@@ -97,7 +97,13 @@ export async function publishSocialMedia(supabase, userId, file, caption, kind) 
     await supabase.storage.from(SOCIAL_BUCKET).remove([path]).catch(() => {});
     throw error;
   }
-  return { ...data, url: await socialSignedUrl(supabase, path, kind === 'story' ? 86400 : 7 * 86400) };
+  let url = null;
+  let urlError = null;
+  try { url = await socialSignedUrl(supabase, path, kind === 'story' ? 86400 : 7 * 86400); }
+  catch (error) { urlError = error?.message || 'Не удалось подготовить ссылку на медиа'; }
+  // The database row is already committed. A signing failure must not make
+  // the caller report a failed publication and invite a duplicate retry.
+  return { ...data, url, urlError };
 }
 
 export async function deleteSocialMedia(supabase, item, kind) {
