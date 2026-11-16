@@ -633,7 +633,7 @@ body{overscroll-behavior:none}
 .pending-chat-media .pending-image-preview{display:block;width:min(220px,42vw);max-height:180px;object-fit:cover;border-radius:9px}
 .pending-chat-media .pending-video-preview{display:block;width:min(230px,45vw);max-height:170px;border-radius:9px}
 .pending-chat-media .pending-file-icon{font-size:24px;flex:0 0 auto}
-.settings-section-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:5px;border:1px solid var(--line);border-radius:12px;background:#100d19}
+.settings-section-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;padding:5px;border:1px solid var(--line);border-radius:12px;background:#100d19}
 .settings-section-tabs button{border:0;border-radius:9px;background:transparent;color:#a69bb7;padding:10px 5px;font-size:11px}.settings-section-tabs button.active{background:#302642;color:#e4d9ff}
 .advanced-settings-content{display:grid;gap:13px;max-height:55vh;overflow:auto;padding:4px 2px}
 .setting-toggle-row,.device-row,.blocked-user-row{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#211c2b}

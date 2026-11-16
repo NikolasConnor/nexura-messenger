@@ -1518,7 +1518,7 @@ function App() {
       setReplyTarget(null);
       loadChats();
     } catch (error) {
-      setNotice('Не удалось отправить защищённое сообщение: ' + (error?.message || 'ошибка'));
+      setNotice('Не удалось отправить сообщение: ' + (error?.message || 'ошибка'));
     } finally { setSending(false); }
   }
 
@@ -1755,7 +1755,7 @@ function App() {
               </div>
             </React.Fragment>;
           })}
-          <div className="security-note"><LockKeyhole size={14}/><span>{e2eeStatus}</span></div>
+          <div className="security-note"><LockKeyhole size={14}/><span>{selected.chatMode==='cloud'?'Облачный режим: текст хранится без сквозного шифрования':e2eeStatus}</span></div>
         </div>
         {(replyTarget || editingMessageId) && <div className="reply-composer"><span>{editingMessageId ? 'Редактирование сообщения' : 'Ответ на: '+String(replyTarget?.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>{setReplyTarget(null);setEditingMessageId(null);setDraft('');}} aria-label="Отменить">×</button></div>}
         {selected.kind === 'direct' || selected.kind === 'group' ? <form className="composer" onSubmit={sendMessage}>
@@ -1766,7 +1766,7 @@ function App() {
             <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={!e2eeReady||sending||recording||!!pendingMedia} title="Прикрепить файл" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
             <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={!e2eeReady||sending||!!pendingMedia} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
             <textarea ref={composerInputRef} value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}else if(event.key==='Escape'&&(replyTarget||editingMessageId)){setReplyTarget(null);setEditingMessageId(null);setDraft('');}}} placeholder={e2eeReady ? 'Сообщение' : 'Подключаем защищённое соединение…'} maxLength={12000} rows={1} disabled={(!e2eeReady&&selected.chatMode!=='cloud') || sending}/>
-            <button type="button" className="composer-schedule" onClick={openScheduleDialog} disabled={!draft.trim()||sending} title="Отложить отправку" aria-label="Отложить отправку"><Clock size={17}/></button>
+            <button type="button" className="composer-schedule" onClick={openScheduleDialog} disabled={!draft.trim()||sending} title={scheduledCount?'Отложить отправку · в очереди: '+scheduledCount:'Отложить отправку'} aria-label="Отложить отправку"><Clock size={17}/></button>
             <button className="send-button" type="submit" disabled={(!e2eeReady&&selected.chatMode!=='cloud') || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button>
           </div>
           <div className="composer-hint"><LockKeyhole size={11}/><span>{selected.chatMode==='cloud'?'Облачный режим · без E2EE':e2eeReady ? 'Сквозное шифрование включено' : 'Ожидаем подключение шифрования'}</span><span className="composer-shortcut">Enter — отправить · Shift + Enter — перенос</span></div>
@@ -1792,7 +1792,7 @@ function App() {
     </div>}
     {scheduleOpen&&<div className="modal-backdrop" onClick={()=>!scheduleBusy&&setScheduleOpen(false)}><section className="group-modal schedule-modal" onClick={event=>event.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">ОТЛОЖЕННАЯ ОТПРАВКА</div><h3>Запланировать сообщение</h3></div><button className="icon-button" onClick={()=>setScheduleOpen(false)} disabled={scheduleBusy}><X size={18}/></button></div>
-      <div className="schedule-preview">{draft}</div><label className="modal-label">Дата и время<input type="datetime-local" value={scheduleAt} min={new Date(Date.now()+60000).toISOString().slice(0,16)} onChange={event=>setScheduleAt(event.target.value)}/></label>
+      <div className="schedule-preview">{draft}</div><label className="modal-label">Дата и время<input type="datetime-local" value={scheduleAt} onChange={event=>setScheduleAt(event.target.value)}/></label>
       <p className="settings-description">Сообщение отправится, когда веб-клиент открыт. Если браузер будет закрыт, оно уйдёт при следующем открытии Nexura.</p>
       <div className="modal-foot"><button className="secondary-btn" onClick={()=>setScheduleOpen(false)} disabled={scheduleBusy}>Отмена</button><button className="primary-btn" onClick={scheduleCurrentMessage} disabled={scheduleBusy}>{scheduleBusy?'Сохраняем…':'Запланировать'}</button></div>
     </section></div>}
@@ -1864,7 +1864,7 @@ function App() {
         <div className="settings-info-note"><LockKeyhole size={17}/> Резервная копия содержит только зашифрованное состояние браузерного E2EE. Код восстановления не отправляется на сервер.</div>
         <div className="settings-description">{webBackupExists?'В облаке есть резервная копия веб-устройства.':'Резервной копии веб-устройства пока нет.'}</div>
         <button className="primary-btn" onClick={createWebE2eeBackup} disabled={backupBusy||!e2eeReady}>{backupBusy?'Создаём…':webBackupExists?'Обновить резервную копию':'Создать резервную копию'}</button>
-        {recoveryCode&&<div className="backup-recovery-box"><b>Новый код восстановления</b><code>{recoveryCode}</code><button className="secondary-btn" onClick={()=>navigator.clipboard?.writeText(recoveryCode).then(()=>setNotice('Код скопирован')).catch(()=>setNotice('Не удалось скопировать код'))}>Скопировать код</button><small>Запиши код на бумаге или сохрани в менеджере паролей. Если потеряешь его, расшифровать копию будет невозможно.</small></div>}
+        {recoveryCode&&<div className="backup-recovery-box"><b>Новый код восстановления</b><code>{recoveryCode}</code><button className="secondary-btn" onClick={async()=>{try{if(!navigator.clipboard?.writeText||!window.isSecureContext)throw new Error('Буфер обмена недоступен');await navigator.clipboard.writeText(recoveryCode);setNotice('Код скопирован');}catch(error){setNotice('Не удалось скопировать код: '+error.message);}}}>Скопировать код</button><small>Запиши код на бумаге или сохрани в менеджере паролей. Если потеряешь его, расшифровать копию будет невозможно.</small></div>}
         <div className="backup-restore-box"><b>Восстановить на новом браузере</b><p>Введи код от резервной копии. Восстановление доступно только если на этом браузере ещё не создано E2EE-устройство.</p><input value={restoreCode} onChange={event=>setRestoreCode(event.target.value.trim())} placeholder="Код восстановления" autoComplete="off"/><button className="secondary-btn" onClick={restoreWebE2eeBackup} disabled={backupBusy||!restoreCode.trim()||!e2eeRecoveryRequired}>{backupBusy?'Восстанавливаем…':'Восстановить ключи'}</button></div>
       </div>}
       {settingsSection==='blocked'&&<div className="advanced-settings-content">
