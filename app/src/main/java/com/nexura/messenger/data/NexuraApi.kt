@@ -224,15 +224,13 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             throw IOException("Supabase подтвердил вход, но не вернул полную сессию. Повторите вход.")
         }
     }
-    suspend fun signUp(email: String, password: String, displayName: String, username: String) {
-        val normalizedUsername = username.trim().removePrefix("@").lowercase(java.util.Locale.US)
-        validateUsername(normalizedUsername)
+    suspend fun signUp(email: String, password: String, displayName: String) {
         val redirect = java.net.URLEncoder.encode(AUTH_REDIRECT, "UTF-8")
         val result = JSONObject(call("/auth/v1/signup?redirect_to=$redirect", "POST",
             JSONObject().put("email", email).put("password", password)
-                .put("data", JSONObject().put("display_name", displayName).put("username", normalizedUsername)).toString(), auth = false))
+                .put("data", JSONObject().put("display_name", displayName.trim())).toString(), auth = false))
         if (result.has("access_token")) saveSession(result)
-        else throw IOException("Аккаунт создан. Подтвердите email по ссылке из письма, затем вернитесь в Nexura.")
+        else throw IOException("Аккаунт создан. Подтвердите email по ссылке из письма, затем вернитесь в Nexura и придумайте username.")
     }
     // EncryptedSharedPreferences performs encryption/decryption synchronously.
     // Never write session tokens on the Android main thread after a network response.
