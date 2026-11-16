@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
 import { Room, RoomEvent, Track } from 'livekit-client';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, MicOff, Bell, Pin, Clock } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, MicOff, Bell, Pin, Star, Clock } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadEncryptedRecord, exportEncryptedRecords, importEncryptedRecords, loadEncryptedRecordsByPrefix, removeEncryptedRecord, saveEncryptedRecords } from './crypto/secure-store.js';
@@ -1328,6 +1328,36 @@ function App() {
     catch(error){setNotice('Не удалось изменить микрофон: '+error.message);}
   }
 
+  async function openSavedMessages() {
+    try{
+      const {data,error}=await supabase.rpc('get_or_create_saved_conversation');
+      if(error)throw error;
+      const idValue=String(data||'').replace(/^"|"$/g,'');
+      if(!idValue)throw new Error('Сервер не вернул чат Избранного');
+      const {data:row,error:readError}=await supabase.from('conversations')
+        .select('id,kind,title,chat_mode,last_message_at').eq('id',idValue).single();
+      if(readError)throw readError;
+      const chat={id:row.id,kind:row.kind,chatMode:row.chat_mode||'cloud',title:'⭐ Избранное',avatar:'⭐',peerUserId:null,updated:row.last_message_at,unread:0};
+      setChats(previous=>[chat,...previous.filter(item=>item.id!==chat.id)]);
+      openChat(chat);
+    }catch(error){setNotice('Не удалось открыть Избранное: '+error.message);}
+  }
+
+  async function saveMessageToSaved(message) {
+    if(!message||message.encrypted||message.decryptionError){setNotice('Это сообщение ещё не расшифровано и его нельзя сохранить.');return;}
+    try{
+      const {data,error}=await supabase.rpc('get_or_create_saved_conversation');
+      if(error)throw error;
+      const savedId=String(data||'').replace(/^"|"$/g,'');
+      if(!savedId)throw new Error('Не удалось открыть Избранное');
+      const text=String(message.content||'');
+      const payload={userId:session.user.id,conversationId:savedId,messageId:crypto.randomUUID(),plaintext:text,messageType:message.message_type||'text'};
+      await sendCloudMessage(supabase,payload);
+      setMessageMenu(null);setNotice('Сообщение сохранено в ⭐ Избранное');
+      loadChats({silent:true});
+    }catch(error){setNotice('Не удалось сохранить сообщение: '+error.message);}
+  }
+
   async function createGroupChat() {
     const title = groupTitle.trim();
     const memberIds = [...new Set(groupMembers)];
@@ -1693,6 +1723,7 @@ function App() {
       </div>
       <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КАТАЛОГ ПОЛЬЗОВАТЕЛЕЙ':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
       <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
+      {activeTab==='chats'&&<button className="saved-messages-shortcut" onClick={openSavedMessages}><Star size={16} fill="currentColor"/> Избранное</button>}
       <div className="chat-list">
         {activeTab==='chats' ? <>
           {loadingChats && chats.length===0 && <div className="chat-skeleton-list" aria-label="Загружаем чаты">{Array.from({length:5},(_,i)=><div className="chat-skeleton" key={i}><i/><span><b/><small/></span><em/></div>)}</div>}
@@ -1800,7 +1831,7 @@ function App() {
     </main>
     {activeMenuMessage && createPortal(<div className="message-context-menu message-context-menu-floating" style={{top:messageMenuPosition.top,left:messageMenuPosition.left}} role="menu" aria-label="Действия с сообщением" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setReplyTarget(activeMenuMessage);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
-      <button role="menuitem" onClick={()=>{copyMessage(activeMenuMessage);setMessageMenu(null);}}><Copy size={15}/>Копировать</button><button role="menuitem" onClick={()=>togglePinnedChatMessage(activeMenuMessage)}><Pin size={15}/>{pinnedMessageId===activeMenuMessage.id?'Открепить':'Закрепить в чате'}</button>
+      <button role="menuitem" onClick={()=>{copyMessage(activeMenuMessage);setMessageMenu(null);}}><Copy size={15}/>Копировать</button>{!activeMenuMessage.encrypted&&!activeMenuMessage.decryptionError&&<button role="menuitem" onClick={()=>saveMessageToSaved(activeMenuMessage)}><Star size={15}/>Сохранить в Избранное</button>}<button role="menuitem" onClick={()=>togglePinnedChatMessage(activeMenuMessage)}><Pin size={15}/>{pinnedMessageId===activeMenuMessage.id?'Открепить':'Закрепить в чате'}</button>
       {!activeMenuMessage.encrypted && <button role="menuitem" onClick={()=>{setForwardMessage(activeMenuMessage);setMessageMenu(null);}}><Forward size={15}/>Переслать</button>}
       {activeMenuMine && selected?.kind==='direct' && !activeMenuMessage.encrypted && <button role="menuitem" onClick={()=>{startEditing(activeMenuMessage);setMessageMenu(null);}}><Pencil size={15}/>Изменить</button>}
       {activeMenuMine && <button role="menuitem" className="danger-action" onClick={()=>{setMessageMenu(null);removeOwnMessage(activeMenuMessage);}} disabled={pendingAction}><Trash2 size={15}/>Удалить</button>}
