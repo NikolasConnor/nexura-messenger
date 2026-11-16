@@ -40,6 +40,7 @@ object AudioTranscriber {
     private const val MAX_ARCHIVE_BYTES = 100L * 1024L * 1024L
     private const val MAX_EXTRACTED_BYTES = 250L * 1024L * 1024L
     private val modelMutex = Mutex()
+    private val recognitionMutex = Mutex()
 
     suspend fun transcribe(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
         val app = context.applicationContext
@@ -65,18 +66,20 @@ object AudioTranscriber {
                 throw IOException("Голосовое сообщение превышает лимит расшифровки 25 МБ")
             }
             val modelDirectory = modelMutex.withLock { ensureModel(app) }
-            val model = Model(modelDirectory.absolutePath)
-            try {
-                val recognizer = Recognizer(model, SAMPLE_RATE.toFloat())
+            recognitionMutex.withLock {
+                val model = Model(modelDirectory.absolutePath)
                 try {
-                    val transcript = decodeAndRecognize(audioFile, recognizer)
-                    if (transcript.isBlank()) throw IOException("Не удалось распознать речь в этом сообщении")
-                    transcript
+                    val recognizer = Recognizer(model, SAMPLE_RATE.toFloat())
+                    try {
+                        val transcript = decodeAndRecognize(audioFile, recognizer)
+                        if (transcript.isBlank()) throw IOException("Не удалось распознать речь в этом сообщении")
+                        transcript
+                    } finally {
+                        recognizer.close()
+                    }
                 } finally {
-                    recognizer.close()
+                    model.close()
                 }
-            } finally {
-                model.close()
             }
         } finally {
             temporaryAudio?.delete()
