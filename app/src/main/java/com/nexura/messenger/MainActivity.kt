@@ -3123,88 +3123,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                     }
-                    if (selectedSocialPhoto != null) {
-                        val photo = selectedSocialPhoto!!
-                        AlertDialog(
-                            onDismissRequest = { if (!socialInteractionBusy) selectedSocialPhoto = null },
-                            title = { Text("Фотография") },
-                            text = {
-                                Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография публикации", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { selectedSocialPhoto = null; mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
-                                    if (photo.caption.isNotBlank()) Text(photo.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.toggleProfilePhotoLike(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
-                                            Text(if (socialPhotoLikes.likedByMe) "♥  Лайк " + socialPhotoLikes.count else "♡  Лайк " + socialPhotoLikes.count, color = if (socialPhotoLikes.likedByMe) Accent else MainText)
-                                        }
-                                        Text("Комментарии · " + socialPhotoComments.size, color = SecondaryText, fontSize = 12.sp)
-                                    }
-                                    socialPhotoComments.forEach { comment ->
-                                        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(10.dp)).background(Surface1).padding(9.dp)) {
-                                            Text(if (comment.userId == store.userId) "Вы" else "Пользователь", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                            Text(comment.content, color = MainText, fontSize = 13.sp)
-                                        }
-                                    }
-                                    if (socialPhotoComments.isEmpty()) Text("Пока нет комментариев. Будьте первым!", color = SecondaryText, fontSize = 12.sp)
-                                    OutlinedTextField(value = socialCommentDraft, onValueChange = { socialCommentDraft = it.take(1000) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = { Text("Написать комментарий…") }, maxLines = 3, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
-                                }
-                            },
-                            confirmButton = {
-                                TextButton(enabled = socialCommentDraft.isNotBlank() && !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { api.addProfilePhotoComment(photo.id, socialCommentDraft); socialCommentDraft = ""; socialPhotoComments = api.profilePhotoComments(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось отправить комментарий" } finally { socialInteractionBusy = false } } }) { Text("Отправить") }
-                            },
-                            dismissButton = { TextButton(onClick = { selectedSocialPhoto = null }) { Text("Закрыть") } }
-                        )
-                    }
-                    if (selectedSocialStory != null) {
-                        val story = selectedSocialStory!!
-                        AlertDialog(
-                            onDismissRequest = { if (!socialInteractionBusy) selectedSocialStory = null },
-                            title = { Text("История") },
-                            text = {
-                                Column {
-                                    if (story.mediaType == "video") {
-                                        Box(
-                                            Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(14.dp)).background(Surface2)
-                                                .clickable { selectedSocialStory = null; mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "video" },
-                                            contentAlignment = Alignment.Center
-                                        ) { Icon(Icons.Default.PlayArrow, "Воспроизвести видеоисторию", tint = Color.White, modifier = Modifier.size(56.dp)) }
-                                    } else {
-                                        AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { selectedSocialStory = null; mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
-                                    }
-                                    if (story.caption.isNotBlank()) Text(story.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.toggleStoryLike(story.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
-                                            Text(if (socialStoryLikes.likedByMe) "♥  Лайк " + socialStoryLikes.count else "♡  Лайк " + socialStoryLikes.count, color = if (socialStoryLikes.likedByMe) Accent else MainText)
-                                        }
-                                        Text("История исчезнет через 24 часа", color = SecondaryText, fontSize = 11.sp)
-                                    }
-                                    if (story.userId != store.userId) {
-                                        OutlinedTextField(value = socialReplyDraft, onValueChange = { socialReplyDraft = it.take(1000) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = { Text("Ответить автору в личку…") }, maxLines = 3, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
-                                    }
-                                }
-                            },
-                            confirmButton = {
-                                if (story.userId != store.userId) TextButton(enabled = socialReplyDraft.isNotBlank() && !socialInteractionBusy, onClick = {
-                                    scope.launch {
-                                        socialInteractionBusy = true
-                                        try {
-                                            val chatId = api.createDirect(story.userId)
-                                            val refreshed = api.chats()
-                                            chats = refreshed
-                                            val chat = refreshed.firstOrNull { it.id == chatId }
-                                                ?: ChatItem(chatId, "Пользователь", "direct", null, peerUserId = story.userId)
-                                            if (refreshed.none { it.id == chatId }) chats = refreshed + chat
-                                            openChat(chat)
-                                            draft = "↩ Ответ на историю: " + story.caption.ifBlank { if (story.mediaType == "video") "видео" else "фото" } + "\n" + socialReplyDraft.trim()
-                                            selectedSocialStory = null
-                                            homeTab = "chats"
-                                        } catch (e: Exception) { error = e.message ?: "Не удалось открыть личный чат" }
-                                        finally { socialInteractionBusy = false }
-                                    }
-                                }) { Text("Перейти в личку") }
-                            },
-                            dismissButton = { TextButton(onClick = { selectedSocialStory = null }) { Text("Закрыть") } }
-                        )
-                    }
+                    
+                    
                     if (trustCandidate != null && trustPeerId != null) {
                         val remote = trustCandidate!!
                         val client = e2eeClient
@@ -4355,6 +4275,91 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             }
         )
     }
+    // Social media dialogs must render on every tab, not only inside an open chat.
+    if (selectedSocialPhoto != null) {
+            val photo = selectedSocialPhoto!!
+            AlertDialog(
+                onDismissRequest = { if (!socialInteractionBusy) selectedSocialPhoto = null },
+                title = { Text("Фотография") },
+                text = {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                        AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография публикации", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { selectedSocialPhoto = null; mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                        if (photo.caption.isNotBlank()) Text(photo.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.toggleProfilePhotoLike(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
+                                Text(if (socialPhotoLikes.likedByMe) "♥  Лайк " + socialPhotoLikes.count else "♡  Лайк " + socialPhotoLikes.count, color = if (socialPhotoLikes.likedByMe) Accent else MainText)
+                            }
+                            Text("Комментарии · " + socialPhotoComments.size, color = SecondaryText, fontSize = 12.sp)
+                        }
+                        socialPhotoComments.forEach { comment ->
+                            Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(10.dp)).background(Surface1).padding(9.dp)) {
+                                Text(if (comment.userId == store.userId) "Вы" else "Пользователь", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text(comment.content, color = MainText, fontSize = 13.sp)
+                            }
+                        }
+                        if (socialPhotoComments.isEmpty()) Text("Пока нет комментариев. Будьте первым!", color = SecondaryText, fontSize = 12.sp)
+                        OutlinedTextField(value = socialCommentDraft, onValueChange = { socialCommentDraft = it.take(1000) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = { Text("Написать комментарий…") }, maxLines = 3, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                    }
+                },
+                confirmButton = {
+                    TextButton(enabled = socialCommentDraft.isNotBlank() && !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { api.addProfilePhotoComment(photo.id, socialCommentDraft); socialCommentDraft = ""; socialPhotoComments = api.profilePhotoComments(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось отправить комментарий" } finally { socialInteractionBusy = false } } }) { Text("Отправить") }
+                },
+                dismissButton = { TextButton(onClick = { selectedSocialPhoto = null }) { Text("Закрыть") } }
+            )
+                        }
+    
+        if (selectedSocialStory != null) {
+            val story = selectedSocialStory!!
+            AlertDialog(
+                onDismissRequest = { if (!socialInteractionBusy) selectedSocialStory = null },
+                title = { Text("История") },
+                text = {
+                    Column {
+                        if (story.mediaType == "video") {
+                            Box(
+                                Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(14.dp)).background(Surface2)
+                                    .clickable { selectedSocialStory = null; mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "video" },
+                                contentAlignment = Alignment.Center
+                            ) { Icon(Icons.Default.PlayArrow, "Воспроизвести видеоисторию", tint = Color.White, modifier = Modifier.size(56.dp)) }
+                        } else {
+                            AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { selectedSocialStory = null; mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                        }
+                        if (story.caption.isNotBlank()) Text(story.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.toggleStoryLike(story.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
+                                Text(if (socialStoryLikes.likedByMe) "♥  Лайк " + socialStoryLikes.count else "♡  Лайк " + socialStoryLikes.count, color = if (socialStoryLikes.likedByMe) Accent else MainText)
+                            }
+                            Text("История исчезнет через 24 часа", color = SecondaryText, fontSize = 11.sp)
+                        }
+                        if (story.userId != store.userId) {
+                            OutlinedTextField(value = socialReplyDraft, onValueChange = { socialReplyDraft = it.take(1000) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = { Text("Ответить автору в личку…") }, maxLines = 3, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (story.userId != store.userId) TextButton(enabled = socialReplyDraft.isNotBlank() && !socialInteractionBusy, onClick = {
+                        scope.launch {
+                            socialInteractionBusy = true
+                            try {
+                                val chatId = api.createDirect(story.userId)
+                                val refreshed = api.chats()
+                                chats = refreshed
+                                val chat = refreshed.firstOrNull { it.id == chatId }
+                                    ?: ChatItem(chatId, "Пользователь", "direct", null, peerUserId = story.userId)
+                                if (refreshed.none { it.id == chatId }) chats = refreshed + chat
+                                openChat(chat)
+                                draft = "↩ Ответ на историю: " + story.caption.ifBlank { if (story.mediaType == "video") "видео" else "фото" } + "\n" + socialReplyDraft.trim()
+                                selectedSocialStory = null
+                                homeTab = "chats"
+                            } catch (e: Exception) { error = e.message ?: "Не удалось открыть личный чат" }
+                            finally { socialInteractionBusy = false }
+                        }
+                    }) { Text("Перейти в личку") }
+                },
+                dismissButton = { TextButton(onClick = { selectedSocialStory = null }) { Text("Закрыть") } }
+            )
+                        }
+
     // Global media viewer, independent of the currently selected screen.
     if (mediaViewerUri != null) {
         Dialog(onDismissRequest = { mediaViewerUri = null }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
