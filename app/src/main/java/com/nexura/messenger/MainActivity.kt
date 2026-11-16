@@ -2120,8 +2120,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         if (homeTab == "chats") {
-                            if (storyHighlights.isNotEmpty()) {
-                                Text("Истории", color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp, bottom = 7.dp))
+                            Text("Истории", color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp, bottom = 7.dp))
                                 LazyRow(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     item {
                                         Column(Modifier.width(64.dp).clickable { settingsOpen = true; scope.launch { runCatching { val p = api.myProfile(); socialPhotos = api.profilePhotos(p.id); socialStories = api.activeStories().filter { it.userId == p.id } } } }, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2144,7 +2143,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                     }
                                 }
-                            }
                             OutlinedTextField(
                                 value = chatFilter,
                                 onValueChange = { chatFilter = it },
