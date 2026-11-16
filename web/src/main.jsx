@@ -62,8 +62,18 @@ function Avatar({ value, name, className = '' }) {
   return <div className={'avatar '+className}>{src ? <img src={src} alt="" loading="lazy"/> : value ? value : initials(name || '?')}</div>;
 }
 function isEncrypted(content = '') {
-  const value = String(content).trim();
-  return value.startsWith('{') && (value.includes('"ciphertext"') || value.includes('"protocol"') || value.includes('"nexura"') || value.includes('"kind"'));
+  const raw = String(content || '').trim();
+  if (!raw.startsWith('{')) return false;
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || value.schema === 'nexura-media-v1') return false;
+    return value.protocol === 'nexura-olm-group-v1' ||
+      value.protocol === 'nexura-olm-v1' ||
+      (Array.isArray(value.recipients) && typeof value.sender_device_id === 'string') ||
+      typeof value.ciphertext === 'string';
+  } catch {
+    return false;
+  }
 }
 
 
@@ -245,7 +255,7 @@ function App() {
   const [profileDraft, setProfileDraft] = useState({ display_name: '', username: '', avatar_url: '🙂', bio: '', age: '' });
   const [profileBusy, setProfileBusy] = useState(false);
   const [draft, setDraft] = useState('');
-  const [pendingMedia, setPendingMedia] = useState(null);
+  const [pendingMedia, setPendingMedia] = useState([]);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const fileInputRef = useRef(null);
@@ -667,7 +677,7 @@ function App() {
     try {
       const [photos, stories] = await Promise.all([
         loadProfilePhotos(supabase, session.user.id),
-        loadStories(supabase, {userId:session.user.id, activeOnly:true})
+        loadStories(supabase, {userId:session.user.id, activeOnly:false})
       ]);
       setProfilePhotos(photos); setProfileStories(stories);
     } catch(error) { setNotice('Не удалось загрузить публикации: '+error.message); }
@@ -765,8 +775,11 @@ function App() {
       if(error){await supabase.storage.from('nexura-social-media').remove([path]);throw error;}
       const {data:signed,error:signError}=await supabase.storage.from('nexura-social-media').createSignedUrl(path,kind==='story'?86400:7*86400);
       if(signError)throw signError;
-      if(kind==='story')setProfileStories(previous=>[{...data,url:signed.signedUrl},...previous]);
-      else setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
+      if(kind==='story') {
+        const published={...data,url:signed.signedUrl,profile:{display_name:profile?.display_name||'Вы',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂'}};
+        setProfileStories(previous=>[published,...previous.filter(item=>item.id!==data.id)]);
+        setStoriesFeed(previous=>[published,...previous.filter(item=>item.id!==data.id)].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
+      } else setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
       setSocialCaption('');
       setNotice(kind==='story'?'История опубликована на 24 часа':'Фотография добавлена в профиль');
     } catch(error) { setNotice('Не удалось опубликовать: '+error.message); }
@@ -1516,13 +1529,14 @@ function App() {
     setMessageMenu(null);
   }
 
-  async function sendAttachment(fileOverride = pendingMedia, existingMessageId = null) {
-    const file = fileOverride;
+  async function sendAttachment(fileOverride = null, existingMessageId = null) {
+    const file = fileOverride || pendingMedia[0] || null;
     if (!file || !selected || (selected.kind === 'direct' && !selected.peerUserId) || (!e2eeReady&&selected.chatMode!=='cloud') || sending) return;
     setSending(true); setNotice('');
     const conversationId = selected.id;
     const messageId = existingMessageId || crypto.randomUUID();
     const createdAt = new Date().toISOString();
+    let uploadedPath = null;
     if (!existingMessageId) {
       const optimistic = {
         id:messageId, sender_id:session.user.id, content:'', created_at:createdAt,
@@ -1536,6 +1550,7 @@ function App() {
     const replyToId = existingMessageId ? (pendingMediaOutboxRef.current.get(existingMessageId)?.reply_to_id || null) : (replyTarget?.id || null);
     try {
       const metadata = await encryptAndUploadMedia(supabase, { file, userId:session.user.id, conversationId, messageId });
+      uploadedPath = metadata.path;
       const payload = {userId:session.user.id, conversationId, messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId};
       const sent = selected.chatMode==='cloud'
         ? await sendCloudMessage(supabase,payload)
@@ -1545,11 +1560,40 @@ function App() {
       pendingMediaOutboxRef.current.delete(messageId);
       if (selectedChatIdRef.current === conversationId) setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
-      setPendingMedia(null); setReplyTarget(null); loadChats();
+      setPendingMedia(previous=>previous.filter(item=>item!==file)); setReplyTarget(null); loadChats();
+      return true;
     } catch(error) {
+      if (uploadedPath) {
+        try {
+          const {data: savedMessage} = await supabase.from('messages').select('id')
+            .eq('id', messageId).eq('conversation_id', conversationId).maybeSingle();
+          if (!savedMessage) await supabase.storage.from('nexura-chat-media').remove([uploadedPath]);
+        } catch { /* Keep the original send error visible; cleanup is best-effort. */ }
+      }
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'failed'}));
       setNotice('Не удалось отправить вложение: '+(error?.message||'ошибка'));
+      return false;
     } finally { setSending(false); }
+  }
+
+  async function sendPendingAttachments() {
+    if (!pendingMedia.length || sending) return;
+    const batch = [...pendingMedia];
+    for (const file of batch) {
+      const sent = await sendAttachment(file);
+      if (!sent) break;
+    }
+  }
+
+  function addPendingMediaFiles(event) {
+    const incoming = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!incoming.length) return;
+    const valid = incoming.filter(file => file.size > 0 && file.size <= 24 * 1024 * 1024);
+    if (valid.length !== incoming.length) setNotice('Каждый файл должен быть не пустым и не больше 24 МБ.');
+    const room = Math.max(0, 10 - pendingMedia.length);
+    if (valid.length > room) setNotice('За одно сообщение можно прикрепить не более 10 файлов.');
+    if (room) setPendingMedia(previous => [...previous, ...valid].slice(0, 10));
   }
 
   function retryMediaMessage(message) {
@@ -1574,7 +1618,7 @@ function App() {
       recorder.onstop=()=>{
         const blob=new Blob(recordingChunksRef.current,{type:recorder.mimeType||'audio/webm'});
         const extension=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm';
-        if(blob.size) setPendingMedia(new File([blob],'Голосовое.'+extension,{type:blob.type}));
+        if(blob.size) setPendingMedia(previous=>previous.length>=10?previous:[...previous,new File([blob],'Голосовое.'+extension,{type:blob.type})]);
         stream.getTracks().forEach(track=>track.stop());
         setRecording(false); setRecordingSeconds(0);
       };
@@ -1813,7 +1857,7 @@ function App() {
         </div>
         <div className="web-profile-heading"><Avatar className="web-profile-avatar" value={profile?.avatar_url} name={profile?.display_name}/><div className="web-profile-title"><h2>{profile?.display_name||'Твой профиль'}</h2><span>{profile?.username?'@'+profile.username:'Username не задан'}</span>{profile?.bio&&<p>{profile.bio}</p>}{profile?.age&&<small>{profile.age} лет</small>}</div><button className="primary-btn" onClick={()=>{setProfileEditDraft({display_name:profile?.display_name||'',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂',bio:profile?.bio||'',age:profile?.age==null?'':String(profile.age)});setProfileEdit(true);}}>Изменить профиль</button></div>
         <label className="social-caption-field">Подпись к следующей публикации<input value={socialCaption} onChange={event=>setSocialCaption(event.target.value)} placeholder="Добавь описание (необязательно)" maxLength={500}/></label>
-        <div className="web-social-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Публикации доступны 24 часа</span></div><button className="social-add-button" onClick={()=>storyInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={storyInputRef} type="file" accept="image/*,video/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('story',file);event.target.value='';}}/></div>
+        <div className="web-social-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Активные истории — 24 часа, старые остаются в архиве</span></div><button className="social-add-button" onClick={()=>storyInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={storyInputRef} type="file" accept="image/*,video/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('story',file);event.target.value='';}}/></div>
           <div className="web-social-grid stories-grid">{profileStories.map(item=><button key={item.id} className="web-story-card" onClick={()=>openSocialItem(item,'story')}><div className="web-story-media">{item.media_type==='video'?<video src={item.url} muted playsInline/>:<img src={item.url} alt="История"/>}<span><Play size={16}/></span></div><small>{new Date(item.created_at).toLocaleDateString('ru-RU')}</small></button>)}{!profileStories.length&&<div className="social-empty">У тебя пока нет историй. Добавь фото или видео.</div>}</div>
         </div>
         <div className="web-social-section"><div className="web-section-heading"><div><h3>Фотографии</h3><span>Твоя галерея профиля</span></div><button className="social-add-button" onClick={()=>photoInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={photoInputRef} type="file" accept="image/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('photo',file);event.target.value='';}}/></div>
@@ -1872,12 +1916,21 @@ function App() {
         </div>
         {(replyTarget || editingMessageId) && <div className="reply-composer"><span>{editingMessageId ? 'Редактирование сообщения' : 'Ответ на: '+String(replyTarget?.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>{setReplyTarget(null);setEditingMessageId(null);setDraft('');}} aria-label="Отменить">×</button></div>}
         {selected.kind === 'direct' || selected.kind === 'group' ? <form className="composer" onSubmit={sendMessage}>
-          {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><PendingMediaPreview file={pendingMedia}/><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sending}>{sending?'Отправка…':'Отправить'}</button></div>}
+          {pendingMedia.length>0 && <div className="pending-attachments">
+            <div className="pending-attachments-list">{pendingMedia.map((file,index)=><div className="pending-attachment" key={file.name+'-'+file.size+'-'+file.lastModified+'-'+index}>
+              <span>📎</span><div><b>{file.name||'Вложение'}</b><small>{(file.size/1024/1024).toFixed(2)} МБ · будет зашифровано</small></div>
+              <button type="button" onClick={()=>setPendingMedia(previous=>previous.filter((_,i)=>i!==index))} aria-label="Убрать вложение">×</button>
+              <PendingMediaPreview file={file}/>
+            </div>)}</div>
+            <div className="pending-attachments-footer"><small>{pendingMedia.length}/10 вложений</small>
+              <button type="button" className="primary-btn" onClick={sendPendingAttachments} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending}>{sending?'Отправка…':'Отправить '+pendingMedia.length}</button>
+            </div>
+          </div>}
           {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={cancelVoiceRecording}>Отмена</button><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
-          <input ref={fileInputRef} type="file" className="visually-hidden-file"  onChange={event=>{const file=event.target.files?.[0];if(file)setPendingMedia(file);event.target.value='';}}/>
+          <input ref={fileInputRef} type="file" multiple className="visually-hidden-file" onChange={addPendingMediaFiles}/>
           <div className="composer-input-row">
-            <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={!e2eeReady||sending||recording||!!pendingMedia} title="Прикрепить файл" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
-            <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={!e2eeReady||sending||!!pendingMedia} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
+            <button type="button" className="composer-attach" onClick={()=>fileInputRef.current?.click()} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending||recording||pendingMedia.length>=10} title="Прикрепить до 10 файлов" aria-label="Прикрепить файл"><Paperclip size={18}/></button>
+            <button type="button" className={'composer-mic '+(recording?'recording':'')} onClick={recording?stopVoiceRecording:startVoiceRecording} disabled={(!e2eeReady&&selected.chatMode!=='cloud')||sending||pendingMedia.length>0} title={recording?'Завершить запись':'Записать голосовое'} aria-label={recording?'Завершить запись':'Записать голосовое'}>{recording?<Square size={16}/>:<Mic size={18}/>}</button>
             <textarea ref={composerInputRef} value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage(event);}else if(event.key==='Escape'&&(replyTarget||editingMessageId)){setReplyTarget(null);setEditingMessageId(null);setDraft('');}}} placeholder={e2eeReady ? 'Сообщение' : 'Подключаем защищённое соединение…'} maxLength={12000} rows={1} disabled={(!e2eeReady&&selected.chatMode!=='cloud') || sending}/>
             <button type="button" className="composer-schedule" onClick={openScheduleDialog} disabled={!draft.trim()||sending} title={scheduledCount?'Отложить отправку · в очереди: '+scheduledCount:'Отложить отправку'} aria-label="Отложить отправку"><Clock size={17}/></button>
             <button className="send-button" type="submit" disabled={(!e2eeReady&&selected.chatMode!=='cloud') || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button>
