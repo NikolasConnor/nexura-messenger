@@ -395,6 +395,10 @@ function App() {
   }, [session?.user?.id]);
 
   const decryptMessageRow = useCallback(async (chat, message, cloudPlaintext = null) => {
+    if(message.content==='NEXURA_CLOUD_V1'){
+      if(typeof cloudPlaintext==='string'&&cloudPlaintext.length)return {...message,content:cloudPlaintext,decrypted:true,encrypted:false,decryptionError:null,cloudMode:true};
+      return {...message,encrypted:true,decryptionError:'Не удалось открыть облачное сообщение. Проверь подключение к облачной истории.',cloudMode:true};
+    }
     if (!isEncrypted(message.content)) return message;
     // A shared encrypted cloud-history copy lets this browser restore messages
     // created for a different active device without weakening Olm device checks.
@@ -443,7 +447,7 @@ function App() {
       }
       const cloudItems = [
         ...rawRows
-          .filter(message => isEncrypted(message.content) && typeof message.cloud_content === 'string' && message.cloud_content.length)
+          .filter(message => (isEncrypted(message.content)||message.content==='NEXURA_CLOUD_V1') && typeof message.cloud_content === 'string' && message.cloud_content.length)
           .map(message => ({ id: message.id, cloud_content: message.cloud_content, scope: 'shared' })),
         ...personalArchives
           .filter(item => typeof item.message_id === 'string' && typeof item.cloud_content === 'string' && item.cloud_content.length)
@@ -1429,7 +1433,7 @@ function App() {
 
   async function sendAttachment(fileOverride = pendingMedia, existingMessageId = null) {
     const file = fileOverride;
-    if (!file || !selected || (selected.kind === 'direct' && !selected.peerUserId) || !e2eeReady || sending) return;
+    if (!file || !selected || (selected.kind === 'direct' && !selected.peerUserId) || (!e2eeReady&&selected.chatMode!=='cloud') || sending) return;
     setSending(true); setNotice('');
     const conversationId = selected.id;
     const messageId = existingMessageId || crypto.randomUUID();
@@ -1448,9 +1452,11 @@ function App() {
     try {
       const metadata = await encryptAndUploadMedia(supabase, { file, userId:session.user.id, conversationId, messageId });
       const payload = {userId:session.user.id, conversationId, messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId};
-      const sent = selected.kind === 'group'
-        ? await sendBrowserGroupMessage(supabase, payload)
-        : await sendBrowserDirectMessage(supabase, {...payload, peerUserId:selected.peerUserId});
+      const sent = selected.chatMode==='cloud'
+        ? await sendCloudMessage(supabase,payload)
+        : selected.kind === 'group'
+          ? await sendBrowserGroupMessage(supabase,payload)
+          : await sendBrowserDirectMessage(supabase,{...payload,peerUserId:selected.peerUserId});
       pendingMediaOutboxRef.current.delete(messageId);
       if (selectedChatIdRef.current === conversationId) setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
       setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
