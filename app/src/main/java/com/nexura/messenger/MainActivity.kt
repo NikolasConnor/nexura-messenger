@@ -4481,7 +4481,7 @@ private fun AudioMessagePlayer(
             )
         }.getOrNull()
     }
-    var transcript by remember(messageId) { mutableStateOf(transcriptPrefs?.getString(messageId, null)) }
+    var transcript by remember(messageId) { mutableStateOf(runCatching { transcriptPrefs?.getString(messageId, null) }.getOrNull()) }
     var transcriptExpanded by remember(messageId) { mutableStateOf(false) }
     var transcribing by remember(messageId) { mutableStateOf(false) }
     var transcriptionError by remember(messageId) { mutableStateOf<String?>(null) }
@@ -4606,7 +4606,7 @@ private fun AudioMessagePlayer(
                             try {
                                 val result = AudioTranscriber.transcribe(context, uri)
                                 transcript = result
-                                transcriptPrefs?.edit()?.putString(messageId, result)?.apply()
+                                runCatching { transcriptPrefs?.edit()?.putString(messageId, result)?.apply() }
                                 transcriptExpanded = true
                             } catch (e: Exception) {
                                 transcriptionError = e.message ?: "Не удалось расшифровать голосовое сообщение"
