@@ -2284,18 +2284,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     loadingProfile = true
                                     scope.launch {
                                         try {
-                                            val chatId = api.createDirect(person.id)
-                                            val refreshed = api.chats()
-                                            chats = refreshed
-                                            val chat = refreshed.firstOrNull { it.id == chatId }
-                                                ?: ChatItem(chatId, person.displayName, "direct", null, avatar = person.avatar, peerUserId = person.id)
-                                            if (refreshed.none { it.id == chatId }) chats = refreshed + chat
-                                            openChat(chat)
                                             viewedProfile = api.userProfile(person.id)
                                             viewedPresence = api.userPresence(person.id)
-                                            profileMedia = api.messages(chatId, e2eeClient, mediaOnly = true)
                                             viewedProfilePhotos = api.profilePhotos(person.id)
                                             viewedProfileStories = api.activeStories().filter { it.userId == person.id }
+                                            profileMedia = emptyList()
                                         } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль пользователя" }
                                         finally { loadingProfile = false }
                                     }
@@ -5089,9 +5082,11 @@ private fun OwnProfileScreen(
             else LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 items(stories, key = { it.id }) { item ->
                     Box(Modifier.size(92.dp).clip(RoundedCornerShape(15.dp)).background(Surface2).clickable { onOpenStory(item) }) {
-                        if (item.mediaType == "video") MutedVideoBanner(item.mediaUrl, Modifier.fillMaxSize())
-                        else AsyncImage(model = item.mediaUrl, contentDescription = "Ваша история", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        if (item.mediaType == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(25.dp))
+                        if (item.mediaType == "video") {
+                            Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.PlayArrow, "Видеоистория", tint = Color.White, modifier = Modifier.size(30.dp))
+                            }
+                        } else AsyncImage(model = item.mediaUrl, contentDescription = "Ваша история", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     }
                 }
             }
@@ -5128,8 +5123,8 @@ private fun PeopleDirectoryScreen(
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Все пользователи", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
-                Text("Каталог зарегистрированных пользователей Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+                Text("Люди", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
+                Text("Найдите собеседника в Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
             }
             Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp))
