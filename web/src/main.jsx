@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { loadEncryptedRecord } from './crypto/secure-store.js';
 import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch } from 'lucide-react';
