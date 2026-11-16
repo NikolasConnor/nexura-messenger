@@ -279,6 +279,55 @@ async function decryptBrowserGroupMessageOnce(supabase, userId, chatId, message)
   const uid = uuid(userId, 'user');
   let envelope;
   try { envelope = JSON.parse(message.content); } catch { throw new Error('Повреждённый E2EE-конверт'); }
+  // Compatibility with the earlier one-recipient direct-message envelope.
+  // Do not weaken recipient/device checks: decrypt only if this browser's device
+  // is the exact recipient recorded in the authenticated envelope.
+  if (envelope.protocol === 'nexura-olm-v1') {
+    if (uuid(envelope.conversation_id, 'conversation') !== uuid(chatId, 'conversation')) {
+      throw new Error('E2EE-конверт не соответствует переписке');
+    }
+    const bundle = await loadEncryptedRecord(uid, 'public-device');
+    if (!bundle) throw new Error('Браузерное E2EE-устройство не зарегистрировано');
+    if (message.sender_id === uid && envelope.sender_device_id === bundle.device_id) {
+      const own = await loadEncryptedRecord(uid, 'sent:' + message.id);
+      if (typeof own !== 'string') throw new Error('Локальная копия отправленного сообщения недоступна');
+      return own;
+    }
+    if (envelope.recipient_device_id !== bundle.device_id) {
+      throw new Error('Сообщение адресовано другому устройству; облачный архив недоступен');
+    }
+    const { data: devices, error } = await supabase.from('e2ee_devices')
+      .select('user_id,device_id,curve25519_key,ed25519_key,protocol,bundle_version')
+      .eq('user_id', message.sender_id).eq('device_id', envelope.sender_device_id).eq('is_active', true).limit(1);
+    if (error) throw error;
+    const sender = devices?.[0];
+    if (!sender || sender.curve25519_key !== envelope.sender_curve25519 ||
+        sender.protocol !== 'olm-v1' || sender.bundle_version !== 1) {
+      throw new Error('Устройство отправителя не зарегистрировано или его ключ изменился');
+    }
+    await pinDevice(uid, { ...sender, device_id: envelope.sender_device_id });
+    const key = sessionId(chatId, message.sender_id, envelope.sender_device_id);
+    const session = await loadEncryptedRecord(uid, key);
+    if (envelope.kind === 'prekey') {
+      if (session) throw new Error('Повторный или конфликтующий pre-key пакет');
+      const { accept_inbound_session } = await import('./pkg/nexura_crypto_wasm.js');
+      const account = await loadEncryptedRecord(uid, 'account');
+      if (!account) throw new Error('Не найден локальный E2EE-аккаунт');
+      const accepted = accept_inbound_session(account, sender.curve25519_key, envelope.ciphertext);
+      const text = new TextDecoder().decode(new Uint8Array(accepted.plaintext));
+      await saveEncryptedRecords(uid, [
+        ['account', accepted.account_pickle], [key, accepted.session_pickle],
+        ['received:' + message.id, text]
+      ]);
+      return text;
+    }
+    if (envelope.kind !== 'normal' || !session) throw new Error('Защищённая сессия ещё не установлена');
+    const { decrypt_message } = await import('./pkg/nexura_crypto_wasm.js');
+    const result = decrypt_message(session, envelope.ciphertext);
+    const text = new TextDecoder().decode(new Uint8Array(result.plaintext));
+    await saveEncryptedRecords(uid, [[key, result.session_pickle], ['received:' + message.id, text]]);
+    return text;
+  }
   if (envelope.protocol !== PROTOCOL || uuid(envelope.conversation_id, 'conversation') !== uuid(chatId, 'conversation') ||
       uuid(envelope.sender_user_id, 'sender') !== uuid(message.sender_id, 'message sender')) {
     throw new Error('E2EE-конверт не соответствует переписке');

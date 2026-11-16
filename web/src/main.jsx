@@ -338,13 +338,32 @@ function App() {
       ]);
       if (messageResult.error) throw messageResult.error;
       const rawRows = (messageResult.data || []).reverse();
-      const cloudItems = rawRows
-        .filter(message => isEncrypted(message.content) && typeof message.cloud_content === 'string' && message.cloud_content.length)
-        .map(message => ({ id: message.id, cloud_content: message.cloud_content, scope: 'shared' }));
+      const missingSharedIds = rawRows
+        .filter(message => isEncrypted(message.content) && !(typeof message.cloud_content === 'string' && message.cloud_content.length))
+        .map(message => message.id);
+      let personalArchives = [];
+      if (missingSharedIds.length && session?.user?.id) {
+        // Android backfills legacy messages into an account-scoped encrypted archive.
+        // The browser must read that archive too, otherwise old messages remain
+        // incorrectly bound to whichever device originally received them.
+        const { data, error } = await supabase.from('message_cloud_archives')
+          .select('message_id,cloud_content')
+          .eq('user_id', session.user.id)
+          .eq('conversation_id', chat.id)
+          .in('message_id', missingSharedIds);
+        if (!error && Array.isArray(data)) personalArchives = data;
+      }
+      const cloudItems = [
+        ...rawRows
+          .filter(message => isEncrypted(message.content) && typeof message.cloud_content === 'string' && message.cloud_content.length)
+          .map(message => ({ id: message.id, cloud_content: message.cloud_content, scope: 'shared' })),
+        ...personalArchives
+          .filter(item => typeof item.message_id === 'string' && typeof item.cloud_content === 'string' && item.cloud_content.length)
+          .map(item => ({ id: item.message_id, cloud_content: item.cloud_content, scope: 'user' }))
+      ];
       let cloudPlaintextById = new Map();
       if (cloudItems.length) {
-        // Cloud history is an additional encrypted recovery copy, not a plaintext
-        // transport. If the service is temporarily unavailable, Olm remains the fallback.
+        // Both shared and account-scoped archives remain encrypted at rest.
         try {
           const { data, error } = await supabase.functions.invoke('cloud-history', {
             body: { action: 'decrypt', conversation_id: chat.id, items: cloudItems }
