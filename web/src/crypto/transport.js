@@ -150,7 +150,17 @@ async function consumePreKey(supabase, chatId, localUserId, recipientUserId, dev
   return row;
 }
 
-export async function sendBrowserDirectMessage(supabase, {
+// Olm ratchets are stateful: serialize envelope creation and ratchet persistence,
+ // while allowing media bytes to upload in parallel before entering this queue.
+let browserSendQueue = Promise.resolve();
+
+export function sendBrowserDirectMessage(supabase, options) {
+  const task = browserSendQueue.then(() => sendBrowserDirectMessageUnlocked(supabase, options));
+  browserSendQueue = task.catch(() => {});
+  return task;
+}
+
+async function sendBrowserDirectMessageUnlocked(supabase, {
   userId, conversationId, peerUserId, messageId, plaintext, replyToId = null, messageType = 'text'
 }) {
   await initializeOlm();
