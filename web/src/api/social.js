@@ -75,7 +75,17 @@ export async function loadStories(supabase, { userId = null, activeOnly = true }
   else if (userId) query = query.lte('expires_at', new Date().toISOString());
   const { data, error } = await query.order('created_at', { ascending: false }).limit(200);
   if (error) throw error;
-  return Promise.all((data || []).map(async row => ({ ...row, url: await socialSignedUrl(supabase, row.storage_path, 24 * 60 * 60) })));
+  // A stale Storage object should not make the whole stories rail disappear.
+  const resolved = await Promise.all((data || []).map(async row => {
+    try {
+      const url = await socialSignedUrl(supabase, row.storage_path, 24 * 60 * 60);
+      return { ...row, url };
+    } catch (mediaError) {
+      console.warn('Nexura: skipping unavailable story media', row.id, mediaError?.message);
+      return null;
+    }
+  }));
+  return resolved.filter(Boolean);
 }
 
 export async function publishSocialMedia(supabase, userId, file, caption, kind) {
