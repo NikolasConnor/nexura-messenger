@@ -6,7 +6,8 @@ import { Room, RoomEvent, Track } from 'livekit-client';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, MicOff, Bell, Pin } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
-import { loadEncryptedRecord } from './crypto/secure-store.js';
+import { loadEncryptedRecord, exportEncryptedRecords, importEncryptedRecords } from './crypto/secure-store.js';
+import { createRecoveryCode, encryptBackup, decryptBackup } from './crypto/backup.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage, getPinnedMessage, setPinnedMessage } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, sendBrowserGroupMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 import { encryptAndUploadMedia, downloadAndDecryptMedia } from './crypto/media.js';
@@ -268,6 +269,12 @@ function App() {
   const callRef = useRef({});
   const [notificationPrefs, setNotificationPrefs] = useState({push_enabled:true,sound_enabled:true,vibration_enabled:false});
   const [browserNotificationPermission, setBrowserNotificationPermission] = useState(typeof Notification==='undefined'?'unsupported':Notification.permission);
+  const [e2eeRecoveryRequired,setE2eeRecoveryRequired] = useState(false);
+  const [webBackupExists,setWebBackupExists] = useState(false);
+  const [backupBusy,setBackupBusy] = useState(false);
+  const [recoveryCode,setRecoveryCode] = useState('');
+  const [restoreCode,setRestoreCode] = useState('');
+
 
 
   useEffect(() => {
@@ -341,8 +348,15 @@ function App() {
     if (!session) { setCryptoRuntimeError(''); return; }
     setE2eeReady(false);
     setE2eeStatus('Подготавливаем защищённое устройство…');
-    initializeOlm().then(() => ensureBrowserE2eeDevice(supabase, session.user.id))
-      .then(result => { setE2eeReady(true); setE2eeStatus('Защита включена · ' + result.availableKeys + ' одноразовых ключей'); })
+    initializeOlm().then(async()=>{
+      const localDevice=await loadEncryptedRecord(session.user.id,'public-device').catch(()=>null);
+      if(!localDevice){
+        const {data,error}=await supabase.from('e2ee_web_state_backups').select('user_id').eq('user_id',session.user.id).maybeSingle();
+        if(error)throw error;
+        if(data){setE2eeRecoveryRequired(true);setE2eeStatus('Найдена облачная резервная копия · требуется восстановление');setCryptoRuntimeError('Восстанови E2EE-ключи из резервной копии в настройках безопасности.');return null;}
+      }
+      return ensureBrowserE2eeDevice(supabase,session.user.id);
+    }).then(result => { if(!result)return;setE2eeRecoveryRequired(false);setE2eeReady(true);setE2eeStatus('Защита включена · ' + result.availableKeys + ' одноразовых ключей'); })
       .catch(error => { setE2eeReady(false); setCryptoRuntimeError(error?.message || 'Не удалось загрузить криптомодуль'); setE2eeStatus('Защита не готова: ' + (error?.message || 'ошибка')); });
   }, [session?.user?.id]);
 
@@ -704,19 +718,22 @@ function App() {
   async function openAdvancedSettings() {
     setAdvancedSettingsOpen(true); setSettingsSection('privacy'); setSettingsBusy(true);
     try {
-      const [profileResult,presenceResult,blocksResult,devicesResult,bundle,notificationsResult] = await Promise.all([
+      const [profileResult,presenceResult,blocksResult,devicesResult,bundle,notificationsResult,webBackupResult] = await Promise.all([
         supabase.from('profiles').select('read_receipts_enabled').eq('id',session.user.id).maybeSingle(),
         supabase.from('user_presence').select('show_online_status').eq('user_id',session.user.id).maybeSingle(),
         supabase.from('user_blocks').select('blocked_id,created_at').eq('blocker_id',session.user.id).order('created_at',{ascending:false}),
         supabase.from('e2ee_devices').select('device_id,created_at,last_seen_at,protocol,bundle_version,curve25519_key,ed25519_key,is_active').eq('user_id',session.user.id).eq('is_active',true).order('created_at',{ascending:false}),
         loadEncryptedRecord(session.user.id,'public-device'),
-        supabase.from('notification_preferences').select('push_enabled,sound_enabled,vibration_enabled').eq('user_id',session.user.id).maybeSingle()
+        supabase.from('notification_preferences').select('push_enabled,sound_enabled,vibration_enabled').eq('user_id',session.user.id).maybeSingle(),
+        supabase.from('e2ee_web_state_backups').select('updated_at').eq('user_id',session.user.id).maybeSingle()
       ]);
       if(profileResult.error)throw profileResult.error;
       if(presenceResult.error)throw presenceResult.error;
       if(blocksResult.error)throw blocksResult.error;
       if(devicesResult.error)throw devicesResult.error;
       if(notificationsResult.error)throw notificationsResult.error;
+      if(webBackupResult.error)throw webBackupResult.error;
+      setWebBackupExists(!!webBackupResult.data);
       setNotificationPrefs(notificationsResult.data||{push_enabled:true,sound_enabled:true,vibration_enabled:false});
       setBrowserNotificationPermission(typeof Notification==='undefined'?'unsupported':Notification.permission);
       setPrivacyDraft({showOnlineStatus:presenceResult.data?.show_online_status??true,readReceiptsEnabled:profileResult.data?.read_receipts_enabled??true});
@@ -726,6 +743,43 @@ function App() {
       setBrowserDeviceId(bundle?.device_id||'');
     } catch(error) { setNotice('Не удалось загрузить настройки: '+error.message); }
     finally { setSettingsBusy(false); }
+  }
+
+  async function createWebE2eeBackup() {
+    if(!e2eeReady||backupBusy)return;
+    setBackupBusy(true);
+    try {
+      const recovery=createRecoveryCode();
+      const snapshot=await exportEncryptedRecords(session.user.id);
+      const encrypted=await encryptBackup(session.user.id,snapshot,recovery);
+      const {error}=await supabase.from('e2ee_web_state_backups').upsert({
+        user_id:session.user.id,format_version:1,encrypted_payload:encrypted,updated_at:new Date().toISOString()
+      },{onConflict:'user_id'});
+      if(error)throw error;
+      setRecoveryCode(recovery);setWebBackupExists(true);
+      setNotice('Резервная копия создана. Сохрани код восстановления отдельно от этого устройства.');
+    } catch(error) { setNotice('Не удалось создать резервную копию: '+error.message); }
+    finally { setBackupBusy(false); }
+  }
+
+  async function restoreWebE2eeBackup() {
+    if(backupBusy)return;
+    setBackupBusy(true);
+    try {
+      if(await loadEncryptedRecord(session.user.id,'public-device').catch(()=>null)) {
+        throw new Error('На этом браузере уже есть криптографическая идентичность. Восстановление разрешено только на новом браузере без локального E2EE-устройства.');
+      }
+      const {data,error}=await supabase.from('e2ee_web_state_backups')
+        .select('format_version,encrypted_payload').eq('user_id',session.user.id).maybeSingle();
+      if(error)throw error;
+      if(!data?.encrypted_payload)throw new Error('Облачная резервная копия не найдена');
+      const snapshot=await decryptBackup(session.user.id,data.encrypted_payload,restoreCode);
+      const count=await importEncryptedRecords(session.user.id,snapshot);
+      setE2eeRecoveryRequired(false);setE2eeReady(false);setCryptoRuntimeError('');
+      setNotice('Ключи восстановлены ('+count+' записей). Перезапускаем веб-клиент…');
+      window.location.reload();
+    } catch(error) { setNotice('Не удалось восстановить копию: '+error.message); }
+    finally { setBackupBusy(false); }
   }
 
   async function savePrivacySettings(next) {
@@ -1615,7 +1669,7 @@ function App() {
     </section></div>}
     {advancedSettingsOpen && <div className="modal-backdrop" onClick={()=>setAdvancedSettingsOpen(false)}><section className="group-modal advanced-settings-modal" onClick={event=>event.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">УПРАВЛЕНИЕ АККАУНТОМ</div><h3>Настройки</h3></div><button className="icon-button" onClick={()=>setAdvancedSettingsOpen(false)}><X size={18}/></button></div>
-      <div className="settings-section-tabs"><button className={settingsSection==='privacy'?'active':''} onClick={()=>setSettingsSection('privacy')}>Приватность</button><button className={settingsSection==='notifications'?'active':''} onClick={()=>setSettingsSection('notifications')}>Уведомления</button><button className={settingsSection==='devices'?'active':''} onClick={()=>setSettingsSection('devices')}>Устройства</button><button className={settingsSection==='blocked'?'active':''} onClick={()=>setSettingsSection('blocked')}>Блокировки</button></div>
+      <div className="settings-section-tabs"><button className={settingsSection==='privacy'?'active':''} onClick={()=>setSettingsSection('privacy')}>Приватность</button><button className={settingsSection==='notifications'?'active':''} onClick={()=>setSettingsSection('notifications')}>Уведомления</button><button className={settingsSection==='devices'?'active':''} onClick={()=>setSettingsSection('devices')}>Устройства</button><button className={settingsSection==='blocked'?'active':''} onClick={()=>setSettingsSection('blocked')}>Блокировки</button><button className={settingsSection==='backup'?'active':''} onClick={()=>setSettingsSection('backup')}>Резервная копия</button></div>
       {settingsBusy&&<div className="list-hint">Обновляем настройки…</div>}
       {settingsSection==='privacy'&&<div className="advanced-settings-content">
         <div className="setting-toggle-row"><span><b>Показывать статус «В сети»</b><small>Другие пользователи смогут видеть, когда ты онлайн.</small></span><input type="checkbox" checked={privacyDraft.showOnlineStatus} disabled={settingsBusy} onChange={e=>savePrivacySettings({...privacyDraft,showOnlineStatus:e.target.checked})}/></div>
@@ -1632,6 +1686,13 @@ function App() {
         {e2eeDevices.map(device=><div className="device-row" key={device.device_id}><div className="device-icon"><ShieldCheck size={17}/></div><div><b>{device.device_id===browserDeviceId?'Этот браузер':'Устройство Nexura'}</b><small>ID: {device.device_id.slice(0,8)}… · {device.protocol||'E2EE'}</small><small>Отпечаток: {device.curve25519_key?.slice(0,12)||'—'}…</small></div><button disabled={settingsBusy||device.device_id===browserDeviceId} onClick={()=>revokeBrowserDevice(device)}>Отозвать</button></div>)}
         {!e2eeDevices.length&&<div className="social-empty">Активные устройства не найдены.</div>}
         <div className="settings-info-note"><LockKeyhole size={17}/> Отзыв устройства необратим. Для повторного доступа ему потребуется зарегистрировать новую криптографическую идентичность.</div>
+      </div>}
+      {settingsSection==='backup'&&<div className="advanced-settings-content">
+        <div className="settings-info-note"><LockKeyhole size={17}/> Резервная копия содержит только зашифрованное состояние браузерного E2EE. Код восстановления не отправляется на сервер.</div>
+        <div className="settings-description">{webBackupExists?'В облаке есть резервная копия веб-устройства.':'Резервной копии веб-устройства пока нет.'}</div>
+        <button className="primary-btn" onClick={createWebE2eeBackup} disabled={backupBusy||!e2eeReady}>{backupBusy?'Создаём…':webBackupExists?'Обновить резервную копию':'Создать резервную копию'}</button>
+        {recoveryCode&&<div className="backup-recovery-box"><b>Новый код восстановления</b><code>{recoveryCode}</code><button className="secondary-btn" onClick={()=>navigator.clipboard?.writeText(recoveryCode).then(()=>setNotice('Код скопирован')).catch(()=>setNotice('Не удалось скопировать код'))}>Скопировать код</button><small>Запиши код на бумаге или сохрани в менеджере паролей. Если потеряешь его, расшифровать копию будет невозможно.</small></div>}
+        <div className="backup-restore-box"><b>Восстановить на новом браузере</b><p>Введи код от резервной копии. Восстановление доступно только если на этом браузере ещё не создано E2EE-устройство.</p><input value={restoreCode} onChange={event=>setRestoreCode(event.target.value.trim())} placeholder="Код восстановления" autoComplete="off"/><button className="secondary-btn" onClick={restoreWebE2eeBackup} disabled={backupBusy||!restoreCode.trim()||!e2eeRecoveryRequired}>{backupBusy?'Восстанавливаем…':'Восстановить ключи'}</button></div>
       </div>}
       {settingsSection==='blocked'&&<div className="advanced-settings-content">
         {blockedUsers.map(user=><div className="blocked-user-row" key={user.id}><Avatar value={user.avatar_url} name={user.display_name}/><div><b>{user.display_name||'Пользователь'}</b><small>{user.username?'@'+user.username:'Заблокирован'}</small></div><button disabled={settingsBusy} onClick={()=>unblockProfile(user.id)}>Разблокировать</button></div>)}

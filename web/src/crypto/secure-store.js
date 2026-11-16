@@ -162,3 +162,40 @@ export async function clearLocalCryptoState(userId) {
     });
   } finally { db.close(); }
 }
+
+export async function exportEncryptedRecords(userId) {
+  if(!userId)throw new Error('Сессия истекла');
+  const db=await openDatabase();
+  try {
+    const key=await getWrappingKey(userId);
+    const rows=await requestValue(db.transaction(RECORD_STORE,'readonly').objectStore(RECORD_STORE).getAll());
+    const records=[];
+    for(const row of rows.filter(item=>item.userId===userId)) {
+      records.push({recordId:row.recordId,value:await decryptRecord(key,userId,row)});
+    }
+    if(!records.some(item=>item.recordId==='public-device')||!records.some(item=>item.recordId==='account')) {
+      throw new Error('Локальное E2EE-состояние неполное; резервная копия не создана');
+    }
+    const serialized=JSON.stringify({version:1,records});
+    if(new TextEncoder().encode(serialized).byteLength>10*1024*1024)throw new Error('Резервная копия превышает 10 МБ');
+    return serialized;
+  } finally { db.close(); }
+}
+
+export async function importEncryptedRecords(userId,serialized) {
+  if(!userId||typeof serialized!=='string'||serialized.length>10*1024*1024)throw new Error('Некорректная резервная копия');
+  let parsed;
+  try { parsed=JSON.parse(serialized); } catch { throw new Error('Файл резервной копии повреждён'); }
+  if(parsed?.version!==1||!Array.isArray(parsed.records)||parsed.records.length<2||parsed.records.length>10000) {
+    throw new Error('Неподдерживаемый формат резервной копии');
+  }
+  const seen=new Set();
+  const entries=parsed.records.map(item=>{
+    if(!item||typeof item.recordId!=='string'||!item.recordId||item.recordId.length>300||seen.has(item.recordId))throw new Error('В резервной копии есть некорректная запись');
+    seen.add(item.recordId);
+    return [item.recordId,item.value];
+  });
+  if(!seen.has('public-device')||!seen.has('account'))throw new Error('В резервной копии отсутствует идентичность устройства');
+  await saveEncryptedRecords(userId,entries);
+  return entries.length;
+}
