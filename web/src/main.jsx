@@ -274,12 +274,28 @@ function App() {
   }, [session?.user?.id]);
 
   useEffect(() => {
-    if (!session) { setCryptoRuntimeError(''); return; }
+    let active = true;
+    const userId = session?.user?.id;
     setE2eeReady(false);
+    setCryptoRuntimeError('');
+    if (!userId) {
+      setE2eeStatus('Ожидаем вход в аккаунт…');
+      return () => { active = false; };
+    }
     setE2eeStatus('Подготавливаем защищённое устройство…');
-    initializeOlm().then(() => ensureBrowserE2eeDevice(supabase, session.user.id))
-      .then(result => { setE2eeReady(true); setE2eeStatus('Защита включена · ' + result.availableKeys + ' одноразовых ключей'); })
-      .catch(error => { setE2eeReady(false); setCryptoRuntimeError(error?.message || 'Не удалось загрузить криптомодуль'); setE2eeStatus('Защита не готова: ' + (error?.message || 'ошибка')); });
+    initializeOlm().then(() => ensureBrowserE2eeDevice(supabase, userId))
+      .then(result => {
+        if (!active) return;
+        setE2eeReady(true);
+        setE2eeStatus('Защита включена · ' + result.availableKeys + ' одноразовых ключей');
+      })
+      .catch(error => {
+        if (!active) return;
+        setE2eeReady(false);
+        setCryptoRuntimeError(error?.message || 'Не удалось загрузить криптомодуль');
+        setE2eeStatus('Защита не готова: ' + (error?.message || 'ошибка'));
+      });
+    return () => { active = false; };
   }, [session?.user?.id]);
 
   // Keep this browser's published pre-key reserve topped up while the user is
@@ -300,11 +316,26 @@ function App() {
   }, [session?.user?.id, e2eeReady]);
 
   useEffect(() => {
-    if (!session) { setChats([]); setSelected(null); setProfile(null); return; }
+    let active = true;
+    const userId = session?.user?.id;
+    if (!userId) {
+      setChats([]);
+      setSelected(null);
+      setProfile(null);
+      return () => { active = false; };
+    }
+    // Do not leave the previous account's profile visible while the new one loads.
+    setProfile(null);
     loadChats();
-    supabase.from('profiles').select('id,display_name,username,avatar_url,bio,age').eq('id', session.user.id).maybeSingle()
-      .then(({data}) => setProfile(data));
-  }, [session?.user?.id]);
+    supabase.from('profiles').select('id,display_name,username,avatar_url,bio,age')
+      .eq('id', userId).maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) setNotice('Не удалось загрузить профиль: ' + error.message);
+        else setProfile(data);
+      });
+    return () => { active = false; };
+  }, [session?.user?.id, loadChats]);
 
   const decryptMessageRows = useCallback(async (chat, messages) => {
     const rows = messages || [];
