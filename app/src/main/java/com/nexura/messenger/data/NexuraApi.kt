@@ -2078,7 +2078,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 runCatching { updateMyUsername(metadataUsername) }
                     .onSuccess { savedUsername = metadataUsername }
             }
-            return UserProfile(uid, display, savedUsername, "🙂", "", null)
+            return UserProfile(uid, display, savedUsername, "🙂", "", null, "")
         }
         val p = raw.getJSONObject(0)
         var username = p.optString("username").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
@@ -2090,7 +2090,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 runCatching { updateMyUsername(metadataUsername) }.onSuccess { username = metadataUsername }
             }
         }
-        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"), p.optString("banner_url"))
+        return UserProfile(p.optString("id"), p.optString("display_name"), username, p.optString("avatar_url"), p.optString("bio"), if (p.isNull("age")) null else p.optInt("age"), resolveProfileBanner(p.optString("banner_url")))
     }
 
     private fun validateUsername(value: String) {
@@ -2139,13 +2139,24 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             p.optString("avatar_url").ifBlank { "🙂" },
             p.optString("bio"),
             if (p.isNull("age")) null else p.optInt("age"),
-            p.optString("banner_url")
+            resolveProfileBanner(p.optString("banner_url"))
         )
+    }
+
+    private suspend fun resolveProfileBanner(value: String): String {
+        if (value.startsWith("social:")) return socialSignedUrl(value.removePrefix("social:"))
+        return value
     }
 
     suspend fun uploadAvatar(bytes: ByteArray, mimeType: String): String = uploadProfileImage(bytes, mimeType, "avatar")
 
     suspend fun uploadProfileBanner(bytes: ByteArray, mimeType: String): String = uploadProfileImage(bytes, mimeType, "banner")
+
+    suspend fun uploadProfileBannerVideo(bytes: ByteArray, mimeType: String): String {
+        if (!mimeType.startsWith("video/")) throw IOException("Выберите видеофайл")
+        val path = uploadSocialObject(bytes, mimeType, "banners")
+        return "social:$path"
+    }
 
     private suspend fun uploadProfileImage(bytes: ByteArray, mimeType: String, prefix: String): String {
         val uid = store.userId ?: throw IOException("Сессия истекла")

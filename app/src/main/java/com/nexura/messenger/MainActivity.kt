@@ -346,6 +346,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var viewedProfile by remember { mutableStateOf<UserProfile?>(null) }
     var profileMedia by remember { mutableStateOf(emptyList<MessageItem>()) }
     var viewedProfilePhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
+    var viewedProfileStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialStories by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialPhotos by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
     var socialArchive by remember { mutableStateOf(emptyList<SocialMediaItem>()) }
@@ -1625,16 +1626,20 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Card(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp).animateContentSize(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                                     Column(Modifier.padding(12.dp)) {
                                         Text("Обложка профиля", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                        Box(Modifier.fillMaxWidth().padding(top = 9.dp).height(126.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))).clickable { bannerPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
+                                        Box(Modifier.fillMaxWidth().padding(top = 9.dp).height(126.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))).clickable { bannerPicker.launch("*/*") }, contentAlignment = Alignment.Center) {
                                             val bannerModel: Any? = bannerPhotoUri ?: profileBannerUrl.takeIf { it.isNotBlank() }
-                                            if (bannerModel != null) AsyncImage(model = bannerModel, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                            else Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Image, null, tint = Color.White, modifier = Modifier.size(27.dp)); Text("Добавить обложку", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                                            when {
+                                                bannerPhotoUri != null && context.contentResolver.getType(bannerPhotoUri!!)?.startsWith("video/") == true -> MutedVideoBanner(bannerPhotoUri.toString(), Modifier.fillMaxSize())
+                                                profileBannerUrl.contains(".mp4") || profileBannerUrl.contains(".webm") || profileBannerUrl.contains(".mov") -> MutedVideoBanner(profileBannerUrl, Modifier.fillMaxSize())
+                                                bannerModel != null -> AsyncImage(model = bannerModel, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                else -> Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Image, null, tint = Color.White, modifier = Modifier.size(27.dp)); Text("Добавить фото или видео без звука", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+                                            }
                                             Surface(Modifier.align(Alignment.BottomEnd).padding(8.dp), color = Color(0x99000000), shape = CircleShape) { Icon(Icons.Default.Edit, "Изменить обложку", tint = Color.White, modifier = Modifier.padding(8.dp).size(17.dp)) }
                                         }
                                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                            Text("Из галереи телефона", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                            Text("Фото или видео · без звука", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.weight(1f))
                                             if (profileBannerUrl.isNotBlank() || bannerPhotoUri != null) TextButton(onClick = { profileBannerUrl = ""; bannerPhotoUri = null }) { Text("Удалить", color = Danger) }
-                                            TextButton(onClick = { bannerPicker.launch("image/*") }) { Text("Заменить", color = Accent) }
+                                            TextButton(onClick = { bannerPicker.launch("*/*") }) { Text("Заменить", color = Accent) }
                                         }
                                     }
                                 }
@@ -1664,9 +1669,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                              val uri = bannerPhotoUri!!
                                              val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать обложку") }
                                              val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-                                             profileBannerUrl = withContext(Dispatchers.IO) { api.uploadProfileBanner(bytes, mime) }
+                                             profileBannerUrl = withContext(Dispatchers.IO) {
+                                                 if (mime.startsWith("video/")) api.uploadProfileBannerVideo(bytes, mime)
+                                                 else api.uploadProfileBanner(bytes, mime)
+                                             }
                                              bannerPhotoUri = null
                                          }
+                                         if (profileBannerUrl.startsWith("social:")) profileBannerUrl = api.myProfile().bannerUrl
                                          if (profilePhotoUri != null) {
                                             val uri = profilePhotoUri!!
                                             val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
@@ -2236,7 +2245,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "profile") {
                             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).animateContentSize()) {
                                 Box(Modifier.fillMaxWidth().height(184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2)))) {
-                                    if (profileBannerUrl.isNotBlank()) AsyncImage(model = profileBannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    if (profileBannerUrl.contains(".mp4") || profileBannerUrl.contains(".webm") || profileBannerUrl.contains(".mov")) MutedVideoBanner(profileBannerUrl, Modifier.fillMaxSize())
+                                    else if (profileBannerUrl.isNotBlank()) AsyncImage(model = profileBannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                                     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x55000000)))))
                                     TextButton(onClick = { settingsOpen = true }, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)) { Text("Изменить профиль", color = Color.White) }
                                 }
@@ -2253,6 +2263,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Text("Истории", color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
                                         Text("${socialStories.size}", color = SecondaryText, fontSize = 12.sp)
+                                        IconButton(onClick = { socialCaption = ""; storyPicker.launch(arrayOf("image/*", "video/*")) }, enabled = !socialBusy) { Icon(Icons.Default.Add, "Добавить историю", tint = Accent) }
                                     }
                                     if (socialStories.isEmpty()) Text("У вас пока нет историй", color = SecondaryText, fontSize = 12.sp)
                                     else LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -2266,8 +2277,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Text("Фотографии", color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
                                         Text("${socialPhotos.size}", color = SecondaryText, fontSize = 12.sp)
+                                        IconButton(onClick = { socialCaption = ""; profilePhotoPublisher.launch(arrayOf("image/*")) }, enabled = !socialBusy) { Icon(Icons.Default.Add, "Добавить фотографию", tint = Accent) }
                                     }
-                                    if (socialPhotos.isEmpty()) Text("Здесь будут ваши фотографии. Добавить их можно в разделе «Истории и публикации».", color = SecondaryText, fontSize = 12.sp)
+                                    if (socialPhotos.isEmpty()) Text("Здесь будут ваши фотографии. Нажмите +, чтобы добавить первую.", color = SecondaryText, fontSize = 12.sp)
                                     else socialPhotos.chunked(3).forEach { row ->
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                             row.forEach { photo -> AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография профиля", modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop) }
@@ -3318,6 +3330,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Text("Профиль", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart))
                                         IconButton(onClick = { viewedProfile = null; profileMedia = emptyList() }) { Text("×", color = SecondaryText, fontSize = 24.sp) }
                                     }
+                                    Box(Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2)))) {
+                                        if (profile.bannerUrl.contains(".mp4") || profile.bannerUrl.contains(".webm") || profile.bannerUrl.contains(".mov")) MutedVideoBanner(profile.bannerUrl, Modifier.fillMaxSize())
+                                        else if (profile.bannerUrl.isNotBlank()) AsyncImage(model = profile.bannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    }
                                     Avatar(profile.displayName, profile.avatar)
                                     Text(profile.displayName, color = MainText, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
                                     if (profile.username.isNotBlank()) Text("@${profile.username}", color = SecondaryText, fontSize = 13.sp)
@@ -3328,6 +3344,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     }
                                     if (profile.age != null) Text("${profile.age} лет", color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 5.dp))
                                     Text(profile.bio.ifBlank { "Пользователь пока ничего не рассказал о себе" }, color = MainText, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp))
+                                    if (viewedProfileStories.isNotEmpty()) {
+                                        HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
+                                        Text("Истории", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Start))
+                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            items(viewedProfileStories, key = { it.id }) { story ->
+                                                Box(Modifier.size(82.dp).clip(RoundedCornerShape(12.dp)).background(Surface2).clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = story.mediaType }) {
+                                                    if (story.mediaType == "video") Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.align(Alignment.Center).size(30.dp))
+                                                    else AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                }
+                                            }
+                                        }
+                                    }
                                     if (viewedProfilePhotos.isNotEmpty()) {
                                         HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -3416,6 +3444,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 viewedProfile = api.userProfile(peerId)
                                                 viewedPresence = api.userPresence(peerId)
                                                 profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                                viewedProfilePhotos = api.profilePhotos(peerId)
+                                                viewedProfileStories = api.activeStories().filter { it.userId == peerId }
                                             } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
                                             finally { loadingProfile = false }
                                         }
@@ -3431,6 +3461,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             viewedProfile = api.userProfile(peerId)
                                                 viewedPresence = api.userPresence(peerId)
                                             profileMedia = api.messages(chat.id, e2eeClient, mediaOnly = true)
+                                                viewedProfilePhotos = api.profilePhotos(peerId)
+                                                viewedProfileStories = api.activeStories().filter { it.userId == peerId }
                                         } catch (e: Exception) { error = e.message ?: "Не удалось открыть профиль" }
                                         finally { loadingProfile = false }
                                     }
@@ -4566,6 +4598,27 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
 private fun formatNexuraTime(milliseconds: Long): String {
     val seconds = (milliseconds.coerceAtLeast(0L) / 1000L).toInt()
     return "%d:%02d".format(seconds / 60, seconds % 60)
+}
+
+@Composable
+private fun MutedVideoBanner(source: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val player = remember(source) {
+        ExoPlayer.Builder(context).build().apply {
+            volume = 0f
+            repeatMode = Player.REPEAT_MODE_ONE
+            setMediaItem(MediaItem.fromUri(source))
+            prepare()
+            playWhenReady = true
+        }
+    }
+    DisposableEffect(player) { onDispose { player.release() } }
+    AndroidView(modifier = modifier, factory = { ctx -> PlayerView(ctx).apply {
+        useController = false
+        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        this.player = player
+        setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+    } }, update = { it.player = player })
 }
 
 @Composable
