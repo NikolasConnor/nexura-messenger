@@ -191,7 +191,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var displayName by remember { mutableStateOf("") }
     var registerUsername by remember { mutableStateOf("") }
     var usernameDraft by remember { mutableStateOf("") }
-    var usernameSetupRequired by remember { mutableStateOf(signedIn) }
+    var usernameSetupRequired by remember { mutableStateOf(false) }
     var savingUsername by remember { mutableStateOf(false) }
     var register by remember { mutableStateOf(false) }
     var phone by remember { mutableStateOf("") }
@@ -1029,7 +1029,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             error = ""
             try {
                 api.consumeAuthCallback(authCallback)
-                usernameSetupRequired = true
+                usernameSetupRequired = false
                 signedIn = !store.accessToken.isNullOrBlank()
                 notice = "Добро пожаловать в Nexura!"
             } catch (e: Exception) {
@@ -1460,13 +1460,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 notice = "Код отправлен на $phone"
                                             } else {
                                                 api.verifyPhoneCode(phone, phoneCode)
-                                                usernameSetupRequired = true
+                                                usernameSetupRequired = false
                                                 signedIn = true
                                             }
                                         } else {
                                             if (register) api.signUp(email.trim(), password, displayName.trim(), registerUsername)
                                             else api.signIn(email.trim(), password)
-                                            usernameSetupRequired = true
+                                            usernameSetupRequired = false
                                             // Successful auth methods have already validated and persisted
                                             // the session on Dispatchers.IO; do not decrypt preferences on UI.
                                             signedIn = true
