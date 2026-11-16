@@ -1,4 +1,4 @@
-name: Nexura v0.2.0 — NEW test APK
+name: Nexura 0.6.0 — media fixes test APK
 # Build verification for Android UX and account-identity updates.
 on:
   push:
@@ -15,7 +15,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nexura-release-v020-test-${{ github.run_id }}
+  group: nexura-media-test-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
@@ -48,7 +48,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build debug APK from release tag v0.2.0
+      - name: Build debug APK for media reliability branch
         run: gradle --no-daemon assembleDebug
       - name: Verify native libraries are packaged
         run: |
@@ -58,7 +58,7 @@ jobs:
       - name: Upload clearly marked test APK
         uses: actions/upload-artifact@v4
         with:
-          name: "🆕 NEXURA — НОВАЯ СБОРКА (v0.2.0)"
+          name: "NEXURA — тестовая сборка медиа (0.6.0)"
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
