@@ -1454,13 +1454,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Text("Твоё пространство для общения", color = SecondaryText, fontSize = 15.sp, modifier = Modifier.padding(top = 5.dp, bottom = 28.dp))
                         OutlinedButton(
                             onClick = {
-                                error = ""
-                                notice = ""
-                                try {
-                                    val url = api.createTelegramAuthorizationUrl()
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                } catch (e: Exception) {
-                                    error = e.message ?: "Не удалось открыть Telegram"
+                                scope.launch {
+                                    busy = true
+                                    error = ""
+                                    notice = ""
+                                    try {
+                                        val url = api.createTelegramAuthorizationUrl()
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Не удалось открыть Telegram"
+                                    } finally {
+                                        busy = false
+                                    }
                                 }
                             },
                             enabled = !busy,
