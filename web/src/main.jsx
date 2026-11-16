@@ -115,7 +115,7 @@ function PendingMediaPreview({ file }) {
   return <span className="pending-file-icon">📎</span>;
 }
 
-import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
+import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, socialSignedUrl, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
 
 class AppErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { failed: false }; }
@@ -196,6 +196,8 @@ function App() {
   const [profilePhotos, setProfilePhotos] = useState([]);
   const [profileStories, setProfileStories] = useState([]);
   const [storiesFeed, setStoriesFeed] = useState([]);
+  const [publicationsFeed, setPublicationsFeed] = useState([]);
+  const socialViewerRequestRef = useRef(0);
   const [people, setPeople] = useState([]);
   const [peopleQuery, setPeopleQuery] = useState('');
   const [peopleOffset, setPeopleOffset] = useState(0);
@@ -661,17 +663,36 @@ function App() {
 
   async function loadStoriesFeed() {
     try {
-      const stories=await loadStories(supabase,{activeOnly:true});
-      const ids=[...new Set(stories.map(story=>story.user_id))];
-      if(!ids.length){setStoriesFeed([]);return;}
+      const [storiesResult, photosResult] = await Promise.all([
+        loadStories(supabase,{activeOnly:true}),
+        supabase.from('profile_photos').select('id,user_id,storage_path,caption,created_at')
+          .order('created_at',{ascending:false}).limit(60)
+      ]);
+      if(photosResult.error)throw photosResult.error;
+      const ids=[...new Set([...storiesResult.map(item=>item.user_id),...(photosResult.data||[]).map(item=>item.user_id)])];
+      if(!ids.length){setStoriesFeed([]);setPublicationsFeed([]);return;}
       const {data:profiles,error}=await supabase.from('profiles').select('id,display_name,username,avatar_url').in('id',ids);
       if(error)throw error;
-      const byId=new Map((profiles||[]).map(profile=>[profile.id,profile]));
-      setStoriesFeed(stories.map(story=>({...story,profile:byId.get(story.user_id)||{display_name:'Пользователь'}})));
-    } catch(error) { setNotice('Не удалось загрузить истории: '+error.message); }
+      const byId=new Map((profiles||[]).map(person=>[person.id,person]));
+      const attachProfile=item=>({...item,profile:byId.get(item.user_id)||{display_name:'Пользователь'}});
+      setStoriesFeed(storiesResult.map(attachProfile));
+      const photos=await Promise.all((photosResult.data||[]).map(async item=>{
+        let url=null;
+        try{url=await socialSignedUrl(supabase,item.storage_path,7*86400);}catch(error){console.warn('Publication media URL refresh failed',item.id,error);}
+        return {...attachProfile({...item,media_type:'image'}),url};
+      }));
+      setPublicationsFeed(photos);
+    } catch(error) { setNotice('Не удалось загрузить ленту: '+error.message); }
   }
 
-  useEffect(()=>{if(activeTab==='people'&&session?.user?.id)void loadStoriesFeed();},[activeTab,session?.user?.id]);
+  useEffect(()=>{
+    if(activeTab!=='people'||!session?.user?.id)return;
+    void loadStoriesFeed();
+    const refresh=()=>{if(document.visibilityState==='visible')void loadStoriesFeed();};
+    window.addEventListener('focus',refresh);
+    document.addEventListener('visibilitychange',refresh);
+    return()=>{window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh);};
+  },[activeTab,session?.user?.id]);
 
   async function deleteCurrentSocialItem() {
     if(!socialViewer||socialViewer.user_id!==session.user.id||socialBusy)return;
@@ -720,26 +741,31 @@ function App() {
   }
 
   async function openSocialItem(item, kind) {
-    setSocialViewer({...item, kind});
-    setSocialCommentDraft(''); setSocialComments([]);
-    if (kind === 'photo') {
-      try {
-        const [{data:likes,error:likeError},{data:comments,error:commentError}] = await Promise.all([
-          supabase.from('profile_photo_likes').select('user_id').eq('photo_id',item.id),
-          supabase.from('profile_photo_comments').select('id,user_id,content,created_at').eq('photo_id',item.id).order('created_at')
-        ]);
-        if (likeError) throw likeError;
-        if (commentError) throw commentError;
-        setSocialLiked((likes||[]).some(row=>row.user_id===session.user.id));
-        setSocialComments(comments||[]);
-        setSocialViewer(current=>current?.id===item.id?{...current,likeCount:(likes||[]).length}:current);
-      } catch(error) { setNotice('Не удалось загрузить реакции: '+error.message); }
-    } else {
-      const {data:likes,error} = await supabase.from('user_story_likes').select('user_id').eq('story_id',item.id);
-      if (!error) {
-        setSocialLiked((likes||[]).some(row=>row.user_id===session.user.id));
-        setSocialViewer(current=>current?.id===item.id?{...current,likeCount:(likes||[]).length}:current);
+    const requestId=++socialViewerRequestRef.current;
+    setSocialViewer({...item,kind});
+    setSocialLiked(false);
+    setSocialCommentDraft('');
+    setSocialComments([]);
+    try {
+      let url=item.url;
+      if(item.storage_path){
+        try{url=await socialSignedUrl(supabase,item.storage_path,7*86400);}catch(error){console.warn('Could not refresh social media URL',error);}
       }
+      if(requestId!==socialViewerRequestRef.current)return;
+      setSocialViewer(current=>current?.id===item.id?{...current,...item,url,kind}:current);
+      const table=kind==='story'?'user_story_likes':'profile_photo_likes';
+      const key=kind==='story'?'story_id':'photo_id';
+      const requests=[supabase.from(table).select('user_id').eq(key,item.id)];
+      if(kind==='photo')requests.push(supabase.from('profile_photo_comments').select('id,user_id,content,created_at').eq('photo_id',item.id).order('created_at'));
+      const results=await Promise.all(requests);
+      if(requestId!==socialViewerRequestRef.current)return;
+      for(const result of results)if(result.error)throw result.error;
+      const likes=results[0].data||[];
+      setSocialLiked(likes.some(row=>row.user_id===session.user.id));
+      setSocialViewer(current=>current?.id===item.id?{...current,likeCount:likes.length}:current);
+      if(kind==='photo')setSocialComments(results[1].data||[]);
+    } catch(error) {
+      if(requestId===socialViewerRequestRef.current)setNotice('Не удалось загрузить публикацию: '+error.message);
     }
   }
 
@@ -785,26 +811,20 @@ function App() {
     if(kind==='photo'&&!file.type.startsWith('image/')){setNotice('В галерею можно добавить только изображение.');return;}
     setSocialBusy(true);
     try {
-      const extension=(file.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'').toLowerCase()||'jpg';
-      const path=session.user.id+'/'+(kind==='story'?'stories':'photos')+'/'+crypto.randomUUID()+'.'+extension;
-      const {error:uploadError}=await supabase.storage.from('nexura-social-media').upload(path,file,{upsert:false,contentType:file.type});
-      if(uploadError)throw uploadError;
-      const now=new Date();
-      const row=kind==='story'
-        ? {user_id:session.user.id,storage_path:path,media_type:file.type.startsWith('video/')?'video':'image',caption:socialCaption.trim().slice(0,500),created_at:now.toISOString(),expires_at:new Date(now.getTime()+86400000).toISOString()}
-        : {user_id:session.user.id,storage_path:path,caption:socialCaption.trim().slice(0,500)};
-      const table=kind==='story'?'user_stories':'profile_photos';
-      const {data,error}=await supabase.from(table).insert(row).select('id,user_id,storage_path,media_type,caption,created_at,expires_at').single();
-      if(error){await supabase.storage.from('nexura-social-media').remove([path]);throw error;}
-      const {data:signed,error:signError}=await supabase.storage.from('nexura-social-media').createSignedUrl(path,kind==='story'?86400:7*86400);
-      if(signError)throw signError;
+      const published=await publishSocialMedia(supabase,session.user.id,file,socialCaption,kind);
+      const enriched={...published,profile:{display_name:profile?.display_name||'Вы',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂'}};
       if(kind==='story') {
-        const published={...data,url:signed.signedUrl,profile:{display_name:profile?.display_name||'Вы',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂'}};
-        setProfileStories(previous=>[published,...previous.filter(item=>item.id!==data.id)]);
-        setStoriesFeed(previous=>[published,...previous.filter(item=>item.id!==data.id)].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
-      } else setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
+        setProfileStories(previous=>[enriched,...previous.filter(item=>item.id!==published.id)]);
+        setStoriesFeed(previous=>[enriched,...previous.filter(item=>item.id!==published.id)].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
+      } else {
+        setProfilePhotos(previous=>[enriched,...previous.filter(item=>item.id!==published.id)]);
+        setPublicationsFeed(previous=>[enriched,...previous.filter(item=>item.id!==published.id)].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
+      }
       setSocialCaption('');
-      setNotice(kind==='story'?'История опубликована на 24 часа':'Фотография добавлена в профиль');
+      setNotice(published.urlError
+        ? (kind==='story'?'История сохранена, но медиа временно не загрузилось. Открой ленту ещё раз.':'Публикация сохранена, но медиа временно не загрузилось. Открой ленту ещё раз.')
+        : (kind==='story'?'История опубликована на 24 часа':'Фотография опубликована'));
+      if(activeTab==='people')void loadStoriesFeed();
     } catch(error) { setNotice('Не удалось опубликовать: '+error.message); }
     finally { setSocialBusy(false); }
   }
@@ -1893,7 +1913,8 @@ function App() {
         </div>
       </section> : activeTab==='people' ? <div className="people-page"><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p><div className="people-tools"><button className="secondary-btn" onClick={syncBrowserContacts} disabled={contactSyncBusy}>{contactSyncBusy?'Проверяем…':'Синхронизировать контакты'}</button><button className="primary-btn" onClick={shareNexuraInvite}>Пригласить друзей</button><small>Браузер попросит выбрать контакты вручную. На сервер отправляются только выбранные номера для поиска совпадений.</small></div></div>
       {contactMatches.length>0&&<section className="contact-matches"><div className="web-section-heading"><h3>Знакомые в Nexura</h3><span>{contactMatches.length}</span></div><div className="contact-match-grid">{contactMatches.map(person=><article key={person.user_id} className="contact-match-item"><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.phone||''}</small></span><button className="primary-btn" onClick={()=>createDirectChat({id:person.user_id,title:person.display_name||'Пользователь',avatar:person.avatar_url})}><MessageCircle size={14}/> Написать</button></article>)}</div></section>}
-      <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Свежие публикации участников</span></div><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline/>:<img src={item.url} alt="История"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{!storiesFeed.length&&<div className="social-empty">Пока нет активных историй. Будь первым — опубликуй свою в профиле.</div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
+      <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Свежие публикации участников</span></div><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline/>:<img src={item.url} alt="История"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{!storiesFeed.length&&<div className="social-empty">Пока нет активных историй. Будь первым — опубликуй свою в профиле.</div>}</div></section>
+      <section className="publications-feed-section"><div className="web-section-heading"><div><h3>Публикации</h3><span>Фотографии участников Nexura</span></div><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Опубликовать</button></div><div className="publications-feed-grid">{publicationsFeed.map(item=><button className="publication-feed-card" key={item.id} onClick={()=>openSocialItem(item,'photo')}><div className="publication-feed-image">{item.url?<img src={item.url} loading="lazy" alt={item.caption||'Публикация'}/>:<span>Медиа загружается…</span>}</div><div className="publication-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div>{item.caption&&<p>{item.caption}</p>}</button>)}{!publicationsFeed.length&&<div className="social-empty">Пока нет публикаций. Добавь фотографию в своём профиле.</div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
         <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_visible&&peerPresence?.is_online?'в сети':peerPresence?.is_visible&&peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><button className="icon-button" onClick={toggleConversationMode} title="Режим шифрования" aria-label="Режим шифрования"><LockKeyhole size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
           <button onClick={()=>{setChatSearchOpen(value=>!value);setChatSearchQuery('');setChatToolsOpen(false);}}><Search size={15}/>Поиск по переписке</button>
           <button onClick={()=>{setChatGalleryOpen(true);setChatToolsOpen(false);}}><ImageIcon size={15}/>Медиа и ссылки</button>
