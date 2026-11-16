@@ -306,15 +306,52 @@ function App() {
       .then(({data}) => setProfile(data));
   }, [session?.user?.id]);
 
-  const decryptMessageRow = useCallback(async (chat, message) => {
-    if (!isEncrypted(message.content)) return message;
-    try {
-      const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
-      return { ...message, content: plaintext, decrypted: true, encrypted: false, decryptionError: null };
-    } catch (decryptError) {
-      return { ...message, encrypted: true, decryptionError: decryptError?.message || 'Не удалось расшифровать сообщение' };
+  const decryptMessageRows = useCallback(async (chat, messages) => {
+    const rows = messages || [];
+    const cloudRows = rows.filter(message => {
+      const marker = String(message.content || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return marker === 'NEXURACLOUDV1' || marker === 'NEXURACLOUD1';
+    });
+    const cloudPlaintexts = new Map();
+    if (cloudRows.length) {
+      try {
+        const items = cloudRows.filter(message => typeof message.cloud_content === 'string' && message.cloud_content.trim())
+          .map(message => ({ id: message.id, cloud_content: message.cloud_content, scope: 'shared' }));
+        if (items.length) {
+          const { data, error } = await supabase.functions.invoke('cloud-history', {
+            body: { action: 'decrypt', conversation_id: chat.id, items }
+          });
+          if (error) throw error;
+          for (const item of data?.items || []) {
+            if (typeof item.plaintext === 'string') cloudPlaintexts.set(item.id, item.plaintext);
+          }
+        }
+      } catch (error) {
+        console.warn('Nexura cloud message decryption failed:', error);
+      }
     }
+    return Promise.all(rows.map(async message => {
+      const marker = String(message.content || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (marker === 'NEXURACLOUDV1' || marker === 'NEXURACLOUD1') {
+        const plaintext = cloudPlaintexts.get(message.id);
+        return plaintext != null
+          ? { ...message, content: plaintext, decrypted: true, encrypted: false, decryptionError: null }
+          : { ...message, encrypted: true, decryptionError: 'Не удалось открыть облачное сообщение. Проверьте подключение и ключ облачной истории.' };
+      }
+      if (!isEncrypted(message.content)) return message;
+      try {
+        const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
+        return { ...message, content: plaintext, decrypted: true, encrypted: false, decryptionError: null };
+      } catch (decryptError) {
+        return { ...message, encrypted: true, decryptionError: decryptError?.message || 'Не удалось расшифровать сообщение' };
+      }
+    }));
   }, [session?.user?.id]);
+
+  const decryptMessageRow = useCallback(async (chat, message) => {
+    const [decrypted] = await decryptMessageRows(chat, [message]);
+    return decrypted;
+  }, [decryptMessageRows]);
 
   const loadMessages = useCallback(async (chat, { silent = false } = {}) => {
     if (!chat?.id) return;
@@ -326,13 +363,13 @@ function App() {
       // The old ascending+limit query could hide all recent messages in long chats.
       const [messageResult, reactionsResult] = await Promise.all([
         supabase.from('messages')
-          .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+          .select('id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
           .eq('conversation_id', chat.id).is('deleted_at', null)
           .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50),
         loadMessageReactions(supabase, chat.id).catch(() => ({}))
       ]);
       if (messageResult.error) throw messageResult.error;
-      const rows = await Promise.all((messageResult.data || []).reverse().map(message => decryptMessageRow(chat, message)));
+      const rows = await decryptMessageRows(chat, (messageResult.data || []).reverse());
       if (requestId !== messageLoadSeq.current) return;
       const localPending = [...pendingMediaOutboxRef.current.values()].filter(item => item.conversation_id === chat.id);
       setMessages([...rows.filter(item => !localPending.some(pending => pending.id === item.id)), ...localPending].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-50));
@@ -343,7 +380,7 @@ function App() {
     } finally {
       if (requestId === messageLoadSeq.current) setLoadingMessages(false);
     }
-  }, [session?.user?.id, decryptMessageRow]);
+  }, [session?.user?.id, decryptMessageRow, decryptMessageRows]);
 
   useEffect(() => {
     if (!messageMenu && !reactionPickerFor) return;
