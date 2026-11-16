@@ -2305,7 +2305,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (socialArchive.isEmpty()) Text("Истории старше 24 часов появятся здесь. Архив виден только вам.", color = SecondaryText, fontSize = 12.sp)
                                     socialArchive.forEach { item ->
                                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            AsyncImage(model = item.mediaUrl, contentDescription = "История из архива", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = item.mediaType }, contentScale = ContentScale.Crop)
+                                            if (item.mediaType == "video") {
+                                                Box(
+                                                    Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
+                                                        .clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "video" },
+                                                    contentAlignment = Alignment.Center
+                                                ) { Icon(Icons.Default.PlayArrow, "Открыть видео", tint = Color.White, modifier = Modifier.size(34.dp)) }
+                                            } else {
+                                                AsyncImage(model = item.mediaUrl, contentDescription = "История из архива", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                            }
                                             Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                                 Text(item.caption.ifBlank { "История" }, color = MainText, fontWeight = FontWeight.SemiBold)
                                                 Text("Архив · только вам", color = SecondaryText, fontSize = 11.sp)
@@ -2319,7 +2327,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     socialStories.forEach { item ->
                                         Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                AsyncImage(model = item.mediaUrl, contentDescription = "Открыть историю", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } }, contentScale = ContentScale.Crop)
+                                                if (item.mediaType == "video") {
+                                                    Box(
+                                                        Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
+                                                            .clickable { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } },
+                                                        contentAlignment = Alignment.Center
+                                                    ) { Icon(Icons.Default.PlayArrow, "Открыть видеоисторию", tint = Color.White, modifier = Modifier.size(34.dp)) }
+                                                } else {
+                                                    AsyncImage(model = item.mediaUrl, contentDescription = "Открыть историю", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } }, contentScale = ContentScale.Crop)
+                                                }
                                                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                                     Text(if (item.userId == store.userId) "Ваша история" else "История пользователя", color = MainText, fontWeight = FontWeight.SemiBold)
                                                     Text(item.caption.ifBlank { if (item.mediaType == "video") "Видео" else "Фото" }, color = SecondaryText, fontSize = 11.sp)
@@ -3120,7 +3136,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             title = { Text("История") },
                             text = {
                                 Column {
-                                    AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = story.mediaType }, contentScale = ContentScale.Crop)
+                                    if (story.mediaType == "video") {
+                                        Box(
+                                            Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(14.dp)).background(Surface2)
+                                                .clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "video" },
+                                            contentAlignment = Alignment.Center
+                                        ) { Icon(Icons.Default.PlayArrow, "Воспроизвести видеоисторию", tint = Color.White, modifier = Modifier.size(56.dp)) }
+                                    } else {
+                                        AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                    }
                                     if (story.caption.isNotBlank()) Text(story.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialStoryLikes = api.toggleStoryLike(story.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
