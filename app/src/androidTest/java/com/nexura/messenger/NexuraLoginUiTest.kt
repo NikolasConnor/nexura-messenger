@@ -2,6 +2,7 @@ package com.nexura.messenger
 
 import android.Manifest
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -21,7 +22,8 @@ class NexuraLoginUiTest {
     @Test
     fun loginScreenRendersPrimaryAuthenticationOptions() {
         activity.onNodeWithText("nexura").assertIsDisplayed()
-        activity.onNodeWithText("Продолжить с Google").assertIsDisplayed()
+        activity.onNodeWithText("Продолжить с Google").assertDoesNotExist()
+        activity.onNodeWithText("Продолжить с Telegram").assertIsDisplayed()
         activity.onNodeWithText("Email").assertIsDisplayed()
         activity.onNodeWithText("Пароль").assertIsDisplayed()
         activity.onNodeWithText("Войти").assertIsDisplayed()
