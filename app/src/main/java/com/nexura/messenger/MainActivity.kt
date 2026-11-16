@@ -2602,7 +2602,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 settingsOpen = true
                                 error = ""; notice = ""
                                 scope.launch {
-                                    try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" } }
+                                    try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); socialPhotos = api.profilePhotos(p.id); socialStories = api.activeStories().filter { it.userId == p.id } }
                                     catch (e: Exception) { error = e.message ?: "Не удалось загрузить профиль" }
                                 }
                             }
