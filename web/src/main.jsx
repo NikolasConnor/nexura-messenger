@@ -6,7 +6,7 @@ import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldChe
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
-import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
+import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, sendBrowserGroupMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 import { encryptAndUploadMedia, downloadAndDecryptMedia } from './crypto/media.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
@@ -780,7 +780,7 @@ function App() {
 
   async function sendAttachment(fileOverride = pendingMedia, existingMessageId = null) {
     const file = fileOverride;
-    if (!file || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
+    if (!file || !selected || (selected.kind === 'direct' && !selected.peerUserId) || !e2eeReady || sending) return;
     setSending(true); setNotice('');
     const conversationId = selected.id;
     const messageId = existingMessageId || crypto.randomUUID();
@@ -857,7 +857,7 @@ function App() {
 
   async function sendMessage(event) {
     event?.preventDefault?.();
-    if (!selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
+    if (!selected || (selected.kind === 'direct' && !selected.peerUserId) || !e2eeReady || sending) return;
     const text = draft.trim();
     if (!text) return;
     setSending(true); setNotice('');
@@ -1047,7 +1047,7 @@ function App() {
           <div className="security-note"><LockKeyhole size={14}/><span>{e2eeStatus}</span></div>
         </div>
         {(replyTarget || editingMessageId) && <div className="reply-composer"><span>{editingMessageId ? 'Редактирование сообщения' : 'Ответ на: '+String(replyTarget?.content || 'Сообщение').slice(0,90)}</span><button onClick={()=>{setReplyTarget(null);setEditingMessageId(null);setDraft('');}} aria-label="Отменить">×</button></div>}
-        {selected.kind === 'direct' ? <form className="composer" onSubmit={sendMessage}>
+        {selected.kind === 'direct' || selected.kind === 'group' ? <form className="composer" onSubmit={sendMessage}>
           {pendingMedia && <div className="pending-attachment"><span>📎</span><div><b>{pendingMedia.name}</b><small>{(pendingMedia.size/1024/1024).toFixed(2)} МБ · будет зашифровано перед отправкой</small></div><button type="button" onClick={()=>setPendingMedia(null)} aria-label="Убрать вложение">×</button><PendingMediaPreview file={pendingMedia}/><button type="button" className="primary-btn" onClick={sendAttachment} disabled={!e2eeReady||sending}>{sending?'Отправка…':'Отправить'}</button></div>}
           {recording && <div className="recording-indicator"><span className="recording-dot"/><b>Идёт запись</b><time>{formatDuration(recordingSeconds)}</time><button type="button" onClick={cancelVoiceRecording}>Отмена</button><button type="button" onClick={stopVoiceRecording}>Готово</button></div>}
           <input ref={fileInputRef} type="file" className="visually-hidden-file"  onChange={event=>{const file=event.target.files?.[0];if(file)setPendingMedia(file);event.target.value='';}}/>
@@ -1058,7 +1058,7 @@ function App() {
             <button className="send-button" type="submit" disabled={!e2eeReady || sending || !draft.trim()} aria-label="Отправить сообщение"><Send size={18}/></button>
           </div>
           <div className="composer-hint"><LockKeyhole size={11}/><span>{e2eeReady ? 'Сквозное шифрование включено' : 'Ожидаем подключение шифрования'}</span><span className="composer-shortcut">Enter — отправить · Shift + Enter — перенос</span></div>
-        </form> : <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Отправка в группах пока отключена</b><span>Сначала проверяем совместимость личных переписок с Android. Открытый текст не отправляется.</span></div></div>}
+        </form> : <div className="composer-locked"><div className="lock-circle"><LockKeyhole size={17}/></div><div><b>Групповые сообщения защищены E2EE</b><span>Сообщения шифруются отдельно для каждого активного устройства участников. Открытый текст не отправляется.</span></div></div>}
         </>
       }
     </main>

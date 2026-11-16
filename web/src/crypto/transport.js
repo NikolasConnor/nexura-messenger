@@ -267,6 +267,113 @@ export async function sendBrowserDirectMessage(supabase, {
   return { id: msgId, content: plaintext, created_at: new Date().toISOString(), sender_id: uid, message_type: messageType, reply_to_id: replyToId };
 }
 
+export async function sendBrowserGroupMessage(supabase, {
+  userId, conversationId, messageId, plaintext, replyToId = null, messageType = 'text'
+}) {
+  await initializeOlm();
+  const uid = uuid(userId, 'user');
+  const chatId = uuid(conversationId, 'conversation');
+  const msgId = uuid(messageId, 'message');
+  if (!plaintext?.trim()) throw new Error('Сообщение пустое');
+  const bytes = new TextEncoder().encode(plaintext);
+  if (bytes.length > MAX_TEXT_BYTES) throw new Error('Сообщение слишком большое');
+  const ownBundle = await loadEncryptedRecord(uid, 'public-device');
+  const account = await loadEncryptedRecord(uid, 'account');
+  if (!ownBundle || !account) throw new Error('Сначала зарегистрируйте защищённое устройство');
+  const { data: members, error: memberError } = await supabase.from('conversation_members')
+    .select('user_id').eq('conversation_id', chatId);
+  if (memberError) throw memberError;
+  const memberIds = [...new Set((members || []).map(row => row.user_id))];
+  if (!memberIds.includes(uid)) throw new Error('Вы больше не состоите в этой группе');
+  const { data: ownDevices, error: ownError } = await supabase.from('e2ee_devices')
+    .select('user_id,device_id,curve25519_key,ed25519_key,protocol,bundle_version')
+    .eq('user_id', uid).eq('is_active', true);
+  if (ownError) throw ownError;
+  const own = (ownDevices || []).find(device => device.device_id === ownBundle.device_id);
+  if (!own || own.curve25519_key !== ownBundle.curve25519 || own.ed25519_key !== ownBundle.ed25519) {
+    throw new Error('Ваше E2EE-устройство не зарегистрировано или его ключи изменились');
+  }
+  const remoteIds = memberIds.filter(id => id !== uid);
+  const remoteResults = await Promise.all(remoteIds.map(async memberId => {
+    const { data, error } = await supabase.from('e2ee_devices')
+      .select('user_id,device_id,curve25519_key,ed25519_key,protocol,bundle_version')
+      .eq('user_id', memberId).eq('is_active', true);
+    if (error) throw error;
+    return data || [];
+  }));
+  const targets = [...remoteResults.flat(), ...(ownDevices || []).filter(device => device.device_id !== ownBundle.device_id)];
+  const uniqueTargets = [...new Map(targets.map(device => [device.user_id + ':' + device.device_id, device])).values()];
+  if (!uniqueTargets.length) throw new Error('В группе пока нет других активных E2EE-устройств');
+  if (uniqueTargets.length > 64) throw new Error('Слишком много устройств участников для одной защищённой отправки');
+  const recipients = [];
+  const stateWrites = [];
+  let skippedRemote = 0;
+  for (const device of uniqueTargets) {
+    if (device.protocol !== 'olm-v1' || device.bundle_version !== 1) throw new Error('Одно из устройств группы использует неподдерживаемый E2EE-протокол');
+    await pinDevice(uid, device);
+    const key = sessionId(chatId, device.user_id, device.device_id);
+    const session = await loadEncryptedRecord(uid, key);
+    let kind, ciphertext, nextSession;
+    if (session) {
+      const { encrypt_message } = await import('./pkg/nexura_crypto_wasm.js');
+      const result = encrypt_message(session, bytes);
+      kind = 'normal'; ciphertext = result.olm_envelope; nextSession = result.session_pickle;
+    } else {
+      let preKey;
+      try { preKey = await consumePreKey(supabase, chatId, uid, device.user_id, device); }
+      catch (error) {
+        if (/no available one-time key|одноразов.*ключ/i.test(error?.message || '')) {
+          if (device.user_id !== uid) skippedRemote++;
+          continue;
+        }
+        throw error;
+      }
+      const { start_outbound_session } = await import('./pkg/nexura_crypto_wasm.js');
+      const result = start_outbound_session(account, device.curve25519_key, preKey.one_time_key, bytes);
+      kind = 'prekey'; ciphertext = result.olm_envelope; nextSession = result.session_pickle;
+    }
+    recipients.push({ user_id: device.user_id, device_id: device.device_id, kind, ciphertext });
+    stateWrites.push([key, nextSession]);
+  }
+  if (!recipients.some(row => row.user_id !== uid)) {
+    throw new Error(skippedRemote ? 'На устройствах участников закончились одноразовые ключи. Попросите участников открыть Nexura и повторить отправку.' : 'Не удалось подготовить устройства участников группы');
+  }
+  const envelope = JSON.stringify({
+    protocol: PROTOCOL, conversation_id: chatId, sender_user_id: uid,
+    sender_device_id: ownBundle.device_id, sender_curve25519: ownBundle.curve25519, recipients
+  });
+  await saveEncryptedRecords(uid, [
+    ...stateWrites,
+    ['outbox:' + msgId, { conversationId: chatId, messageId: msgId, envelope, state: 'pending' }],
+    ['sent:' + msgId, plaintext]
+  ]);
+  let cloudContent = null;
+  try {
+    const { data, error } = await supabase.functions.invoke('cloud-history', {
+      body: { action: 'encrypt', conversation_id: chatId, message_id: msgId, plaintext }
+    });
+    if (!error && typeof data?.cloud_content === 'string' && data.cloud_content) cloudContent = data.cloud_content;
+  } catch { /* Cloud history is optional; E2EE delivery remains independent. */ }
+  const payload = {
+    id: msgId, conversation_id: chatId, sender_id: uid, message_type: messageType, content: envelope,
+    ...(cloudContent ? { cloud_content: cloudContent } : {}),
+    ...(replyToId ? { reply_to_id: uuid(replyToId, 'reply') } : {})
+  };
+  const { data: inserted, error: insertError } = await supabase.from('messages')
+    .upsert(payload, { onConflict: 'id', ignoreDuplicates: true }).select('id,sender_id,content');
+  if (insertError) throw insertError;
+  let saved = inserted?.[0];
+  if (!saved) {
+    const { data, error } = await supabase.from('messages').select('id,sender_id,content')
+      .eq('id', msgId).eq('conversation_id', chatId).maybeSingle();
+    if (error) throw error;
+    saved = data;
+  }
+  if (!saved || saved.sender_id !== uid || saved.content !== envelope) throw new Error('Сервер не подтвердил сохранение зашифрованного сообщения');
+  await saveEncryptedRecords(uid, [['outbox:' + msgId, { conversationId: chatId, messageId: msgId, envelope, state: 'sent' }]]);
+  return { id: msgId, content: plaintext, created_at: new Date().toISOString(), sender_id: uid, message_type: messageType, reply_to_id: replyToId };
+}
+
 export async function decryptBrowserGroupMessage(supabase, userId, chatId, message) {
   const lockKey = String(userId) + ':' + String(message.id);
   if (decryptLocks.has(lockKey)) return decryptLocks.get(lockKey);
