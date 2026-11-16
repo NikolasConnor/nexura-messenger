@@ -227,28 +227,40 @@ export async function unblockUser(supabase, userId) {
 export async function sendCloudMessage(supabase,{conversationId,messageId,plaintext,replyToId=null,messageType='text'}) {
   const {data:{user}}=await supabase.auth.getUser();
   if(!user)throw new Error('Сессия истекла');
-  const clean=String(plaintext||'');
-  if(!clean.trim()||new TextEncoder().encode(clean).byteLength>12000)throw new Error('Сообщение пустое или слишком большое');
-  const row={id:id(messageId),conversation_id:id(conversationId),sender_id:user.id,content:clean,message_type:messageType};
+  const chatId=id(conversationId),msgId=id(messageId),clean=String(plaintext||'');
+  if(!clean.trim()||new TextEncoder().encode(clean).byteLength>100000)throw new Error('Сообщение пустое или слишком большое');
+  const {data:archive,error:archiveError}=await supabase.functions.invoke('cloud-history',{body:{action:'encrypt',conversation_id:chatId,message_id:msgId,plaintext:clean}});
+  if(archiveError)throw archiveError;
+  if(typeof archive?.cloud_content!=='string'||!archive.cloud_content)throw new Error('Сервис облачной истории не вернул зашифрованное содержимое');
+  const row={id:msgId,conversation_id:chatId,sender_id:user.id,content:'NEXURA_CLOUD_V1',cloud_content:archive.cloud_content,message_type:messageType};
   if(replyToId)row.reply_to_id=id(replyToId);
   const {data,error}=await supabase.from('messages').upsert(row,{onConflict:'id',ignoreDuplicates:true})
-    .select('id,conversation_id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at').maybeSingle();
+    .select('id,conversation_id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at').maybeSingle();
   if(error)throw error;
-  if(data)return {...data,encrypted:false};
-  const {data:existing,error:readError}=await supabase.from('messages')
-    .select('id,conversation_id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
-    .eq('id',row.id).maybeSingle();
-  if(readError)throw readError;
-  if(!existing||existing.sender_id!==user.id||existing.conversation_id!==row.conversation_id||existing.content!==clean)
-    throw new Error('Сервер уже содержит другое сообщение с этим идентификатором');
-  return {...existing,encrypted:false};
+  let saved=data;
+  if(!saved){
+    const {data:existing,error:readError}=await supabase.from('messages').select('id,conversation_id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at').eq('id',msgId).eq('conversation_id',chatId).maybeSingle();
+    if(readError)throw readError;saved=existing;
+  }
+  if(!saved||saved.sender_id!==user.id||saved.content!=='NEXURA_CLOUD_V1'||saved.cloud_content!==archive.cloud_content)throw new Error('Сервер не подтвердил сохранение облачного сообщения');
+  return {...saved,content:clean,encrypted:false,decrypted:true};
 }
 export async function editCloudMessage(supabase,messageId,newText) {
   const clean=String(newText||'').trim();
-  if(!clean||new TextEncoder().encode(clean).byteLength>12000)throw new Error('Сообщение пустое или слишком большое');
-  const {data,error}=await supabase.from('messages').update({content:clean,edited_at:new Date().toISOString()}).eq('id',id(messageId)).select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at').single();
+  if(!clean||new TextEncoder().encode(clean).byteLength>100000)throw new Error('Сообщение пустое или слишком большое');
+  const {data:{user}}=await supabase.auth.getUser();
+  if(!user)throw new Error('Сессия истекла');
+  const messageIdValue=id(messageId);
+  const {data:current,error:readError}=await supabase.from('messages').select('conversation_id,sender_id').eq('id',messageIdValue).maybeSingle();
+  if(readError)throw readError;
+  if(!current||current.sender_id!==user.id)throw new Error('Нельзя изменить это сообщение');
+  const {data:archive,error:archiveError}=await supabase.functions.invoke('cloud-history',{body:{action:'encrypt',conversation_id:current.conversation_id,message_id:messageIdValue,plaintext:clean}});
+  if(archiveError)throw archiveError;
+  if(typeof archive?.cloud_content!=='string'||!archive.cloud_content)throw new Error('Не удалось зашифровать облачное сообщение');
+  const {data,error}=await supabase.from('messages').update({content:'NEXURA_CLOUD_V1',cloud_content:archive.cloud_content,edited_at:new Date().toISOString()})
+    .eq('id',messageIdValue).eq('sender_id',user.id).select('id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at').single();
   if(error)throw error;
-  return {...data,encrypted:false};
+  return {...data,content:clean,encrypted:false,decrypted:true};
 }
 export async function updateConversationChatMode(supabase,conversationId,mode) {
   if(!['secret','cloud'].includes(mode))throw new Error('Неизвестный режим переписки');
