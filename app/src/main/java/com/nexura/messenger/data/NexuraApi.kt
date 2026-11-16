@@ -246,14 +246,16 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         }
         val providerError = uri.getQueryParameter("error")
         if (!providerError.isNullOrBlank()) {
-            store.telegramPendingState = null
-            store.telegramCodeVerifier = null
+            withContext(Dispatchers.IO) {
+                store.telegramPendingState = null
+                store.telegramCodeVerifier = null
+            }
             throw IOException(uri.getQueryParameter("error_description") ?: "Telegram отменил вход: $providerError")
         }
         val code = uri.getQueryParameter("code")
             ?: throw IOException("Telegram не вернул код авторизации. Начните вход заново.")
         val state = uri.getQueryParameter("state")
-        val verifier = store.consumeTelegramVerifier(state)
+        val verifier = withContext(Dispatchers.IO) { store.consumeTelegramVerifier(state) }
             ?: throw IOException("Состояние входа Telegram устарело или уже использовано. Нажмите «Продолжить с Telegram» ещё раз.")
 
         val tokenRequest = Request.Builder()
@@ -301,8 +303,17 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             )
         )
         saveSession(supabaseSession)
-        if (store.accessToken.isNullOrBlank() || store.refreshToken.isNullOrBlank() || store.userId.isNullOrBlank()) {
-            store.clear()
+        val sessionComplete = withContext(Dispatchers.IO) {
+            !store.accessToken.isNullOrBlank() &&
+                !store.refreshToken.isNullOrBlank() &&
+                !store.userId.isNullOrBlank()
+        }
+        if (!sessionComplete) {
+            withContext(Dispatchers.IO) {
+                store.accessToken = null
+                store.refreshToken = null
+                store.userId = null
+            }
             throw IOException("Telegram подтвердил вход, но Supabase не выдал полноценную сессию. Повторите вход.")
         }
     }
