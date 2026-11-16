@@ -322,8 +322,10 @@ function App() {
     if (!silent) setLoadingChats(true);
     if (!silent) setNotice('');
     try {
-      // Fetch the membership list and unread counters together: neither query
-      // depends on the other, so the sidebar is not held up by the RPC.
+      // Keep the private Saved Messages chat available in every client.
+      const {error:savedError}=await supabase.rpc('get_or_create_saved_conversation');
+      if(savedError)throw savedError;
+      // Fetch the membership list and unread counters together.
       const [membershipResult, unreadResult] = await Promise.all([
         supabase.from('conversation_members')
           .select('conversation_id, joined_at, conversations(id,kind,title,chat_mode,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))')
@@ -342,7 +344,7 @@ function App() {
         return {
           id: c.id, kind: c.kind, chatMode:c.chat_mode||'secret', peerUserId: peer?.user_id || null,
           title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
-          avatar: p?.avatar_url || null, updated: c.last_message_at, unread: unread[c.id] || 0
+          avatar: c.title==='⭐ Избранное'?'⭐':(p?.avatar_url || null), updated: c.last_message_at, unread: unread[c.id] || 0
         };
       }).filter(Boolean).sort((a, b) => new Date(b.updated || 0) - new Date(a.updated || 0));
       setChats(list);
