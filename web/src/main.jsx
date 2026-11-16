@@ -117,6 +117,20 @@ function PendingMediaPreview({ file }) {
 
 import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error, info) { console.error('Nexura web render failure', error, info); }
+  render() {
+    if (this.state.failed) return <main className="auth-shell"><section className="auth-panel"><div className="auth-card">
+      <div className="brand"><span className="brand-mark"><MessageCircle size={23}/></span><span>Nexura</span></div>
+      <h2>Не удалось отобразить этот экран</h2><p>Данные переписки не удалены. Обнови страницу и попробуй снова.</p>
+      <button className="primary-btn wide" onClick={()=>window.location.reload()}>Перезагрузить Nexura</button>
+    </div></section></main>;
+    return this.props.children;
+  }
+}
+
 function AuthScreen() {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -2076,4 +2090,4 @@ function App() {
   </div>;
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<AppErrorBoundary><App/></AppErrorBoundary>);
