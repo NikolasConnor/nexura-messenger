@@ -306,8 +306,13 @@ function App() {
       .then(({data}) => setProfile(data));
   }, [session?.user?.id]);
 
-  const decryptMessageRow = useCallback(async (chat, message) => {
+  const decryptMessageRow = useCallback(async (chat, message, cloudPlaintext = null) => {
     if (!isEncrypted(message.content)) return message;
+    // A shared encrypted cloud-history copy lets this browser restore messages
+    // created for a different active device without weakening Olm device checks.
+    if (typeof cloudPlaintext === 'string' && cloudPlaintext.length) {
+      return { ...message, content: cloudPlaintext, decrypted: true, encrypted: false, decryptionError: null, restoredFromCloud: true };
+    }
     try {
       const plaintext = await decryptBrowserGroupMessage(supabase, session?.user?.id, chat.id, message);
       return { ...message, content: plaintext, decrypted: true, encrypted: false, decryptionError: null };
@@ -326,13 +331,34 @@ function App() {
       // The old ascending+limit query could hide all recent messages in long chats.
       const [messageResult, reactionsResult] = await Promise.all([
         supabase.from('messages')
-          .select('id,sender_id,content,created_at,message_type,reply_to_id,edited_at,deleted_at')
+          .select('id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
           .eq('conversation_id', chat.id).is('deleted_at', null)
           .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50),
         loadMessageReactions(supabase, chat.id).catch(() => ({}))
       ]);
       if (messageResult.error) throw messageResult.error;
-      const rows = await Promise.all((messageResult.data || []).reverse().map(message => decryptMessageRow(chat, message)));
+      const rawRows = (messageResult.data || []).reverse();
+      const cloudItems = rawRows
+        .filter(message => isEncrypted(message.content) && typeof message.cloud_content === 'string' && message.cloud_content.length)
+        .map(message => ({ id: message.id, cloud_content: message.cloud_content, scope: 'shared' }));
+      let cloudPlaintextById = new Map();
+      if (cloudItems.length) {
+        // Cloud history is an additional encrypted recovery copy, not a plaintext
+        // transport. If the service is temporarily unavailable, Olm remains the fallback.
+        try {
+          const { data, error } = await supabase.functions.invoke('cloud-history', {
+            body: { action: 'decrypt', conversation_id: chat.id, items: cloudItems }
+          });
+          if (!error && Array.isArray(data?.items)) {
+            cloudPlaintextById = new Map(data.items
+              .filter(item => typeof item?.id === 'string' && typeof item?.plaintext === 'string')
+              .map(item => [item.id, item.plaintext]));
+          }
+        } catch { /* Keep strict per-device E2EE decryption as the fallback. */ }
+      }
+      const rows = await Promise.all(rawRows.map(message =>
+        decryptMessageRow(chat, message, cloudPlaintextById.get(message.id) || null)
+      ));
       if (requestId !== messageLoadSeq.current) return;
       const localPending = [...pendingMediaOutboxRef.current.values()].filter(item => item.conversation_id === chat.id);
       setMessages([...rows.filter(item => !localPending.some(pending => pending.id === item.id)), ...localPending].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-50));
