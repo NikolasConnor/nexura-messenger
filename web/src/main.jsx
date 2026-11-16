@@ -3,11 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import { createClient } from '@supabase/supabase-js';
 import { Room, RoomEvent, Track } from 'livekit-client';
-import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
+import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, MicOff, Bell, Pin } from 'lucide-react';
 import './styles.css';
 import { initializeOlm } from './crypto/olm.js';
 import { loadEncryptedRecord } from './crypto/secure-store.js';
-import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage } from './api/messenger.js';
+import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage, getPinnedMessage, setPinnedMessage } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, sendBrowserGroupMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 import { encryptAndUploadMedia, downloadAndDecryptMedia } from './crypto/media.js';
 
@@ -244,6 +244,12 @@ function App() {
   const [replyTarget, setReplyTarget] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
   const [messageMenuPosition, setMessageMenuPosition] = useState({ top: 0, left: 0 });
+  const [chatToolsOpen,setChatToolsOpen] = useState(false);
+  const [chatSearchOpen,setChatSearchOpen] = useState(false);
+  const [chatSearchQuery,setChatSearchQuery] = useState('');
+  const [chatGalleryOpen,setChatGalleryOpen] = useState(false);
+  const [pinnedMessageId,setPinnedMessageId] = useState(null);
+  const [chatMutedUntil,setChatMutedUntil] = useState(null);
   const [chatThemeOpen, setChatThemeOpen] = useState(false);
   const [chatTheme, setChatTheme] = useState(() => { try { return JSON.parse(localStorage.getItem('nexura_chat_theme') || '{}'); } catch { return {}; } });
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
@@ -292,7 +298,7 @@ function App() {
       // depends on the other, so the sidebar is not held up by the RPC.
       const [membershipResult, unreadResult] = await Promise.all([
         supabase.from('conversation_members')
-          .select('conversation_id, joined_at, conversations(id,kind,title,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))')
+          .select('conversation_id, joined_at, conversations(id,kind,title,chat_mode,last_message_at,conversation_members(user_id,profiles(id,display_name,username,avatar_url)))')
           .eq('user_id', session.user.id).order('joined_at', { ascending: false }),
         supabase.rpc('get_my_unread_counts')
       ]);
@@ -306,7 +312,7 @@ function App() {
         const peer = (c.conversation_members || []).find(m => m.user_id !== session.user.id);
         const p = peer?.profiles;
         return {
-          id: c.id, kind: c.kind, peerUserId: peer?.user_id || null,
+          id: c.id, kind: c.kind, chatMode:c.chat_mode||'secret', peerUserId: peer?.user_id || null,
           title: c.kind === 'direct' ? (p?.display_name || p?.username || 'Пользователь') : (c.title || 'Группа'),
           avatar: p?.avatar_url || null, updated: c.last_message_at, unread: unread[c.id] || 0
         };
@@ -730,6 +736,50 @@ function App() {
     } catch(error) { setNotice('Не удалось изменить уведомления: '+error.message); }
     finally { setSettingsBusy(false); }
   }
+
+  const visibleMessages = useMemo(() => {
+    const query=chatSearchQuery.trim().toLocaleLowerCase();
+    return query ? messages.filter(message=>String(message.content||'').toLocaleLowerCase().includes(query)) : messages;
+  },[messages,chatSearchQuery]);
+
+  useEffect(()=>{
+    if(!selected?.id||!session?.user?.id)return;
+    let cancelled=false;
+    Promise.all([
+      getPinnedMessage(supabase,selected.id),
+      supabase.from('conversation_members').select('muted_until').eq('conversation_id',selected.id).eq('user_id',session.user.id).maybeSingle()
+    ]).then(([pin, mute])=>{
+      if(cancelled)return;
+      setPinnedMessageId(pin||null);
+      if(!mute.error)setChatMutedUntil(mute.data?.muted_until||null);
+    }).catch(error=>{if(!cancelled)setNotice('Не удалось загрузить настройки чата: '+error.message);});
+    return()=>{cancelled=true;};
+  },[selected?.id,session?.user?.id]);
+
+  async function changeChatMute(durationMs) {
+    if(!selected)return;
+    const muted_until=durationMs==null?null:new Date(Date.now()+durationMs).toISOString();
+    try {
+      const {error}=await supabase.from('conversation_members').update({muted_until})
+        .eq('conversation_id',selected.id).eq('user_id',session.user.id);
+      if(error)throw error;
+      setChatMutedUntil(muted_until);setChatToolsOpen(false);
+      setNotice(muted_until?'Уведомления чата отключены.':'Уведомления чата включены.');
+    } catch(error) { setNotice('Не удалось изменить уведомления: '+error.message); }
+  }
+
+  async function togglePinnedChatMessage(message) {
+    if(!selected||!message)return;
+    try {
+      await setPinnedMessage(supabase,selected.id,pinnedMessageId===message.id?null:message.id);
+      setPinnedMessageId(pinnedMessageId===message.id?null:message.id);
+      setNotice(pinnedMessageId===message.id?'Сообщение откреплено.':'Сообщение закреплено.');
+    } catch(error) { setNotice('Не удалось изменить закрепление: '+error.message); }
+    finally { setMessageMenu(null); }
+  }
+
+  const pinnedMessage=useMemo(()=>messages.find(message=>message.id===pinnedMessageId)||null,[messages,pinnedMessageId]);
+  const chatGalleryItems=useMemo(()=>messages.filter(message=>parseMediaPayload(message.content)||/https?:\/\//i.test(String(message.content||''))),[messages]);
 
   const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
 
@@ -1383,11 +1433,19 @@ function App() {
           <div className="web-social-grid">{profilePhotos.map(item=><button key={item.id} className="web-photo-card" onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фотография профиля'}/></button>)}{!profilePhotos.length&&<div className="social-empty">Здесь будут фотографии твоего профиля.</div>}</div>
         </div>
       </section> : activeTab==='people' ? <div className="people-page"><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p></div><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
+          <button onClick={()=>{setChatSearchOpen(value=>!value);setChatSearchQuery('');setChatToolsOpen(false);}}><Search size={15}/>Поиск по переписке</button>
+          <button onClick={()=>{setChatGalleryOpen(true);setChatToolsOpen(false);}}><ImageIcon size={15}/>Медиа и ссылки</button>
+          <button onClick={()=>changeChatMute(chatMutedUntil&&new Date(chatMutedUntil)>new Date()?null:60*60*1000)}><Bell size={15}/>{chatMutedUntil&&new Date(chatMutedUntil)>new Date()?'Включить уведомления':'Отключить на час'}</button>
+          <button onClick={()=>changeChatMute(8*60*60*1000)}><Bell size={15}/>Отключить на 8 часов</button>
+          <button onClick={()=>changeChatMute(48*60*60*1000)}><Bell size={15}/>Отключить на 2 дня</button>
+        </div>}</div><div className="header-secure" title={e2eeReady?'Защищённое устройство подключено':'Защита устройства ещё не готова'}><ShieldCheck size={16}/><span>{e2eeReady?'Сквозное шифрование':'Подключение защиты'}</span></div></header>
         <div className="messages-pane" ref={messagesPaneRef} style={chatTheme.id?{'--chat-wallpaper':chatTheme.wall,'--incoming-bubble':chatTheme.bubble,'--outgoing-bubble':chatTheme.mine}:undefined}>
+          {chatSearchOpen&&<div className="chat-search-bar"><Search size={15}/><input autoFocus value={chatSearchQuery} onChange={e=>setChatSearchQuery(e.target.value)} placeholder="Поиск по загруженной истории…"/><button onClick={()=>{setChatSearchOpen(false);setChatSearchQuery('');}}><X size={15}/></button><small>{visibleMessages.length}</small></div>}
+          {pinnedMessage&&<button className="pinned-message-banner" onClick={()=>document.getElementById('message-'+pinnedMessage.id)?.scrollIntoView({behavior:'smooth',block:'center'})}><span>⌖ Закреплено</span><b>{String(pinnedMessage.content||'Медиа').slice(0,100)}</b><X size={14} onClick={event=>{event.stopPropagation();togglePinnedChatMessage(pinnedMessage);}}/></button>}
           {loadingMessages && <div className="list-hint">Загружаем историю переписки…</div>}
           {!loadingMessages && messages.length===0 && <div className="empty-messages"><div className="empty-chat-icon"><MessageCircle size={28}/></div><b>Начните общение</b><span>Напиши первое сообщение — оно появится здесь.</span></div>}
-          {messages.map((m,index) => {
+          {visibleMessages.map((m,index) => {
             const mine=m.sender_id===session.user.id;
             const previous=messages[index-1];
             const nextMessage=messages[index+1];
@@ -1440,7 +1498,7 @@ function App() {
     </main>
     {activeMenuMessage && createPortal(<div className="message-context-menu message-context-menu-floating" style={{top:messageMenuPosition.top,left:messageMenuPosition.left}} role="menu" aria-label="Действия с сообщением" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setReplyTarget(activeMenuMessage);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
-      <button role="menuitem" onClick={()=>{copyMessage(activeMenuMessage);setMessageMenu(null);}}><Copy size={15}/>Копировать</button>
+      <button role="menuitem" onClick={()=>{copyMessage(activeMenuMessage);setMessageMenu(null);}}><Copy size={15}/>Копировать</button><button role="menuitem" onClick={()=>togglePinnedChatMessage(activeMenuMessage)}><Pin size={15}/>{pinnedMessageId===activeMenuMessage.id?'Открепить':'Закрепить в чате'}</button>
       {!activeMenuMessage.encrypted && <button role="menuitem" onClick={()=>{setForwardMessage(activeMenuMessage);setMessageMenu(null);}}><Forward size={15}/>Переслать</button>}
       {activeMenuMine && selected?.kind==='direct' && !activeMenuMessage.encrypted && <button role="menuitem" onClick={()=>{startEditing(activeMenuMessage);setMessageMenu(null);}}><Pencil size={15}/>Изменить</button>}
       {activeMenuMine && <button role="menuitem" className="danger-action" onClick={()=>{setMessageMenu(null);removeOwnMessage(activeMenuMessage);}} disabled={pendingAction}><Trash2 size={15}/>Удалить</button>}
@@ -1454,6 +1512,11 @@ function App() {
         {forwardingBusy && <div className="list-hint">Пересылаем с повторным шифрованием…</div>}
       </section>
     </div>}
+    {chatGalleryOpen&&<div className="modal-backdrop" onClick={()=>setChatGalleryOpen(false)}><section className="group-modal chat-gallery-modal" onClick={event=>event.stopPropagation()}>
+      <div className="modal-head"><div><div className="eyebrow">МАТЕРИАЛЫ ПЕРЕПИСКИ</div><h3>Медиа и ссылки</h3></div><button className="icon-button" onClick={()=>setChatGalleryOpen(false)}><X size={18}/></button></div>
+      <div className="chat-gallery-list">{chatGalleryItems.map(item=><div className="chat-gallery-item" key={item.id}>{parseMediaPayload(item.content)?<MediaMessage payload={parseMediaPayload(item.content)} supabase={supabase} chatTitle={selected?.title}/>:<a href={String(item.content).match(/https?:\/\/[^\s<>]+/i)?.[0]} target="_blank" rel="noreferrer">{String(item.content).slice(0,180)}</a>}<small>{timeLabel(item.created_at)}</small></div>)}{!chatGalleryItems.length&&<div className="social-empty">В загруженной истории пока нет медиа и ссылок.</div>}</div>
+      <p className="settings-description">Показаны материалы из уже загруженных сообщений.</p>
+    </section></div>}
     {chatThemeOpen && <div className="modal-backdrop" onClick={()=>setChatThemeOpen(false)}><section className="group-modal theme-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">ПЕРСОНАЛИЗАЦИЯ</div><h3>Оформление чата</h3></div><button className="icon-button" onClick={()=>setChatThemeOpen(false)} aria-label="Закрыть">×</button></div><p className="theme-description">Выбери оформление переписки. Настройка сохраняется на этом устройстве.</p><div className="theme-presets">{[{id:'violet',name:'Nexura',wall:'#100d19',bubble:'#49366a',mine:'#49366a'},{id:'midnight',name:'Полночь',wall:'#0b1420',bubble:'#1d3447',mine:'#285879'},{id:'ocean',name:'Океан',wall:'#0b1920',bubble:'#173b42',mine:'#176b70'},{id:'rose',name:'Розовый',wall:'#1b1019',bubble:'#422338',mine:'#713b5b'},{id:'graphite',name:'Графит',wall:'#111318',bubble:'#292d35',mine:'#3f4a60'}].map(theme=><button type="button" key={theme.id} className={'theme-preset '+((chatTheme.id||'violet')===theme.id?'active':'')} onClick={()=>applyChatTheme(theme)}><span className="theme-preview" style={{background:theme.wall}}><i style={{background:theme.bubble}}/><i style={{background:theme.mine}}/></span><b>{theme.name}</b></button>)}</div><div className="theme-modal-foot"><span>Изменения применяются сразу</span><button className="primary-btn" onClick={()=>{applyChatTheme({});setChatThemeOpen(false)}}>Сбросить</button></div></section></div>}
     {settingsOpen && <div className="modal-backdrop" onClick={()=>setSettingsOpen(false)}>
       <section className="group-modal profile-modal" onClick={event=>event.stopPropagation()}>
