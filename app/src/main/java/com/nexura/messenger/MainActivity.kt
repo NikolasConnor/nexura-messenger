@@ -1605,6 +1605,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 OutlinedTextField(value = profileName, onValueChange = { profileName = it.take(40) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, placeholder = { Text("Ваше имя") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
                                 Text("Уникальный username", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
                                 OutlinedTextField(value = profileUsername, onValueChange = { profileUsername = it.lowercase(java.util.Locale.US).filter { ch -> ch.isLetterOrDigit() || ch == '_' }.take(24) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), singleLine = true, leadingIcon = { Text("@", color = Accent) }, placeholder = { Text("username") }, shape = RoundedCornerShape(12.dp), colors = authFieldColors())
+                                Text("Username обязателен: 3–24 символа, латиница, цифры и _. Его можно менять, но нельзя удалить.", color = SecondaryText, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
                                 Text("Аватар", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp, bottom = 7.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙").forEach { emoji ->
@@ -1619,6 +1620,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Button(onClick = { scope.launch {
                                     savingProfile = true; error = ""; notice = ""
                                     try {
+                                        if (!profileUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$"))) {
+                                            throw IOException("Username обязателен: 3–24 символа, латинские буквы, цифры и _.")
+                                        }
                                         if (profilePhotoUri != null) {
                                             val uri = profilePhotoUri!!
                                             val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IOException("Не удалось прочитать фотографию") }
@@ -1636,7 +1640,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         notice = "Профиль сохранён."
                                     } catch (e: Exception) { error = e.message ?: "Не удалось сохранить профиль" }
                                     finally { savingProfile = false }
-                                } }, enabled = !savingProfile && profileName.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
+                                } }, enabled = !savingProfile && profileName.isNotBlank() && profileUsername.matches(Regex("^[a-z][a-z0-9_]{2,23}$")), modifier = Modifier.fillMaxWidth().padding(top = 14.dp), shape = RoundedCornerShape(12.dp)) { Text(if (savingProfile) "Сохраняем…" else "Сохранить профиль") }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
                                 Text("ID пользователя", color = SecondaryText, fontSize = 12.sp)
                                 Text(store.userId ?: "Не определён", color = MainText, fontSize = 12.sp)
