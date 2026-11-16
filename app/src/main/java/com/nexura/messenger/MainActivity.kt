@@ -22,9 +22,11 @@ import java.io.IOException
 import org.json.JSONObject
 import android.os.Build
 import android.net.Uri
-import android.widget.VideoView
 import android.media.MediaRecorder
 import android.media.MediaPlayer
+import android.media.MediaMetadataRetriever
+import android.graphics.Bitmap
+import android.view.LayoutInflater
 import java.io.File
 import android.widget.MediaController
 import android.os.Bundle
@@ -106,11 +108,21 @@ import androidx.compose.ui.draw.paint
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import com.nexura.messenger.media.AudioTranscriber
 import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import androidx.compose.ui.text.font.FontWeight
@@ -1436,17 +1448,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         OutlinedButton(
                             onClick = {
                                 val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
-                                val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=google&redirect_to=$redirect"
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            },
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MainText)
-                        ) { Text("Продолжить с Google", fontWeight = FontWeight.SemiBold) }
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedButton(
-                            onClick = {
-                                val redirect = java.net.URLEncoder.encode(NexuraApi.AUTH_REDIRECT, "UTF-8")
                                 val url = "${NexuraApi.BASE_URL}/auth/v1/authorize?provider=custom%3Atelegram&redirect_to=$redirect"
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                             },
@@ -2352,13 +2353,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 if (item.mediaType == "video") {
-                                                    Box(
-                                                        Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
-                                                            .clickable { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } },
-                                                        contentAlignment = Alignment.Center
-                                                    ) { Icon(Icons.Default.PlayArrow, "Открыть видеоисторию", tint = Color.White, modifier = Modifier.size(34.dp)) }
+                                                    VideoThumbnail(
+                                                        uri = Uri.parse(item.mediaUrl),
+                                                        modifier = Modifier.size(76.dp),
+                                                        onClick = { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "video" }
+                                                    )
                                                 } else {
-                                                    AsyncImage(model = item.mediaUrl, contentDescription = "Открыть историю", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { selectedSocialStory = item; socialReplyDraft = ""; scope.launch { try { socialStoryLikes = api.storyReaction(item.id) } catch (_: Exception) { } } }, contentScale = ContentScale.Crop)
+                                                    AsyncImage(model = item.mediaUrl, contentDescription = "Открыть историю", modifier = Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).clickable { mediaViewerUri = Uri.parse(item.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
                                                 }
                                                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                                     Text(if (item.userId == store.userId) "Ваша история" else "История пользователя", color = MainText, fontWeight = FontWeight.SemiBold)
@@ -3129,7 +3130,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             title = { Text("Фотография") },
                             text = {
                                 Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография публикации", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                    AsyncImage(model = photo.mediaUrl, contentDescription = "Фотография публикации", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { selectedSocialPhoto = null; mediaViewerUri = Uri.parse(photo.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
                                     if (photo.caption.isNotBlank()) Text(photo.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         TextButton(enabled = !socialInteractionBusy, onClick = { scope.launch { socialInteractionBusy = true; try { socialPhotoLikes = api.toggleProfilePhotoLike(photo.id) } catch (e: Exception) { error = e.message ?: "Не удалось поставить лайк" } finally { socialInteractionBusy = false } } }) {
@@ -3163,11 +3164,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     if (story.mediaType == "video") {
                                         Box(
                                             Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(14.dp)).background(Surface2)
-                                                .clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "video" },
+                                                .clickable { selectedSocialStory = null; mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "video" },
                                             contentAlignment = Alignment.Center
                                         ) { Icon(Icons.Default.PlayArrow, "Воспроизвести видеоисторию", tint = Color.White, modifier = Modifier.size(56.dp)) }
                                     } else {
-                                        AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
+                                        AsyncImage(model = story.mediaUrl, contentDescription = "История", modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(14.dp)).clickable { selectedSocialStory = null; mediaViewerUri = Uri.parse(story.mediaUrl); mediaViewerType = "image" }, contentScale = ContentScale.Crop)
                                     }
                                     if (story.caption.isNotBlank()) Text(story.caption, color = MainText, modifier = Modifier.padding(top = 8.dp))
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3817,16 +3818,13 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             } else if (msg.messageType == "media" && msg.encrypted) {
                                                 val mediaUri = Uri.parse(msg.content)
                                                 if (msg.mediaKind == "audio") {
-                                                    AudioMessagePlayer(mediaUri, msg.mediaCaption, msg.mediaFileName, msg.mediaMimeType)
+                                                    AudioMessagePlayer(mediaUri, msg.mediaCaption, msg.mediaFileName, msg.mediaMimeType, msg.id)
                                                 } else if (msg.mediaKind == "video") {
-                                                    Box(
-                                                        Modifier.width(230.dp).height(150.dp).clip(RoundedCornerShape(12.dp))
-                                                            .background(Color.Black).clickable { mediaViewerUri = mediaUri; mediaViewerType = "video" },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(Icons.Default.PlayArrow, "Открыть видео", tint = Color.White, modifier = Modifier.size(54.dp))
-                                                        Text("Видео", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).padding(10.dp))
-                                                    }
+                                                    VideoThumbnail(
+                                                        uri = mediaUri,
+                                                        modifier = Modifier.width(230.dp).height(150.dp),
+                                                        onClick = { mediaViewerUri = mediaUri; mediaViewerType = "video" }
+                                                    )
                                                     msg.mediaCaption?.takeIf { it.isNotBlank() }?.let {
                                                         Text(it, color = MainText, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
                                                     }
@@ -4373,43 +4371,287 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
 @Composable
 private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
-    var videoView by remember(uri) { mutableStateOf<VideoView?>(null) }
-    var durationMs by remember(uri) { mutableIntStateOf(0) }
-    var positionMs by remember(uri) { mutableIntStateOf(0) }
-    var isPlaying by remember(uri) { mutableStateOf(false) }
-    var ready by remember(uri) { mutableStateOf(false) }
-    var playbackError by remember(uri) { mutableStateOf(false) }
-    AndroidView(factory = { ctx ->
-        VideoView(ctx).apply {
-            setBackgroundColor(android.graphics.Color.BLACK)
-            setVideoURI(uri)
-            setOnPreparedListener { player -> durationMs = player.duration.coerceAtLeast(0); ready = true; start(); isPlaying = true }
-            setOnCompletionListener { isPlaying = false; positionMs = durationMs }
-            setOnErrorListener { _, _, _ -> playbackError = true; isPlaying = false; true }
-            videoView = this
+    val context = LocalContext.current
+    var playbackError by remember(uri) { mutableStateOf<String?>(null) }
+    val player = remember(uri) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(uri))
+            playWhenReady = true
+            prepare()
         }
-    }, update = { view -> if (videoView !== view) videoView = view }, modifier = Modifier.fillMaxSize())
-    LaunchedEffect(uri, isPlaying, ready) {
-        while (ready && isPlaying) { videoView?.let { positionMs = it.currentPosition.coerceAtLeast(0) }; delay(350) }
     }
-    DisposableEffect(uri) { onDispose { videoView?.runCatching { stopPlayback() }; videoView = null } }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (!ready && !playbackError) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Accent)
-        if (playbackError) Text("Не удалось воспроизвести видео", color = Color.White, modifier = Modifier.align(Alignment.Center))
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000)))).padding(start = 18.dp, end = 18.dp, top = 34.dp, bottom = 22.dp)) {
-            Slider(value = if (durationMs > 0) positionMs.toFloat().coerceIn(0f, durationMs.toFloat()) else 0f, onValueChange = { positionMs = it.toInt() }, onValueChangeFinished = { videoView?.seekTo(positionMs) }, valueRange = 0f..durationMs.coerceAtLeast(1).toFloat(), enabled = ready, colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color.White.copy(alpha = 0.35f)))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { videoView?.let { view -> if (view.isPlaying) { view.pause(); isPlaying = false } else { if (positionMs >= durationMs && durationMs > 0) view.seekTo(0); view.start(); isPlaying = true } } }, enabled = ready) { Text(if (isPlaying) "Ⅱ" else "▶", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold) }
-                Text(formatVideoTime(positionMs) + " / " + formatVideoTime(durationMs), color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = onClose) { Text("Готово", color = Color.White) }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                playbackError = error.localizedMessage?.takeIf { it.isNotBlank() }
+                    ?: "Формат видео не поддерживается этим устройством"
             }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            factory = { ctx ->
+                (LayoutInflater.from(ctx).inflate(R.layout.nexura_video_player, null, false) as PlayerView)
+                    .apply { this.player = player }
+            },
+            update = { it.player = player },
+            modifier = Modifier.weight(1f).fillMaxWidth()
+        )
+        playbackError?.let {
+            Text(it, color = Color.White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+        }
+        Row(Modifier.fillMaxWidth().padding(end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onClose) { Text("Закрыть", color = Color.White) }
         }
     }
 }
 
-private fun formatVideoTime(milliseconds: Int): String {
-    val seconds = milliseconds.coerceAtLeast(0) / 1000
-    return "%d:%02d".format(seconds / 60, seconds % 60)
+@Composable
+private fun VideoThumbnail(uri: Uri, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    var frame by remember(uri) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(uri) {
+        frame = withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                if (uri.scheme == "file") {
+                    retriever.setDataSource(uri.path ?: throw IOException("Видео недоступно"))
+                } else {
+                    retriever.setDataSource(uri.toString(), emptyMap())
+                }
+                retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } catch (_: Exception) {
+                null
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
+    }
+    Box(
+        modifier.clip(RoundedCornerShape(12.dp)).background(Color.Black).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        val bitmap = frame
+        if (bitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Кадр видео",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(Modifier.fillMaxSize().background(Surface2))
+        }
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.62f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.PlayArrow, "Воспроизвести видео", tint = Color.White, modifier = Modifier.size(30.dp))
+        }
+    }
+}
+
+@Composable
+private fun AudioMessagePlayer(
+    uri: Uri,
+    caption: String?,
+    fileName: String?,
+    mimeType: String?,
+    messageId: String
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val transcriptPrefs = remember(context) {
+        runCatching {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context,
+                "nexura_voice_transcripts",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }.getOrNull()
+    }
+    var transcript by remember(messageId) { mutableStateOf(transcriptPrefs?.getString(messageId, null)) }
+    var transcriptExpanded by remember(messageId) { mutableStateOf(false) }
+    var transcribing by remember(messageId) { mutableStateOf(false) }
+    var transcriptionError by remember(messageId) { mutableStateOf<String?>(null) }
+    var playing by remember(uri) { mutableStateOf(false) }
+    var loading by remember(uri) { mutableStateOf(false) }
+    var durationMs by remember(uri) { mutableLongStateOf(0L) }
+    var positionMs by remember(uri) { mutableLongStateOf(0L) }
+    var dragging by remember(uri) { mutableStateOf(false) }
+
+    LaunchedEffect(uri) {
+        while (true) {
+            val active = AudioPlaybackService.activeUri == uri.toString()
+            loading = active && AudioPlaybackService.loading
+            playing = active && AudioPlaybackService.playing
+            if (active) {
+                durationMs = AudioPlaybackService.durationMs
+                if (!dragging) positionMs = AudioPlaybackService.positionMs
+            } else {
+                durationMs = 0L
+                positionMs = 0L
+            }
+            delay(250)
+        }
+    }
+
+    fun sendAudioAction(action: String, position: Long? = null) {
+        val intent = Intent(context, AudioPlaybackService::class.java).setAction(action)
+        if (position != null) intent.putExtra(AudioPlaybackService.EXTRA_POSITION, position)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "Не удалось управлять аудио", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun formatTime(value: Long): String {
+        val seconds = value.coerceAtLeast(0L) / 1000L
+        return String.format(Locale.getDefault(), "%d:%02d", seconds / 60L, seconds % 60L)
+    }
+
+    val title = fileName?.takeIf { it.isNotBlank() && it != "voice.m4a" }
+        ?: if (mimeType?.startsWith("audio/") == true) "Аудиофайл" else "Голосовое сообщение"
+    val subtitle = caption?.takeIf { it.isNotBlank() } ?: mimeType?.uppercase(Locale.getDefault()) ?: "ЗАЩИЩЁННОЕ АУДИО"
+    val active = AudioPlaybackService.activeUri == uri.toString()
+
+    Column(
+        Modifier.widthIn(min = 245.dp, max = 300.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF30234B), Surface2)))
+            .border(1.dp, Accent.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
+            .padding(horizontal = 12.dp, vertical = 11.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = {
+                    when {
+                        active && playing -> sendAudioAction(AudioPlaybackService.ACTION_PAUSE)
+                        active -> sendAudioAction(AudioPlaybackService.ACTION_RESUME)
+                        else -> {
+                            val intent = Intent(context, AudioPlaybackService::class.java)
+                                .setAction(AudioPlaybackService.ACTION_PLAY)
+                                .putExtra(AudioPlaybackService.EXTRA_URI, uri.toString())
+                                .putExtra(AudioPlaybackService.EXTRA_TITLE, title)
+                                .putExtra(AudioPlaybackService.EXTRA_SUBTITLE, subtitle)
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                                else context.startService(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Не удалось открыть аудиофайл", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.size(48.dp).clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(Accent, Accent2)))
+            ) {
+                if (loading) CircularProgressIndicator(Modifier.size(21.dp), color = Bg, strokeWidth = 2.dp)
+                else Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (playing) "Пауза" else "Воспроизвести",
+                    tint = Bg,
+                    modifier = Modifier.size(27.dp)
+                )
+            }
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(title, color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(subtitle, color = SecondaryText, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+            }
+            Icon(Icons.Default.GraphicEq, contentDescription = "Аудио", tint = Accent, modifier = Modifier.padding(start = 6.dp).size(22.dp))
+        }
+        Slider(
+            value = if (active && durationMs > 0L) positionMs.coerceIn(0L, durationMs).toFloat() else 0f,
+            onValueChange = { dragging = true; positionMs = it.toLong() },
+            onValueChangeFinished = {
+                if (active && durationMs > 0L) sendAudioAction(AudioPlaybackService.ACTION_SEEK, positionMs.coerceIn(0L, durationMs))
+                dragging = false
+            },
+            valueRange = 0f..(durationMs.coerceAtLeast(1L).toFloat()),
+            enabled = active && durationMs > 0L,
+            modifier = Modifier.fillMaxWidth().height(25.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Accent,
+                activeTrackColor = Accent,
+                inactiveTrackColor = SecondaryText.copy(alpha = 0.28f)
+            )
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(if (loading) "Загрузка…" else formatTime(positionMs), color = SecondaryText, fontSize = 10.sp)
+            Text(if (durationMs > 0L) formatTime(durationMs) else "--:--", color = SecondaryText, fontSize = 10.sp)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(
+                enabled = !transcribing,
+                onClick = {
+                    if (!transcript.isNullOrBlank()) {
+                        transcriptExpanded = !transcriptExpanded
+                    } else {
+                        scope.launch {
+                            transcribing = true
+                            transcriptionError = null
+                            try {
+                                val result = AudioTranscriber.transcribe(context, uri)
+                                transcript = result
+                                transcriptPrefs?.edit()?.putString(messageId, result)?.apply()
+                                transcriptExpanded = true
+                            } catch (e: Exception) {
+                                transcriptionError = e.message ?: "Не удалось расшифровать голосовое сообщение"
+                            } finally {
+                                transcribing = false
+                            }
+                        }
+                    }
+                }
+            ) {
+                Text(
+                    when {
+                        transcribing -> "Расшифровываем…"
+                        !transcript.isNullOrBlank() -> if (transcriptExpanded) "Скрыть текст" else "Показать текст"
+                        else -> "Расшифровать"
+                    },
+                    color = Accent,
+                    fontSize = 12.sp
+                )
+            }
+        }
+        if (transcript.isNullOrBlank() && !transcribing) {
+            Text(
+                "Распознавание выполняется на устройстве. При первом запуске загрузится русская модель (~45 МБ).",
+                color = SecondaryText,
+                fontSize = 9.sp,
+                lineHeight = 12.sp,
+                modifier = Modifier.padding(bottom = 3.dp)
+            )
+        }
+        if (transcribing) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 5.dp)) {
+                CircularProgressIndicator(Modifier.size(13.dp), color = Accent, strokeWidth = 2.dp)
+                Text("  Подготовка модели и распознавание речи…", color = SecondaryText, fontSize = 10.sp)
+            }
+        }
+        transcriptionError?.let {
+            Text(it, color = Danger, fontSize = 10.sp, modifier = Modifier.padding(bottom = 4.dp))
+        }
+        if (transcriptExpanded && !transcript.isNullOrBlank()) {
+            Divider(color = Accent.copy(alpha = 0.25f), modifier = Modifier.padding(vertical = 7.dp))
+            Text("Расшифровка", color = Accent, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+            Text(transcript.orEmpty(), color = MainText, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
 }
 
 @Composable
