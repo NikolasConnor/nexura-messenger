@@ -482,7 +482,10 @@ function App() {
       let messageQuery=supabase.from('messages')
         .select('id,sender_id,content,cloud_content,created_at,message_type,reply_to_id,edited_at,deleted_at')
         .eq('conversation_id',chat.id).is('deleted_at',null);
-      if(before?.created_at)messageQuery=messageQuery.lt('created_at',before.created_at);
+      if(before?.created_at&&before?.id)messageQuery=messageQuery.or(
+        'created_at.lt.'+before.created_at+',and(created_at.eq.'+before.created_at+',id.lt.'+before.id+')'
+      );
+      else if(before?.created_at)messageQuery=messageQuery.lt('created_at',before.created_at);
       const [messageResult,reactionsResult]=await Promise.all([
         messageQuery.order('created_at',{ascending:false}).order('id',{ascending:false}).limit(50),
         before?Promise.resolve({data:null}):loadMessageReactions(supabase,chat.id).catch(()=>({}))
@@ -689,10 +692,12 @@ function App() {
   async function loadOwnSocial() {
     if (!session?.user?.id) return;
     try {
-      const [photos, stories] = await Promise.all([
+      const [photos, activeStories, archivedStories] = await Promise.all([
         loadProfilePhotos(supabase, session.user.id),
+        loadStories(supabase, {userId:session.user.id, activeOnly:true}),
         loadStories(supabase, {userId:session.user.id, activeOnly:false})
       ]);
+      const stories=[...activeStories,...archivedStories].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
       setProfilePhotos(photos); setProfileStories(stories);
     } catch(error) { setNotice('Не удалось загрузить публикации: '+error.message); }
   }
