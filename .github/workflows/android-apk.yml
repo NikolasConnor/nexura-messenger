@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - livekit-cloud-android-studio
+      - feature/nexura-0.6.1-media-transcription
   workflow_dispatch:
 
 permissions:
