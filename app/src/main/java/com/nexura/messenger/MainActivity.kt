@@ -1067,6 +1067,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
         }
     }
 
+    // Private social media URLs are time-limited. Re-sign them whenever the
+    // social screen is opened or the user switches between active stories/archive.
+    LaunchedEffect(signedIn, homeTab, socialArchiveOpen) {
+        if (signedIn && homeTab == "social") {
+            socialBusy = true
+            try {
+                if (socialArchiveOpen) socialArchive = api.myStoryArchive()
+                else socialStories = api.activeStories()
+                socialPhotos = api.profilePhotos(store.userId.orEmpty())
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось обновить фотографии и истории"
+            } finally {
+                socialBusy = false
+            }
+        }
+    }
+
     LaunchedEffect(signedIn) {
         if (signedIn) {
             launch {
@@ -2271,13 +2288,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Text("Сообщество", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold)
                                         Text("Истории и фотографии пользователей", color = SecondaryText, fontSize = 12.sp)
                                     }
-                                    TextButton(onClick = {
-                                        socialArchiveOpen = !socialArchiveOpen
-                                        scope.launch { socialBusy = true; try {
-                                            if (socialArchiveOpen) socialArchive = api.myStoryArchive()
-                                            else socialStories = api.activeStories()
-                                        } catch (e: Exception) { error = e.message ?: "Не удалось загрузить истории" } finally { socialBusy = false } }
-                                    }) { Text(if (socialArchiveOpen) "К историям" else "Архив", color = Accent) }
+                                    TextButton(onClick = { socialArchiveOpen = !socialArchiveOpen }) {
+                                        Text(if (socialArchiveOpen) "К историям" else "Архив", color = Accent)
+                                    }
                                 }
                                 OutlinedTextField(value = socialCaption, onValueChange = { socialCaption = it.take(500) },
                                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp), placeholder = { Text("Подпись к публикации") },
