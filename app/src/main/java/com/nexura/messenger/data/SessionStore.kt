@@ -42,12 +42,16 @@ class SessionStore(context: Context) {
         get() = prefs.getString("telegram_code_verifier", null)
         set(value) { prefs.edit().putString("telegram_code_verifier", value).apply() }
 
+    @Synchronized
     fun consumeTelegramVerifier(callbackState: String?): String? {
         val savedState = telegramPendingState
         val verifier = telegramCodeVerifier
-        // Clear first so a repeated callback cannot reuse the same state/code verifier.
+        val valid = !savedState.isNullOrBlank() && !verifier.isNullOrBlank() &&
+            (callbackState.isNullOrBlank() || savedState == callbackState)
+        if (!valid) return null
+        // Consume only a matching one-time state; invalid deep links cannot cancel a pending login.
         prefs.edit().remove("telegram_pending_state").remove("telegram_code_verifier").apply()
-        return verifier?.takeIf { !savedState.isNullOrBlank() && (callbackState.isNullOrBlank() || savedState == callbackState) }
+        return verifier
     }
 
     data class PendingCloudMessage(val id: String, val chatId: String, val text: String, val replyToId: String?)
