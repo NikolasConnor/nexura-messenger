@@ -4478,6 +4478,7 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
     var duration by remember(uri) { mutableLongStateOf(0L) }
     var showControls by remember(uri) { mutableStateOf(true) }
     var dragging by remember(uri) { mutableStateOf(false) }
+    var muted by remember(uri) { mutableStateOf(false) }
 
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
@@ -4531,7 +4532,7 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = { ctx ->
             PlayerView(ctx).apply {
-                player = player
+                this.player = player
                 useController = false
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setKeepContentOnPlayerReset(true)
@@ -4546,6 +4547,9 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
                         Text("NEXURA", color = Color.White.copy(alpha = 0.72f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
                         Text("Видеоплеер", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     }
+                    TextButton(onClick = { muted = !muted; player.volume = if (muted) 0f else 1f; showControls = true }) {
+                        Text(if (muted) "Включить звук" else "Выключить звук", color = Color.White, fontSize = 12.sp)
+                    }
                     IconButton(onClick = onClose, modifier = Modifier.background(Color(0x66000000), CircleShape)) { Icon(Icons.Default.Close, "Закрыть видео", tint = Color.White) }
                 }
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(horizontal = 18.dp, vertical = 18.dp)) {
@@ -4555,8 +4559,9 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
                         Slider(
                             value = if (duration > 0L) position.coerceIn(0L, duration).toFloat() else 0f,
                             onValueChange = { value -> dragging = true; position = value.toLong() },
-                            onValueChangeFinished = { player.seekTo(position.coerceIn(0L, duration.coerceAtLeast(0L))); dragging = false },
+                            onValueChangeFinished = { if (duration > 0L) player.seekTo(position.coerceIn(0L, duration)); dragging = false },
                             valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+                            enabled = duration > 0L,
                             modifier = Modifier.weight(1f).padding(horizontal = 9.dp),
                             colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Accent, inactiveTrackColor = Color.White.copy(alpha = 0.3f))
                         )
