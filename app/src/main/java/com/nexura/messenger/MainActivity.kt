@@ -2062,7 +2062,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); profileBannerUrl = p.bannerUrl; bannerPhotoUri = null; profileBannerUrl = p.bannerUrl; bannerPhotoUri = null; val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); profileBannerUrl = p.bannerUrl; bannerPhotoUri = null; val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
@@ -2617,7 +2617,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         NexuraBottomBar(
                             selected = homeTab,
                             profileSelected = homeTab == "profile",
-                            onSelect = { tab -> if (tab == "settings") settingsOpen = true else { homeTab = tab; settingsOpen = false }; createGroupOpen = false },
+                            onSelect = { tab ->
+                                if (tab == "settings") {
+                                    settingsOpen = true
+                                    scope.launch {
+                                        try {
+                                            val p = api.myProfile()
+                                            profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username
+                                            profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty()
+                                            profileBannerUrl = p.bannerUrl; bannerPhotoUri = null
+                                            val privacy = api.privacySettings()
+                                            showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled
+                                            blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices()
+                                        } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" }
+                                    }
+                                } else { homeTab = tab; settingsOpen = false }
+                                createGroupOpen = false
+                            },
                             onProfile = {
                                 settingsOpen = false; homeTab = "profile"
                                 error = ""; notice = ""
