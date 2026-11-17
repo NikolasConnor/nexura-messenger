@@ -4006,7 +4006,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 Modifier.fillMaxWidth()
                                                     .padding(top = 4.dp, start = 5.dp, end = 5.dp, bottom = 2.dp)
                                                     .heightIn(min = 30.dp),
-                                                horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                                                horizontalArrangement = Arrangement.Start,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                     reactionsForMessage.forEach { reaction ->
@@ -5380,13 +5380,13 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         }
     }
     Row(
-        Modifier.padding(end = 4.dp).height(30.dp)
+        Modifier.padding(end = 5.dp).height(32.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(12.dp)).background(chipColor)
-            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.20f), RoundedCornerShape(12.dp))
+            .clip(CircleShape).background(chipColor)
+            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.18f), CircleShape)
             .clickable { if (!pulse) { pulse = true; onClick() } }
-            .animateContentSize(spring(dampingRatio = 0.78f, stiffness = 520f))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 480f))
+            .padding(horizontal = 11.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
