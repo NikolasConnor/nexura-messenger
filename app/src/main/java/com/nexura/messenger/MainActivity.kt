@@ -4003,10 +4003,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             exit = fadeOut() + shrinkVertically()
                                         ) {
                                             Row(
-                                                Modifier.fillMaxWidth()
-                                                    .padding(top = 4.dp, start = 5.dp, end = 5.dp, bottom = 2.dp)
+                                                Modifier.align(Alignment.Start)
+                                                    .wrapContentWidth()
+                                                    .padding(top = 2.dp, start = 5.dp, end = 5.dp, bottom = 3.dp)
                                                     .heightIn(min = 30.dp),
-                                                horizontalArrangement = Arrangement.Start,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                     reactionsForMessage.forEach { reaction ->
@@ -5380,13 +5381,13 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         }
     }
     Row(
-        Modifier.padding(end = 5.dp).height(32.dp)
+        Modifier.height(30.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(CircleShape).background(chipColor)
-            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.18f), CircleShape)
+            .clip(RoundedCornerShape(50)).background(chipColor)
+            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.18f), RoundedCornerShape(50))
             .clickable { if (!pulse) { pulse = true; onClick() } }
             .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 480f))
-            .padding(horizontal = 11.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
