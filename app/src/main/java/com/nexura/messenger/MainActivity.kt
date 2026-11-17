@@ -3966,6 +3966,39 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }}
                                                 }
                                             }
+                                            val reactionsForMessage = messageReactions[msg.id].orEmpty()
+                                            AnimatedVisibility(
+                                                visible = reactionsForMessage.isNotEmpty(),
+                                                enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.96f),
+                                                exit = fadeOut() + shrinkVertically()
+                                            ) {
+                                                Row(
+                                                    Modifier.fillMaxWidth()
+                                                        .horizontalScroll(rememberScrollState())
+                                                        .padding(top = 6.dp)
+                                                        .heightIn(min = 32.dp),
+                                                    horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    reactionsForMessage.forEach { reaction ->
+                                                        AnimatedReactionChip(
+                                                            emoji = reaction.emoji,
+                                                            count = reaction.count,
+                                                            selected = reaction.selectedByMe,
+                                                            onClick = {
+                                                                scope.launch {
+                                                                    try {
+                                                                        api.toggleMessageReaction(chat.id, msg.id, reaction.emoji)
+                                                                        messageReactions = api.messageReactions(chat.id)
+                                                                    } catch (e: Exception) {
+                                                                        error = e.message ?: "Не удалось изменить реакцию"
+                                                                    }
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                             AnimatedVisibility(
                                                 visible = reactionPickerFor == msg.id,
@@ -3995,38 +4028,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                         }
                                                     }
                                                 }
-                                            }
-                                        val reactionsForMessage = messageReactions[msg.id].orEmpty()
-                                        AnimatedVisibility(
-                                            visible = reactionsForMessage.isNotEmpty(),
-                                            enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.92f),
-                                            exit = fadeOut() + shrinkVertically()
-                                        ) {
-                                            Row(
-                                                Modifier.align(Alignment.Start)
-                                                    .wrapContentWidth()
-                                                    .padding(top = 2.dp, start = 5.dp, end = 5.dp, bottom = 3.dp)
-                                                    .heightIn(min = 30.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                    reactionsForMessage.forEach { reaction ->
-                                                        AnimatedReactionChip(
-                                                            emoji = reaction.emoji,
-                                                            count = reaction.count,
-                                                            selected = reaction.selectedByMe,
-                                                            onClick = {
-                                                                scope.launch {
-                                                                    try {
-                                                                        api.toggleMessageReaction(chat.id, msg.id, reaction.emoji)
-                                                                        messageReactions = api.messageReactions(chat.id)
-                                                                    } catch (e: Exception) { error = e.message ?: "Не удалось изменить реакцию" }
-                                                                }
-                                                            }
-                                                        )
-                                                    }
-                                                }
-                                            }
                                             }
                                         }
                                     }
@@ -5360,7 +5361,7 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         label = "reaction-chip-emoji-scale"
     )
     val chipColor by animateColorAsState(
-        targetValue = if (selected) Accent.copy(alpha = 0.30f) else Surface2,
+        targetValue = if (selected) Accent.copy(alpha = 0.92f) else Surface2.copy(alpha = 0.96f),
         animationSpec = spring(stiffness = 420f),
         label = "reaction-chip-color"
     )
@@ -5381,13 +5382,15 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         }
     }
     Row(
-        Modifier.height(30.dp)
+        Modifier.padding(end = 5.dp)
+            .height(30.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(50)).background(chipColor)
-            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.18f), RoundedCornerShape(50))
+            .clip(CircleShape)
+            .background(chipColor)
+            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.22f), CircleShape)
             .clickable { if (!pulse) { pulse = true; onClick() } }
             .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 480f))
-            .padding(horizontal = 10.dp, vertical = 3.dp),
+            .padding(horizontal = 9.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -5401,7 +5404,7 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
             }
         )
         AnimatedContent(targetState = count, label = "reaction-count") { value ->
-            Text(" $value", color = MainText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(value.toString(), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
         }
     }
 }
