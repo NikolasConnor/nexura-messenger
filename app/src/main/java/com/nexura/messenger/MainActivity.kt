@@ -4003,7 +4003,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             exit = fadeOut() + shrinkVertically()
                                         ) {
                                             Row(
-                                                Modifier.fillMaxWidth().padding(top = 4.dp, start = 5.dp, end = 5.dp),
+                                                Modifier.fillMaxWidth().padding(top = 0.dp, start = 5.dp, end = 5.dp).offset(y = (-10).dp),
                                                 horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
@@ -4358,8 +4358,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                     }
                 }
-                if (mediaViewerItems.size > 1) Text("Свайпните влево или вправо", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp).background(Color(0x66000000), RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 7.dp))
+                if (mediaViewerItems.size > 1 && mediaViewerType != "video") Text("Свайпните влево или вправо", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 12.dp).background(Color(0x66000000), RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 7.dp))
             }
         }
     }
@@ -4548,7 +4548,7 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
                     }
                     IconButton(onClick = onClose, modifier = Modifier.background(Color(0x66000000), CircleShape)) { Icon(Icons.Default.Close, "Закрыть видео", tint = Color.White) }
                 }
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().imePadding().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 20.dp)) {
                     playbackError?.let { Text(it, color = Color(0xFFFFB4AB), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(formatNexuraTime(position), color = Color.White, fontSize = 11.sp)
