@@ -4003,7 +4003,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             exit = fadeOut() + shrinkVertically()
                                         ) {
                                             Row(
-                                                Modifier.fillMaxWidth().padding(top = 0.dp, start = 5.dp, end = 5.dp).offset(y = (-10).dp),
+                                                Modifier.fillMaxWidth()
+                                                    .padding(top = 4.dp, start = 5.dp, end = 5.dp, bottom = 2.dp)
+                                                    .heightIn(min = 30.dp),
                                                 horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
@@ -4548,7 +4550,7 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
                     }
                     IconButton(onClick = onClose, modifier = Modifier.background(Color(0x66000000), CircleShape)) { Icon(Icons.Default.Close, "Закрыть видео", tint = Color.White) }
                 }
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 20.dp)) {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))).padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 60.dp)) {
                     playbackError?.let { Text(it, color = Color(0xFFFFB4AB), fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(formatNexuraTime(position), color = Color.White, fontSize = 11.sp)
@@ -5347,7 +5349,7 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
 private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
     var pulse by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (pulse) 1.18f else 1f,
+        targetValue = if (pulse) 1.06f else 1f,
         animationSpec = spring(dampingRatio = 0.46f, stiffness = 520f),
         label = "reaction-chip-scale"
     )
@@ -5378,12 +5380,13 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
         }
     }
     Row(
-        Modifier.padding(end = 6.dp).graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(18.dp)).background(chipColor)
-            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.20f), RoundedCornerShape(18.dp))
+        Modifier.padding(end = 4.dp).height(30.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(12.dp)).background(chipColor)
+            .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.20f), RoundedCornerShape(12.dp))
             .clickable { if (!pulse) { pulse = true; onClick() } }
             .animateContentSize(spring(dampingRatio = 0.78f, stiffness = 520f))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
