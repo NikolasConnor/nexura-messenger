@@ -3535,6 +3535,45 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Text(if (busy) "Загружаем сообщения…" else "Напишите первое сообщение 👋", color = SecondaryText, fontSize = 13.sp)
                             }
+                            // Explicit first-message composer: keep it visible for brand-new direct chats.
+                            Row(
+                                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg)))
+                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                IconButton(
+                                    onClick = { mediaPicker.launch(arrayOf("*/*")) },
+                                    enabled = !sendingImage && !recordingVoice,
+                                    modifier = Modifier.size(44.dp).clip(CircleShape).background(Surface2)
+                                ) {
+                                    Icon(Icons.Default.Add, "Прикрепить", tint = Accent)
+                                }
+                                Spacer(Modifier.width(7.dp))
+                                OutlinedTextField(
+                                    value = draft,
+                                    onValueChange = { draft = it; chatDrafts[chat.id] = it },
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 132.dp),
+                                    placeholder = { Text("Сообщение", fontSize = 14.sp, color = SecondaryText) },
+                                    minLines = 1, maxLines = 4, shape = RoundedCornerShape(25.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MainText, unfocusedTextColor = MainText,
+                                        cursorColor = Accent, focusedContainerColor = Surface2,
+                                        unfocusedContainerColor = Surface2, focusedBorderColor = Accent.copy(alpha = 0.65f),
+                                        unfocusedBorderColor = Color.Transparent
+                                    ),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                    keyboardActions = KeyboardActions(onSend = {
+                                        val text = draft.trim()
+                                        if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
+                                    })
+                                )
+                                IconButton(
+                                    onClick = { val text = draft.trim(); if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id) },
+                                    enabled = draft.isNotBlank() && !sendingImage,
+                                    modifier = Modifier.size(46.dp).clip(CircleShape)
+                                        .background(Brush.linearGradient(listOf(Accent, Accent2)))
+                                ) { Icon(Icons.Default.Send, "Отправить первое сообщение", tint = Bg) }
+                            }
                         } else {
                             if (visibleMessages.isEmpty()) {
                                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
