@@ -753,7 +753,7 @@ function App() {
     setProfileBusy(true); setNotice('');
     try {
       await updateMyProfile(supabase, profileDraft);
-      const username = await updateMyUsername(supabase, usernameDraft);
+      const username = usernameDraft.trim() ? await updateMyUsername(supabase, usernameDraft) : (profile?.username || '');
       await updatePrivacySettings(supabase, privacyDraft.showOnlineStatus, privacyDraft.readReceiptsEnabled);
       setProfile(previous => ({ ...previous, ...profileDraft, username, display_name: profileDraft.display_name.trim() }));
       setSettingsOpen(false);
@@ -944,7 +944,7 @@ function App() {
             <label className="settings-toggle"><input type="checkbox" checked={privacyDraft.readReceiptsEnabled} onChange={event=>setPrivacyDraft(value=>({...value,readReceiptsEnabled:event.target.checked}))}/> Отправлять отчёты о прочтении</label>
           </>}</div>
           <div className="settings-section"><b>Заблокированные пользователи</b>{blockedUsers.length===0 ? <span>Список пуст</span> : blockedUsers.map(person=><div className="blocked-person" key={person.id}><span>{person.display_name || person.username || 'Пользователь'}</span><button type="button" className="text-action" onClick={()=>unblockPerson(person)}>Разблокировать</button></div>)}</div>
-          <label className="modal-label">Возраст<input type="number" min="1" max="120" value={profileDraft.age} onChange={event=>setProfileDraft(value=>({...value,age:event.target.value}))} placeholder="Необязательно"/></label>
+          <label className="modal-label">Возраст<input type="number" min="13" max="120" value={profileDraft.age} onChange={event=>setProfileDraft(value=>({...value,age:event.target.value}))} placeholder="Необязательно"/></label>
           <label className="modal-label">О себе<textarea value={profileDraft.bio} onChange={event=>setProfileDraft(value=>({...value,bio:event.target.value}))} placeholder="Пара слов о себе" maxLength={160} rows={3}/></label>
           <div className="profile-form-foot"><span>{profileDraft.bio.length}/160</span><button className="primary-btn" type="submit" disabled={profileBusy}>{profileBusy?'Сохраняем…':'Сохранить профиль'}</button></div>
         </form>
