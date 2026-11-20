@@ -134,15 +134,16 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
-private val Bg = Color(0xFF0B0914)
-private val Surface1 = Color(0xFF151126)
-private val Surface2 = Color(0xFF211A35)
-private val Accent = Color(0xFF9B6BFF)
-private val Accent2 = Color(0xFF6842D8)
-private val MainText = Color(0xFFF5F7FB)
-private val SecondaryText = Color(0xFFA4AFBF)
-private val Danger = Color(0xFFFF858D)
-private val Success = Color(0xFF8DDEB0)
+// Nexura visual system: Midnight surfaces, electric-blue actions and ice-cyan highlights.
+private val Bg = NexuraPalette.Background
+private val Surface1 = NexuraPalette.Surface
+private val Surface2 = NexuraPalette.SurfaceRaised
+private val Accent = NexuraPalette.Accent
+private val Accent2 = NexuraPalette.AccentSoft
+private val MainText = NexuraPalette.TextPrimary
+private val SecondaryText = NexuraPalette.TextSecondary
+private val Danger = NexuraPalette.Danger
+private val Success = NexuraPalette.Success
 
 private data class DeviceContact(val name: String, val phone: String, val match: ContactMatch? = null)
 
@@ -286,10 +287,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showChatOptionsMenu by remember { mutableStateOf(false) }
     var showChatModeDialog by remember { mutableStateOf(false) }
     var changingChatMode by remember { mutableStateOf(false) }
-    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
+    var chatWallpaperColor by remember { mutableStateOf(NexuraPalette.Background) }
     var chatWallpaperId by remember { mutableStateOf("midnight") }
     var chatWallpaperImage by remember { mutableStateOf<String?>(null) }
-    var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
+    var chatBubbleColor by remember { mutableStateOf(NexuraPalette.Accent) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceFile by remember { mutableStateOf<File?>(null) }
@@ -430,15 +431,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             .edit().putString("active_chat_id", selected?.id).apply()
         selected?.id?.let { chatId ->
             val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
-            chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
+            chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", NexuraPalette.Background.toArgb()))
             chatWallpaperId = prefs.getString("wallpaper_pattern_$chatId", "midnight") ?: "midnight"
             chatWallpaperImage = prefs.getString("wallpaper_image_$chatId", null)
-            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
+            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", NexuraPalette.Accent.toArgb()))
         } ?: run {
-            chatWallpaperColor = Color(0xFF100C1D)
+            chatWallpaperColor = NexuraPalette.Background
             chatWallpaperId = "midnight"
             chatWallpaperImage = null
-            chatBubbleColor = Color(0xFF6945C7)
+            chatBubbleColor = NexuraPalette.Accent
         }
     }
 
@@ -1456,15 +1457,23 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = Accent, secondary = Accent2, background = Bg, surface = Surface1,
-            onBackground = MainText, onSurface = MainText
+            primary = Accent,
+            secondary = Accent2,
+            tertiary = NexuraPalette.AccentGlow,
+            background = Bg,
+            surface = Surface1,
+            surfaceVariant = Surface2,
+            onBackground = MainText,
+            onSurface = MainText,
+            onPrimary = Color.White,
+            outline = NexuraPalette.Outline
         )
     ) {
         Surface(Modifier.fillMaxSize(), color = Bg) {
             when {
                 !signedIn -> {
                     Column(
-                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF121D32), Bg, Bg)))
+                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(NexuraPalette.SurfaceRaised, Bg, Bg)))
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 24.dp, vertical = 28.dp),
                         verticalArrangement = Arrangement.Top
@@ -1592,7 +1601,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                 }
                 signedIn && usernameSetupRequired -> {
                     Column(
-                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF17102A), Bg)))
+                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(NexuraPalette.SurfaceRaised, Bg)))
                             .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 36.dp),
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
@@ -2587,7 +2596,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (visibleChats.isEmpty()) {
                             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Box(Modifier.size(76.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(76.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Surface2, NexuraPalette.SurfaceTint))), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Default.ChatBubbleOutline, null, tint = Accent, modifier = Modifier.size(34.dp))
                                     }
                                     Text(if (busy) "Загружаем чаты…" else if (chatFilter.isNotBlank()) "Ничего не найдено" else "Здесь пока тихо", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
@@ -2602,8 +2611,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 items(visibleChats, key = { it.id }) { chat ->
                                     Row(
                                         Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                            .clip(RoundedCornerShape(19.dp))
-                                            .background(Surface1)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(Brush.linearGradient(listOf(Surface1, NexuraPalette.SurfaceTint)))
+                                            .border(1.dp, NexuraPalette.Outline.copy(alpha = 0.72f), RoundedCornerShape(20.dp))
                                             .clickable { openChat(chat) }
                                             .padding(start = 12.dp, end = 7.dp, top = 11.dp, bottom = 11.dp),
                                         verticalAlignment = Alignment.CenterVertically
@@ -3045,12 +3055,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     if (chatThemeOpen) {
                         val wallpaperOptions = listOf(
-                            Triple("midnight", "Полночь", Color(0xFF100C1D)), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
+                            Triple("midnight", "Полночь", NexuraPalette.Background), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
                             Triple("forest", "Тайга", Color(0xFF101D1A)), Triple("ocean", "Глубина", Color(0xFF0D1C27)), Triple("rain", "Дождь", Color(0xFF171C27)),
                             Triple("mono", "Графит", Color(0xFF17191F)), Triple("bloom", "Сакура", Color(0xFF211923)), Triple("ember", "Жар", Color(0xFF241815)),
                             Triple("geometry", "Контур", Color(0xFF171725)), Triple("pixel", "Пиксель", Color(0xFF151B25)), Triple("tide", "Прилив", Color(0xFF101F25))
                         )
-                        val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
+                        val bubbleOptions = listOf("Электрический синий" to NexuraPalette.Accent, "Ледяной голубой" to NexuraPalette.AccentSoft, "Индиго" to Color(0xFF405FA8), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
                             containerColor = Surface1,
@@ -3106,7 +3116,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             },
                             confirmButton = { TextButton(onClick = { chatThemeOpen = false }) { Text("Готово") } },
                             dismissButton = { TextButton(onClick = {
-                                chatWallpaperColor = Color(0xFF100C1D)
+                                chatWallpaperColor = NexuraPalette.Background
                                 chatWallpaperId = "midnight"
                                 chatWallpaperImage = null
                                 chatBubbleColor = Color(0xFF304B83)
@@ -3505,7 +3515,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     ) {
                         Column(Modifier.fillMaxSize()) {
                         Row(
-                            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
+                            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, NexuraPalette.SurfaceTint))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = { selected = null; peerReadReceiptAt = null; messages = emptyList(); replyTarget = null; loadChats() }) {
@@ -3886,7 +3896,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 topStart = 20.dp, topEnd = 20.dp,
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
-                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                            )).background(if (mine) chatBubbleColor else Surface2)
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
@@ -3963,7 +3973,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 } else if (msg.mediaKind == "file") {
                                                     Row(
                                                         Modifier.width(250.dp).clip(RoundedCornerShape(16.dp))
-                                                            .background(Brush.linearGradient(listOf(Color(0xFF29203E), Surface2)))
+                                                            .background(Brush.linearGradient(listOf(NexuraPalette.SurfaceTint, Surface2)))
                                                             .border(1.dp, Accent.copy(alpha = 0.20f), RoundedCornerShape(16.dp))
                                                             .clickable {
                                                                 try {
@@ -4292,7 +4302,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             if (replyTarget != null) {
                                 Row(
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
-                                        .background(Brush.horizontalGradient(listOf(Color(0xFF251A3D), Surface2)))
+                                        .background(Brush.horizontalGradient(listOf(NexuraPalette.SurfaceRaised, Surface2)))
                                         .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(13.dp))
                                         .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -4629,7 +4639,7 @@ private fun AudioMessagePlayer(
     Column(
         Modifier.widthIn(min = 245.dp, max = 300.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF30234B), Surface2)))
+            .background(Brush.linearGradient(listOf(NexuraPalette.SurfaceTint, Surface2)))
             .border(1.dp, Accent.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
             .padding(horizontal = 12.dp, vertical = 11.dp)
     ) {
@@ -4766,13 +4776,13 @@ private fun NexuraBottomBar(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-        color = Surface1,
-        shape = RoundedCornerShape(24.dp),
-        shadowElevation = 12.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
+        color = NexuraPalette.NavSurface,
+        shape = RoundedCornerShape(25.dp),
+        shadowElevation = 16.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, NexuraPalette.Outline)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp),
+            modifier = Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
@@ -4785,26 +4795,34 @@ private fun NexuraBottomBar(
                 val active = selected == key && !profileSelected
                 Column(
                     modifier = Modifier.weight(1f).fillMaxHeight()
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(if (active) Accent.copy(alpha = 0.16f) else Color.Transparent)
-                        .clickable { onSelect(key) },
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (active) Brush.linearGradient(listOf(Accent.copy(alpha = 0.22f), Accent2.copy(alpha = 0.12f)))
+                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                        )
+                        .clickable { onSelect(key) }
+                        .padding(vertical = 3.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp))
-                    Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+                    Icon(icon, contentDescription = label, tint = if (active) Accent2 else SecondaryText, modifier = Modifier.size(21.dp))
+                    Text(label, color = if (active) MainText else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
                 }
             }
             Column(
                 modifier = Modifier.weight(1f).fillMaxHeight()
-                    .clip(RoundedCornerShape(17.dp))
-                    .background(if (profileSelected) Accent.copy(alpha = 0.16f) else Color.Transparent)
-                    .clickable { onProfile() },
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (profileSelected) Brush.linearGradient(listOf(Accent.copy(alpha = 0.22f), Accent2.copy(alpha = 0.12f)))
+                        else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                    )
+                    .clickable { onProfile() }
+                    .padding(vertical = 3.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Default.AccountCircle, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
-                Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+                Icon(Icons.Default.AccountCircle, contentDescription = "Профиль", tint = if (profileSelected) Accent2 else SecondaryText, modifier = Modifier.size(21.dp))
+                Text("Профиль", color = if (profileSelected) MainText else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }

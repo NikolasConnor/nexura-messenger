@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - livekit-cloud-android-studio
+      - design/nexura-midnight-refresh
   workflow_dispatch:
 
 permissions:

@@ -15,15 +15,15 @@ internal fun Modifier.nexuraWallpaperPattern(theme: String): Modifier = this.dra
     val line = 0.8.dp.toPx()
     val ink = when (theme) {
         "circuit" -> Color(0xFF42B8C8)
-        "orbit" -> Color(0xFF8997E8)
+        "orbit" -> Color(0xFF7CE7F2)
         "forest" -> Color(0xFF75B99A)
         "ocean", "tide" -> Color(0xFF58B8C8)
         "rain" -> Color(0xFF91A8C8)
         "mono" -> Color(0xFFB0B7C2)
         "bloom" -> Color(0xFFD58BAF)
         "ember" -> Color(0xFFE18B62)
-        "pixel" -> Color(0xFF83A9D6)
-        else -> Color(0xFF9B83D8)
+        "pixel" -> Color(0xFF8FB8FF)
+        else -> Color(0xFF4F8DFF)
     }.copy(alpha = 0.22f)
     var row = 0
     var y = step / 2
