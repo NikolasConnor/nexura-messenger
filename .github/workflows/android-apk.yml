@@ -5,6 +5,15 @@ on:
     branches:
       - livekit-cloud-android-studio
       - design/nexura-midnight-refresh
+      - fix/android-jni-packaging
+    paths:
+      - "app/**"
+      - "crypto-core/**"
+      - "crypto-jni/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - ".github/workflows/android-apk.yml"
   workflow_dispatch:
 
 permissions:
@@ -16,9 +25,9 @@ concurrency:
 
 jobs:
   build:
-    name: Compile and test Android app
+    name: Build, test and verify Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +37,38 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 'latest'
+          accept-android-sdk-licenses: true
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018'
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Run native E2EE tests
+        run: cargo test --manifest-path crypto-jni/Cargo.toml
+
+      - name: Configure Android NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.4 --locked
+
+      - name: Build E2EE JNI libraries for supported Android ABIs
+        working-directory: crypto-jni
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release
+
+      - name: Verify JNI libraries were generated
+        run: |
+          set -eu
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            test -s "app/src/main/jniLibs/$abi/libnexura_e2ee_jni.so"
+          done
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -43,10 +84,20 @@ jobs:
       - name: Run unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
 
+      - name: Verify native libraries are packaged in APK
+        run: |
+          set -eu
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            unzip -l "$APK" | grep -q "lib/$abi/libnexura_e2ee_jni.so"
+          done
+          echo "Verified libnexura_e2ee_jni.so for arm64-v8a, armeabi-v7a and x86_64."
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: nexura-debug-apk
+          name: nexura-debug-apk-with-e2ee
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
