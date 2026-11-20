@@ -3,150 +3,212 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#100b1d">
-  <meta name="description" content="Nexura Messenger 0.8.0 уже выпущен. Скачайте официальное Android-приложение или откройте предварительную веб-версию.">
+  <meta name="theme-color" content="#090a12">
+  <meta name="description" content="Nexura — пространство для личных и групповых разговоров. Узнайте о мессенджере и скачайте Android-приложение.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Nexura Messenger 0.8.0 — официальный релиз">
-  <meta property="og:description" content="Nexura Messenger — публичный релиз 0.8.0 для Android уже доступен бесплатно.">
-  <title>Nexura — общение в своём пространстве</title>
+  <meta property="og:title" content="Nexura — своё пространство для общения">
+  <meta property="og:description" content="Личные разговоры, группы и общение без лишнего шума.">
+  <title>Nexura — своё пространство для общения</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='19' fill='%238d75ff'/%3E%3Cpath d='M17 46V18h7l16 17V18h7v28h-7L24 29v17z' fill='white'/%3E%3C/svg%3E">
   <style>
-    :root{color-scheme:dark;--bg:#0b0813;--panel:#151020;--panel2:#1d1630;--text:#f8f5ff;--muted:#b6abc9;--purple:#ad85ff;--purple2:#7046d5;--line:#ffffff14;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:radial-gradient(ellipse at 75% 0, #57358b35,transparent 34%),var(--bg);color:var(--text);line-height:1.6}a{color:inherit;text-decoration:none}button{font:inherit}.wrap{width:min(1120px,calc(100% - 40px));margin:auto}
-    .nav{height:78px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);position:relative;z-index:5}.brand{display:flex;align-items:center;gap:11px;font-weight:850;font-size:22px;letter-spacing:-.7px}.brand-mark{width:39px;height:39px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,var(--purple),var(--purple2));box-shadow:0 8px 28px #8957e64a;font-size:21px}.navlinks{display:flex;align-items:center;gap:27px;color:var(--muted);font-size:14px}.navlinks a:hover,.footer-links a:hover{color:white}.menu-toggle{display:none;background:#ffffff0b;border:1px solid var(--line);color:white;border-radius:12px;padding:9px 12px}
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:13px 20px;border-radius:14px;background:linear-gradient(135deg,var(--purple),var(--purple2));color:white;font-weight:750;border:1px solid #ffffff20;box-shadow:0 10px 32px #8050d84a;transition:transform .2s,filter .2s}.btn:hover{transform:translateY(-2px);filter:brightness(1.08)}.btn.secondary{background:#ffffff09;box-shadow:none;border:1px solid var(--line)}
-    .hero{display:grid;grid-template-columns:1.05fr .95fr;align-items:center;gap:55px;padding:82px 0 90px;min-height:610px}.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid #a77bff44;border-radius:99px;color:#d7c5ff;background:#a77bff12;font-size:11px;font-weight:800;letter-spacing:1px}
-    h1{font-size:clamp(44px,6vw,72px);line-height:1.03;letter-spacing:-3.3px;margin:22px 0 20px}h1 span{background:linear-gradient(100deg,#d1baff,#916af4);-webkit-background-clip:text;background-clip:text;color:transparent}.lead{max-width:530px;color:var(--muted);font-size:18px;margin:0 0 29px}.hero-actions{display:flex;align-items:center;gap:13px;flex-wrap:wrap}.hint{color:#9186a1;font-size:12px;margin-top:17px}
-    .visual{position:relative;display:flex;justify-content:center;align-items:center;min-height:455px}.glow{position:absolute;width:360px;height:360px;border-radius:50%;background:#8955e8;filter:blur(100px);opacity:.25}.phone{position:relative;width:278px;height:510px;border-radius:38px;border:1px solid #ffffff2a;background:linear-gradient(160deg,#281d42,#100d1b 75%);padding:18px 15px;box-shadow:0 35px 100px #0009,0 0 0 7px #ffffff08;transform:rotate(4deg)}.phone-top{display:flex;justify-content:space-between;color:#bcb0d2;font-size:10px;padding:2px 5px 18px}.phone-title{font-size:23px;font-weight:850;margin:4px 5px 17px}.chat{display:flex;gap:10px;align-items:center;padding:12px 8px;border-bottom:1px solid #ffffff0d}.avatar{width:40px;height:40px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#9d6dff,#5636a7);font-size:19px;flex:none}.chat b{display:block;font-size:12px}.chat small{display:block;color:#a99dbb;font-size:10px;margin-top:3px}.time{margin-left:auto;color:#8f849f;font-size:9px;align-self:flex-start}.bubble{position:absolute;left:26px;right:26px;bottom:28px;padding:12px 14px;border-radius:17px;background:#2b2141;border:1px solid #ffffff13;font-size:11px;color:#e8dfff}.bubble span{display:block;color:#b99aff;font-size:9px;letter-spacing:.8px;margin-bottom:5px}
-    .trust-row{display:flex;gap:20px;flex-wrap:wrap;margin-top:28px;color:#a99dbb;font-size:12px}.trust-row span{display:flex;align-items:center;gap:7px}.trust-row i{font-style:normal;color:#b99aff}
-    section{padding:76px 0}.section-head{text-align:center;max-width:660px;margin:0 auto 38px}.kicker{color:#b99aff;font-size:11px;font-weight:850;letter-spacing:1.5px;text-transform:uppercase}.section-head h2{font-size:clamp(30px,4vw,43px);letter-spacing:-1.5px;line-height:1.12;margin:12px 0}.section-head p{color:var(--muted);margin:0}
-    .features{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.feature{padding:25px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,#1b142b,#130f20);transition:transform .2s,border-color .2s}.feature:hover{transform:translateY(-4px);border-color:#a77bff55}.feature-icon{width:46px;height:46px;border-radius:15px;background:#a77bff1c;display:grid;place-items:center;font-size:22px;margin-bottom:17px}.feature h3{font-size:17px;margin:0 0 8px}.feature p{color:var(--muted);font-size:14px;margin:0}
-    .privacy{display:grid;grid-template-columns:.85fr 1.15fr;gap:42px;align-items:center;padding:36px;border:1px solid var(--line);border-radius:28px;background:linear-gradient(120deg,#211735,#151020)}.privacy-art{min-height:245px;border-radius:20px;background:radial-gradient(circle at 50% 45%,#8b5ce6 0,#51358d 22%,#211936 60%);display:grid;place-items:center;font-size:78px}.privacy h2{font-size:clamp(29px,3.5vw,37px);line-height:1.1;letter-spacing:-1.2px;margin:10px 0 14px}.privacy p{color:var(--muted);font-size:14px}.checks{display:grid;gap:10px;margin-top:20px}.checks div{font-size:13px;color:#e6def5}.checks span{color:#b99aff;margin-right:9px}
-    .roadmap{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.roadmap-card{padding:22px;border:1px solid var(--line);border-radius:20px;background:#ffffff06}.roadmap-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.roadmap-card h3{font-size:16px;margin:0}.roadmap-card p{font-size:13px;color:var(--muted);margin:8px 0 0}.roadmap-tag{font-size:10px;font-weight:800;letter-spacing:.5px;border-radius:99px;padding:6px 9px;background:#a77bff18;color:#d6c4ff;border:1px solid #a77bff35}.roadmap-tag.planned{background:#ffffff0a;color:#c2b9d0;border-color:var(--line)}.feedback{margin-top:24px;padding:22px;border-radius:20px;border:1px solid #a77bff35;background:#a77bff0b;display:flex;align-items:center;justify-content:space-between;gap:18px}.feedback p{margin:4px 0 0;color:var(--muted);font-size:13px}.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.step{padding:23px;border-radius:20px;background:#ffffff06;border:1px solid var(--line)}.step-num{color:#b99aff;font-weight:850;font-size:12px;letter-spacing:1px}.step h3{font-size:16px;margin:9px 0 6px}.step p{color:var(--muted);font-size:13px;margin:0}
-    .lab{max-width:850px;margin:auto;padding:26px;border:1px solid #a77bff35;border-radius:24px;background:linear-gradient(145deg,#1c1530,#120e1e)}.lab-intro{color:var(--muted);font-size:14px;margin:0 0 20px}.lab-list{display:grid;gap:10px}.lab-item{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--line);border-radius:15px;background:#ffffff05;cursor:pointer}.lab-item input{width:18px;height:18px;margin:3px 0 0;accent-color:#a77bff;flex:none}.lab-item strong{display:block;font-size:14px}.lab-item small{display:block;color:var(--muted);font-size:12px;margin-top:3px}.lab-result{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:18px;padding:16px;border-radius:15px;background:#a77bff12;border:1px solid #a77bff30}.lab-result strong{font-size:14px}.lab-result span{font-size:13px;color:#d7c5ff}.lab-note{font-size:11px;color:#958aa8;margin:13px 0 0}@media(max-width:620px){.lab{padding:18px}.lab-result{align-items:flex-start;flex-direction:column}}
-    .faq{max-width:790px;margin:auto;display:grid;gap:10px}.faq details{background:#ffffff06;border:1px solid var(--line);border-radius:16px;padding:17px 19px}.faq summary{cursor:pointer;font-weight:700;list-style:none}.faq summary::-webkit-details-marker{display:none}.faq summary:after{content:"＋";float:right;color:#b99aff}.faq details[open] summary:after{content:"−"}.faq p{color:var(--muted);font-size:14px;margin:12px 0 0}
-    .download{padding:50px 30px;text-align:center;border-radius:28px;border:1px solid #a77bff35;background:radial-gradient(ellipse at 50% 0,#57378c55,transparent 65%),#171126}.download h2{font-size:clamp(29px,4vw,39px);letter-spacing:-1px;margin:10px 0}.download p{color:var(--muted);max-width:590px;margin:0 auto 23px}.status{display:inline-flex;align-items:center;gap:8px;border:1px solid #e9bb5a44;background:#e9bb5a12;color:#f3d69a;padding:8px 12px;border-radius:99px;font-size:12px;font-weight:700}.status-dot{width:7px;height:7px;border-radius:50%;background:#e9bb5a}
-    footer{padding:32px 0 40px;border-top:1px solid var(--line);color:#9388a6;font-size:12px}.footer-row{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}.footer-links{display:flex;gap:18px;flex-wrap:wrap}
-    @media(max-width:820px){.navlinks{gap:14px}.hero{grid-template-columns:1fr;gap:12px;padding:60px 0 45px;text-align:center}.lead{margin-left:auto;margin-right:auto}.hero-actions,.trust-row{justify-content:center}.visual{min-height:470px}.features{grid-template-columns:1fr 1fr}.privacy{grid-template-columns:1fr}.privacy-art{min-height:180px}.steps{grid-template-columns:1fr}.roadmap{grid-template-columns:1fr}.feedback{align-items:flex-start;flex-direction:column}}
-    @media(max-width:620px){.wrap{width:min(100% - 30px,1120px)}.nav{height:70px}.menu-toggle{display:block}.navlinks{display:none;position:absolute;top:69px;left:0;right:0;padding:17px;background:#171126;border:1px solid var(--line);border-radius:0 0 18px 18px;align-items:stretch;flex-direction:column;gap:15px}.navlinks.open{display:flex}.navlinks a{display:block!important}.navlinks .btn{text-align:center}.hero{padding-top:48px}h1{letter-spacing:-2.2px}.lead{font-size:16px}.visual{min-height:420px}.phone{transform:scale(.86) rotate(4deg)}section{padding:55px 0}.features{grid-template-columns:1fr}.privacy{padding:22px}.download{padding:38px 18px}.trust-row{gap:12px}}
-    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important}}
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+    :root{color-scheme:dark;--bg:#090a12;--bg2:#0d0e18;--panel:#121421;--panel2:#171a2a;--ink:#f5f4fb;--muted:#a4a5b8;--dim:#73758c;--line:#ffffff16;--violet:#a28bff;--violet2:#7658e8;--mint:#9ff4d2;--cyan:#8bdff1;--display:'Manrope',sans-serif;--mono:'DM Mono',monospace;font-family:var(--display);font-synthesis:none;text-rendering:optimizeLegibility}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:88px}body{margin:0;background:var(--bg);color:var(--ink);line-height:1.6;overflow-x:hidden}body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(ellipse at 78% 4%,#6752c51b,transparent 32%),radial-gradient(ellipse at 8% 48%,#3e8f8810,transparent 34%),linear-gradient(180deg,#0a0b13,#090a12 70%)}a{color:inherit;text-decoration:none}button{font:inherit}.wrap{width:min(1180px,calc(100% - 48px));margin-inline:auto}.mono{font-family:var(--mono)}.eyebrow{display:flex;align-items:center;gap:10px;color:var(--mint);font:500 10px var(--mono);letter-spacing:.13em;text-transform:uppercase}.eyebrow:before{content:"";width:22px;height:1px;background:currentColor}.muted{color:var(--muted)}
+    .site-header{position:fixed;z-index:30;inset:0 0 auto;height:76px;border-bottom:1px solid transparent;transition:background .25s,border-color .25s,backdrop-filter .25s}.site-header.scrolled{background:#090a12d9;border-color:var(--line);backdrop-filter:blur(18px)}.nav{height:100%;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:11px;font-size:20px;font-weight:800;letter-spacing:-.8px}.brand-symbol{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(145deg,#b4a1ff,#7157e2);color:white;box-shadow:0 5px 24px #8c72ff55;font-size:17px}.nav-links{display:flex;align-items:center;gap:27px;color:#b4b5c5;font-size:12px}.nav-links a:hover{color:white}.nav-cta,.button{display:inline-flex;align-items:center;justify-content:center;gap:10px;border:1px solid #ffffff24;border-radius:12px;padding:12px 17px;background:linear-gradient(120deg,#a18aff,#7557e6);color:white;font-size:12px;font-weight:800;box-shadow:0 10px 32px #7658e833;transition:transform .2s,filter .2s,border-color .2s}.nav-cta:hover,.button:hover{transform:translateY(-2px);filter:brightness(1.1)}.button.secondary{background:#ffffff08;box-shadow:none;border-color:var(--line);color:#e5e3f0}.menu-toggle{display:none;border:1px solid var(--line);background:#ffffff08;color:white;border-radius:10px;padding:9px 12px}
+    .hero{min-height:850px;padding:150px 0 90px;display:grid;grid-template-columns:.94fr 1.06fr;gap:35px;align-items:center;position:relative}.hero-copy{position:relative;z-index:2}.release-pill{display:inline-flex;align-items:center;gap:9px;padding:7px 11px;border:1px solid #9ff4d230;background:#9ff4d20b;border-radius:99px;color:#c9fbe7;font:10px var(--mono);letter-spacing:.04em;margin-bottom:26px}.pulse{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 5px #9ff4d21a}.hero h1{font-size:clamp(54px,7vw,94px);line-height:.99;letter-spacing:-.075em;margin:0 0 25px;font-weight:800}.hero h1 span{display:block;color:transparent;background:linear-gradient(105deg,#c7bbff 8%,#9a82ff 48%,#8fe4d0 100%);background-clip:text;-webkit-background-clip:text}.hero-lead{max-width:470px;color:#b1b2c4;font-size:16px;line-height:1.8;margin:0 0 29px}.hero-actions{display:flex;flex-wrap:wrap;gap:12px}.hero-note{margin-top:17px;color:#77798f;font:10px var(--mono)}.hero-stats{display:flex;gap:25px;flex-wrap:wrap;margin-top:42px;padding-top:22px;border-top:1px solid var(--line)}.hero-stats div{display:grid;gap:3px}.hero-stats b{font-size:14px}.hero-stats span{font:9px var(--mono);color:var(--dim);letter-spacing:.05em;text-transform:uppercase}
+    .hero-world{height:570px;position:relative;perspective:1000px;isolation:isolate}.world-grid{position:absolute;inset:5% -8% 0 0;background-image:linear-gradient(#a99bff0c 1px,transparent 1px),linear-gradient(90deg,#a99bff0c 1px,transparent 1px);background-size:42px 42px;transform:perspective(700px) rotateX(62deg) rotateZ(-27deg) scale(1.1);mask-image:radial-gradient(ellipse,#000 15%,transparent 70%);opacity:.7}.world-halo{position:absolute;width:420px;height:420px;left:50%;top:46%;transform:translate(-50%,-50%);border-radius:50%;background:#7659e82b;filter:blur(85px)}.world-orbit{position:absolute;left:50%;top:48%;width:430px;height:210px;border:1px solid #a99bff32;border-radius:50%;transform:translate(-50%,-50%) rotate(-25deg)}.world-orbit:before,.world-orbit:after{content:"";position:absolute;border:1px solid #9ff4d226;border-radius:50%;inset:24px -22px;transform:rotate(57deg)}.world-orbit:after{inset:55px -52px;transform:rotate(-48deg);border-color:#a99bff1e}.world-core{position:absolute;left:50%;top:47%;width:128px;height:128px;transform:translate(-50%,-50%) rotate(-8deg);display:grid;place-items:center;border-radius:38px;background:linear-gradient(145deg,#b6a5ff,#7658e5 72%);box-shadow:0 28px 90px #785be866,0 0 0 12px #9e89ff0c,0 0 0 1px #ffffff55 inset;font-size:54px;font-weight:800}.world-core:after{content:"";position:absolute;inset:10px;border:1px solid #ffffff52;border-radius:30px}.float-card{position:absolute;z-index:2;border:1px solid #ffffff20;background:linear-gradient(145deg,#1a1c2ceF,#10121deF);box-shadow:0 24px 70px #0008;border-radius:17px;backdrop-filter:blur(14px);animation:float 7s ease-in-out infinite}.float-card small{display:block;color:#85879e;font:9px var(--mono);letter-spacing:.1em;text-transform:uppercase}.float-card b{display:block;font-size:12px;margin-top:5px}.float-card .mini-icon{width:31px;height:31px;display:grid;place-items:center;border-radius:10px;background:#a18aff22;color:#c7baff;margin-bottom:12px}.float-one{left:0;top:17%;width:164px;padding:15px;transform:rotate(-7deg)}.float-two{right:0;top:27%;width:178px;padding:15px;animation-delay:-2s;transform:rotate(6deg)}.float-three{left:9%;bottom:13%;width:184px;padding:15px;animation-delay:-4s;transform:rotate(4deg)}.float-four{right:7%;bottom:8%;width:158px;padding:15px;animation-delay:-1s;transform:rotate(-5deg)}.tiny-avatars{display:flex;margin-top:10px}.tiny-avatars i{width:24px;height:24px;border:2px solid #151725;border-radius:50%;display:grid;place-items:center;background:#3a3653;font-style:normal;font-size:10px;margin-left:-5px}.tiny-avatars i:first-child{margin-left:0}.signal{display:flex;align-items:center;gap:6px;color:var(--mint);font:9px var(--mono);margin-top:10px}.signal:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.world-caption{position:absolute;bottom:0;right:0;color:#6f7188;font:9px var(--mono);letter-spacing:.08em}
+    .scroll-cue{display:flex;align-items:center;gap:12px;color:#77798f;font:9px var(--mono);letter-spacing:.13em;text-transform:uppercase;margin-top:-25px;padding-bottom:65px}.scroll-cue i{display:block;width:34px;height:1px;background:var(--violet)}
+    .intro-band{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:#ffffff03}.intro-band .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-block:21px}.intro-band p{margin:0;color:#b9bac9;font-size:12px}.intro-band strong{color:white}.intro-band .mono{color:var(--mint);font-size:9px}
+    section{padding:112px 0}.section-top{display:flex;align-items:flex-end;justify-content:space-between;gap:30px;margin-bottom:46px}.section-top h2{max-width:660px;font-size:clamp(35px,5vw,60px);line-height:1.05;letter-spacing:-.065em;margin:13px 0 0}.section-top p{max-width:340px;color:var(--muted);font-size:13px;margin:0 0 5px}.section-number{font:10px var(--mono);color:#666980}
+    .world-scroll{height:430vh;position:relative;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:radial-gradient(ellipse at 50% 45%,#30245c2b,transparent 54%),#0b0c15}.world-sticky{position:sticky;top:0;height:100svh;min-height:620px;overflow:hidden;display:grid;grid-template-columns:.75fr 1.25fr;align-items:center;gap:20px;padding:100px max(24px,calc((100vw - 1180px)/2)) 65px}.world-story{position:relative;z-index:5;max-width:410px}.world-story .eyebrow{margin-bottom:20px}.world-story h2{font-size:clamp(37px,4.7vw,62px);line-height:1.02;letter-spacing:-.07em;margin:0 0 18px}.world-story p{color:#aaadbf;font-size:14px;line-height:1.8;max-width:370px}.world-progress{display:flex;align-items:center;gap:9px;margin-top:34px}.world-progress span{height:3px;width:34px;border-radius:9px;background:#ffffff22;transition:background .2s,width .2s}.world-progress span.active{width:58px;background:var(--mint)}.world-counter{font:10px var(--mono);color:#7f829a;margin-left:6px}.flight-stage{height:min(68vh,610px);min-height:420px;position:relative;perspective:1100px;transform-style:preserve-3d}.flight-grid{position:absolute;inset:0;background-image:linear-gradient(#b9aaff0c 1px,transparent 1px),linear-gradient(90deg,#b9aaff0c 1px,transparent 1px);background-size:38px 38px;transform:rotateX(58deg) rotateZ(-25deg) scale(1.3);mask-image:radial-gradient(ellipse,#000 15%,transparent 68%)}.flight-scene{position:absolute;inset:7% 3%;display:grid;place-items:center;transform-style:preserve-3d;will-change:transform,opacity;opacity:0;pointer-events:none}.scene-card{width:min(470px,92%);aspect-ratio:1.15;position:relative;border:1px solid #ffffff24;border-radius:30px;background:linear-gradient(145deg,#1a1d30,#10121e 75%);box-shadow:0 45px 110px #0009;overflow:hidden;transform:rotateX(5deg) rotateY(-9deg)}.scene-card:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 40%,#9a82ff1c,transparent 58%)}.scene-label{position:absolute;left:24px;top:22px;color:#a3a5bb;font:9px var(--mono);letter-spacing:.12em}.scene-floor{position:absolute;left:12%;right:12%;bottom:12%;height:37%;border:1px solid #9f8cff44;background:linear-gradient(135deg,#a18aff14,#8fe5d00b);transform:rotateX(60deg) rotateZ(-30deg);border-radius:15px;box-shadow:0 35px 55px #0005}.scene-window{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);width:190px;height:180px;border-radius:24px;border:1px solid #a99bff48;background:linear-gradient(145deg,#302a4c,#171a2c);box-shadow:0 18px 55px #0008;display:grid;place-items:center}.scene-glyph{width:72px;height:72px;border-radius:23px;background:linear-gradient(145deg,#b7a6ff,#765be5);display:grid;place-items:center;font-size:31px;box-shadow:0 15px 40px #795ce955}.scene-orbit{position:absolute;left:50%;top:50%;width:260px;height:110px;border:1px solid #9ff4d244;border-radius:50%;transform:translate(-50%,-50%) rotate(-24deg)}.scene-bubble{position:absolute;padding:10px 13px;border:1px solid #ffffff24;background:#22263a;border-radius:13px;color:#e8e6f3;font-size:10px;box-shadow:0 12px 30px #0006}.scene-bubble.one{left:10%;top:34%}.scene-bubble.two{right:9%;top:55%;background:#55437e}.scene-avatar{position:absolute;width:45px;height:45px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#b5a4ff,#6650ba);border:2px solid #202137;box-shadow:0 12px 25px #0007;font-size:19px}.scene-avatar.a{left:25%;top:22%}.scene-avatar.b{right:22%;top:26%;background:linear-gradient(145deg,#9ff4d2,#398f85)}.scene-avatar.c{left:42%;bottom:20%;background:linear-gradient(145deg,#f4c18c,#b66b58)}.scene-bars{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:8px}.scene-bars i{display:block;width:8px;border-radius:8px;background:linear-gradient(180deg,var(--mint),var(--violet));height:35px}.scene-bars i:nth-child(2){height:70px}.scene-bars i:nth-child(3){height:48px}.scene-bars i:nth-child(4){height:86px}.scene-shield{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);width:130px;height:150px;clip-path:polygon(50% 0,94% 17%,88% 68%,50% 100%,12% 68%,6% 17%);background:linear-gradient(145deg,#a9f5d7,#5c9d9a);display:grid;place-items:center;color:#0e2727;font-size:52px;filter:drop-shadow(0 20px 35px #8ce6ce44)}.scene-caption{position:absolute;left:24px;bottom:22px;color:#777b94;font:9px var(--mono);letter-spacing:.08em}.world-mobile-note{display:none}
+    .feature-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.feature{position:relative;min-height:250px;padding:27px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,#151827,#0f111c);overflow:hidden;transition:transform .25s,border-color .25s}.feature:hover{transform:translateY(-5px);border-color:#a28bff60}.feature:nth-child(1),.feature:nth-child(4){grid-column:span 7}.feature:nth-child(2),.feature:nth-child(3){grid-column:span 5}.feature:nth-child(5),.feature:nth-child(6){grid-column:span 6}.feature-index{font:10px var(--mono);color:#747790}.feature-icon{width:44px;height:44px;display:grid;place-items:center;border-radius:14px;background:#a28bff19;color:#c5b9ff;font-size:20px;margin:20px 0 16px}.feature h3{font-size:19px;letter-spacing:-.04em;margin:0 0 8px}.feature p{max-width:390px;color:#a2a4b8;font-size:12px;line-height:1.75;margin:0}.feature-art{position:absolute;right:25px;top:34px;width:130px;height:100px;opacity:.85}.art-ring{position:absolute;inset:8px 16px;border:1px solid #9c8aff60;border-radius:50%;transform:rotate(-30deg)}.art-ring:after{content:"";position:absolute;inset:12px -12px;border:1px solid #9ff4d245;border-radius:50%;transform:rotate(60deg)}.art-dot{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--mint);box-shadow:0 0 22px #9ff4d2;left:20px;top:18px}.art-chat{position:absolute;right:3px;top:18px;width:64px;height:40px;border-radius:12px;background:#a18aff30;border:1px solid #a18aff65}.art-chat:after{content:"";position:absolute;left:12px;top:12px;width:36px;height:3px;border-radius:5px;background:#c3b6ff;box-shadow:0 8px #c3b6ff80}.art-lock{position:absolute;right:18px;top:9px;width:47px;height:53px;border:2px solid #9ff4d2;border-radius:15px}.art-lock:before{content:"";position:absolute;left:10px;top:-18px;width:22px;height:24px;border:2px solid #9ff4d2;border-bottom:0;border-radius:15px 15px 0 0}
+    .privacy-panel{display:grid;grid-template-columns:.8fr 1.2fr;gap:55px;align-items:center;padding:48px;border:1px solid #9ff4d229;border-radius:28px;background:radial-gradient(ellipse at 18% 50%,#6a9d8c19,transparent 45%),linear-gradient(145deg,#141b22,#10121c)}.privacy-visual{min-height:270px;display:grid;place-items:center;position:relative}.privacy-visual:before,.privacy-visual:after{content:"";position:absolute;border:1px solid #9ff4d22b;border-radius:50%;width:240px;height:120px;transform:rotate(35deg)}.privacy-visual:after{transform:rotate(-35deg)}.privacy-emblem{width:120px;height:140px;clip-path:polygon(50% 0,94% 17%,88% 68%,50% 100%,12% 68%,6% 17%);background:linear-gradient(145deg,#b5f6dc,#5d9f95);display:grid;place-items:center;color:#102a2a;font-size:47px;filter:drop-shadow(0 18px 30px #8ce6ce44)}.privacy-panel h2{font-size:clamp(32px,4vw,48px);line-height:1.05;letter-spacing:-.06em;margin:14px 0}.privacy-panel p{color:#aeb5b9;font-size:13px;line-height:1.8}.privacy-list{display:grid;gap:12px;margin-top:24px}.privacy-list div{display:flex;align-items:flex-start;gap:11px;color:#d8e5df;font-size:12px}.privacy-list span{color:var(--mint)}
+    .release-panel{display:grid;grid-template-columns:1fr auto;align-items:center;gap:35px;padding:42px;border:1px solid #a28bff42;border-radius:26px;background:radial-gradient(ellipse at 85% 20%,#8a70ff22,transparent 40%),linear-gradient(130deg,#19172a,#10121d)}.release-panel h2{font-size:clamp(32px,4vw,49px);letter-spacing:-.06em;line-height:1.05;margin:12px 0}.release-panel p{max-width:600px;color:#a8a9bb;font-size:13px}.release-meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:22px;color:#8e91a7;font:9px var(--mono)}.release-meta span:before{content:"•";color:var(--mint);margin-right:7px}.release-actions{display:grid;gap:11px;min-width:205px}
+    .faq-grid{display:grid;grid-template-columns:.7fr 1.3fr;gap:60px}.faq-intro h2{font-size:clamp(35px,4vw,51px);line-height:1.05;letter-spacing:-.06em;margin:14px 0}.faq-intro p{color:var(--muted);font-size:13px}.faq details{padding:20px 0;border-bottom:1px solid var(--line)}.faq summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:20px;font-size:14px;font-weight:700}.faq summary::-webkit-details-marker{display:none}.faq summary:after{content:"+";color:var(--mint);font:20px var(--mono)}.faq details[open] summary:after{content:"−"}.faq details p{max-width:650px;color:#a5a7b8;font-size:12px;line-height:1.8;margin:13px 25px 0 0}
+    .final-cta{padding:95px 0 105px;text-align:center;position:relative;overflow:hidden;border-top:1px solid var(--line);background:radial-gradient(ellipse at 50% 110%,#7760e72b,transparent 58%)}.final-cta:before{content:"N";position:absolute;left:50%;top:50%;transform:translate(-50%,-60%);font-size:clamp(260px,38vw,520px);font-weight:800;letter-spacing:-.12em;color:#ffffff04;pointer-events:none}.final-cta .wrap{position:relative}.final-cta h2{max-width:760px;margin:15px auto;font-size:clamp(43px,6vw,76px);line-height:1;letter-spacing:-.075em}.final-cta p{max-width:500px;margin:0 auto 27px;color:#a5a6b9;font-size:14px}.final-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
+    footer{border-top:1px solid var(--line);padding:28px 0 35px}.footer-row{display:flex;align-items:center;justify-content:space-between;gap:22px;flex-wrap:wrap}.footer-links{display:flex;gap:20px;flex-wrap:wrap;color:#9092a6;font-size:11px}.footer-links a:hover{color:white}.copyright{color:#666980;font:9px var(--mono)}
+    .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}.reveal.visible{opacity:1;transform:none}
+    @keyframes float{0%,100%{translate:0 0}50%{translate:0 -13px}}@keyframes orbit{to{transform:translate(-50%,-50%) rotate(335deg)}}
+    @media(max-width:900px){.hero{grid-template-columns:1fr;min-height:auto;padding-top:140px;gap:5px}.hero-copy{text-align:center}.hero-copy .eyebrow,.hero-actions,.hero-stats{justify-content:center}.hero-lead{margin-inline:auto}.hero-world{height:520px;max-width:650px;width:100%;margin-inline:auto}.scroll-cue{justify-content:center;margin-top:0}.world-sticky{grid-template-columns:1fr;grid-template-rows:auto 1fr;gap:0;padding:100px 28px 35px}.world-story{max-width:700px}.world-story h2{font-size:clamp(31px,5vw,48px);max-width:650px}.world-story p{max-width:620px;margin:0}.world-progress{margin-top:16px}.flight-stage{height:48vh;min-height:300px}.scene-card{width:min(430px,85%)}.section-top{align-items:flex-start;flex-direction:column}.section-top p{max-width:550px}.privacy-panel{gap:20px;padding:32px}.release-panel{grid-template-columns:1fr}.release-actions{display:flex;flex-wrap:wrap}.faq-grid{grid-template-columns:1fr;gap:20px}}
+    @media(max-width:620px){.wrap{width:calc(100% - 34px)}.site-header{height:68px}.nav-links{display:none;position:absolute;top:67px;left:17px;right:17px;padding:18px;background:#111320;border:1px solid var(--line);border-radius:16px;align-items:stretch;flex-direction:column;gap:17px;box-shadow:0 20px 60px #0009}.nav-links.open{display:flex}.nav-links .nav-cta{text-align:center}.menu-toggle{display:block}.hero{padding:120px 0 40px;gap:0}.hero h1{font-size:clamp(48px,13vw,70px);letter-spacing:-.075em}.hero-lead{font-size:14px}.hero-actions{display:grid;grid-template-columns:1fr}.hero-actions .button{width:100%}.hero-stats{gap:16px}.hero-stats div{min-width:82px}.hero-world{height:420px;transform:scale(.94);transform-origin:top center;margin-bottom:-25px}.world-core{width:94px;height:94px;border-radius:29px;font-size:40px}.world-orbit{width:310px;height:155px}.float-one{left:0;top:12%;width:135px}.float-two{right:0;top:23%;width:140px}.float-three{left:0;bottom:8%;width:150px}.float-four{right:0;bottom:4%;width:135px}.float-card{padding:11px}.float-card b{font-size:10px}.float-card small{font-size:8px}.world-caption{display:none}.scroll-cue{padding-bottom:40px}.intro-band .wrap{align-items:flex-start;flex-direction:column;gap:8px;padding-block:17px}.intro-band p{font-size:11px}section{padding:75px 0}.section-top{margin-bottom:30px}.section-top h2{font-size:39px}.world-scroll{height:400vh}.world-sticky{height:100svh;min-height:600px;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;padding:92px 17px 20px}.world-story{flex:0 0 auto}.world-story .eyebrow{margin-bottom:10px}.world-story h2{font-size:35px;margin-bottom:9px}.world-story p{font-size:12px;line-height:1.6}.world-progress{margin-top:13px}.flight-stage{flex:1;min-height:260px;height:auto;margin-top:10px;perspective:850px}.flight-scene{inset:2% 0}.scene-card{width:min(390px,100%);border-radius:22px;aspect-ratio:1.1}.scene-window{width:145px;height:140px}.scene-orbit{width:210px}.scene-label{left:17px;top:16px}.scene-caption{left:17px;bottom:16px}.scene-bubble{font-size:8px;padding:8px}.scene-avatar{width:36px;height:36px;border-radius:12px;font-size:15px}.world-mobile-note{display:block;color:#74768b;text-align:center;font:8px var(--mono);padding-top:4px}.feature-grid{display:grid;grid-template-columns:1fr;gap:10px}.feature:nth-child(n){grid-column:span 1;min-height:205px;padding:22px}.feature-art{right:18px;top:24px;transform:scale(.8);transform-origin:top right}.feature h3{font-size:17px}.feature p{max-width:85%}.privacy-panel{grid-template-columns:1fr;padding:24px;gap:8px}.privacy-visual{min-height:190px}.privacy-visual:before,.privacy-visual:after{width:190px;height:95px}.privacy-emblem{width:92px;height:108px;font-size:36px}.privacy-panel h2{font-size:34px}.release-panel{padding:25px}.release-actions{display:grid}.release-actions .button{width:100%}.faq-grid{gap:10px}.faq-intro h2{font-size:40px}.final-cta{padding:75px 0 85px}.final-cta h2{font-size:48px}.footer-row{align-items:flex-start;flex-direction:column}.footer-links{gap:12px 18px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}.flight-scene{opacity:1!important;transform:none!important}.world-scroll{height:auto}.world-sticky{position:relative;height:auto;min-height:0;display:block;padding:65px 24px}.flight-stage{height:auto;min-height:0;display:grid;gap:14px;margin-top:28px}.flight-scene{position:relative;inset:auto;min-height:270px}.scroll-cue{display:none}}
   </style>
 </head>
 <body>
-  <header class="wrap nav">
-    <a class="brand" href="#" aria-label="Nexura — главная"><span class="brand-mark">✦</span>Nexura</a>
-    <button class="menu-toggle" id="menuToggle" aria-expanded="false" aria-controls="navLinks" aria-label="Открыть меню">☰</button>
-    <nav class="navlinks" id="navLinks" aria-label="Главная навигация">
-      <a href="#features">Возможности</a><a href="#news">Новости</a><a href="#download">Скачать APK</a><a href="#privacy">Приватность</a><a href="#lab">Nexura Lab</a><a href="#how">Как начать</a><a href="#roadmap">Планы</a><a href="#faq">Вопросы</a>
-      <a class="btn" href="app/">Открыть веб-версию <span>↗</span></a>
-    </nav>
+  <a href="#main" style="position:absolute;left:-9999px;top:8px;z-index:100;background:#fff;color:#000;padding:10px" onfocus="this.style.left='8px'" onblur="this.style.left='-9999px'">Перейти к содержимому</a>
+  <header class="site-header" id="header">
+    <div class="wrap nav">
+      <a class="brand" href="#" aria-label="Nexura — главная"><span class="brand-symbol">N</span><span>Nexura</span></a>
+      <button class="menu-toggle" id="menuToggle" aria-expanded="false" aria-controls="navLinks" aria-label="Открыть меню">☰</button>
+      <nav class="nav-links" id="navLinks" aria-label="Главная навигация">
+        <a href="#journey">Пространство</a><a href="#features">Возможности</a><a href="#privacy">Приватность</a><a href="#release">Скачать</a>
+        <a class="nav-cta" href="#release">Попробовать Nexura <span>↗</span></a>
+      </nav>
+    </div>
   </header>
-  <main>
-    <div class="wrap hero">
-      <div>
-        <div class="eyebrow">✦ АКТУАЛЬНЫЙ ПУБЛИЧНЫЙ РЕЛИЗ · ANDROID 0.8.0</div>
-        <h1>Ближе друг к другу.<br><span>Спокойнее за личное.</span></h1>
-        <p class="lead">Новая версия Nexura уже доступна. Скачивайте приложение для Android, создавайте аккаунт, находите собеседников и общайтесь в личных и групповых чатах.</p>
-        <div class="hero-actions"><a class="btn" href="https://github.com/NikolasConnor/nexura-messenger/releases/download/v0.8.0/Nexura.apk">↓ Скачать для Android <span>v0.8.0</span></a><a class="btn secondary" href="app/">Открыть веб-версию <span>↗</span></a></div><div class="hint">Релиз опубликован · Версия 0.8.0 · APK доступен бесплатно</div>
-        <div class="trust-row"><span><i>✦</i> Личные и групповые чаты</span><span><i>✦</i> Простой интерфейс</span><span><i>✦</i> Релиз уже доступен</span></div>
-      </div>
-      <div class="visual" role="img" aria-label="Концепт интерфейса Nexura на экране смартфона">
-        <div class="glow"></div><div class="phone">
-          <div class="phone-top"><span>9:41</span><span>●●●　◖</span></div>
-          <div class="phone-title">Сообщения</div>
-          <div class="chat"><div class="avatar">🦊</div><div><b>Александр</b><small>Уже выхожу, скоро буду</small></div><span class="time">09:38</span></div>
-          <div class="chat"><div class="avatar">🌙</div><div><b>Наша компания</b><small>Маша: отправила фото</small></div><span class="time">09:24</span></div>
-          <div class="chat"><div class="avatar">🐼</div><div><b>Мария</b><small>Голосовое сообщение</small></div><span class="time">Вчера</span></div>
-          <div class="chat"><div class="avatar">🚀</div><div><b>Команда</b><small>Отлично, договорились!</small></div><span class="time">Вчера</span></div>
-          <div class="bubble"><span>ПРОСТРАНСТВО NEXURA</span>Твои разговоры — в твоём пространстве.</div>
+  <main id="main">
+    <section class="wrap hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <div class="release-pill"><i class="pulse"></i> ANDROID · ПУБЛИЧНЫЙ РЕЛИЗ 0.8.0</div>
+        <div class="eyebrow">ТВОЁ ЦИФРОВОЕ ПРОСТРАНСТВО</div>
+        <h1 id="hero-title">Общение.<br><span>На твоей орбите.</span></h1>
+        <p class="hero-lead">Nexura — мессенджер для разговоров, которые имеют значение. Личные диалоги, группы и инструменты общения собраны в одном спокойном пространстве.</p>
+        <div class="hero-actions">
+          <a class="button" href="https://github.com/NikolasConnor/nexura-messenger/releases/download/v0.8.0/Nexura.apk">↓ Скачать для Android <span class="mono">0.8.0</span></a>
+          <a class="button secondary" href="app/">Открыть веб-версию <span>↗</span></a>
         </div>
+        <div class="hero-note">Бесплатный APK · Официальная загрузка с GitHub Releases</div>
+        <div class="hero-stats">
+          <div><b>01 — 1</b><span>Личные диалоги</span></div><div><b>∞</b><span>Общие разговоры</span></div><div><b>0.8.0</b><span>Текущий релиз</span></div>
+        </div>
+      </div>
+      <div class="hero-world" aria-label="Абстрактная визуализация пространства Nexura">
+        <div class="world-grid"></div><div class="world-halo"></div><div class="world-orbit"></div>
+        <div class="world-core">N</div>
+        <article class="float-card float-one"><div class="mini-icon">✳</div><small>Личные чаты</small><b>Разговоры один на один</b><div class="signal">ТВОЙ КРУГ</div></article>
+        <article class="float-card float-two"><div class="mini-icon">◉</div><small>Сообщества</small><b>Свои люди рядом</b><div class="tiny-avatars"><i>✦</i><i>☾</i><i>⌁</i><i>+</i></div></article>
+        <article class="float-card float-three"><div class="mini-icon">⌁</div><small>Твоё пространство</small><b>Меньше шума. Больше смысла.</b></article>
+        <article class="float-card float-four"><div class="mini-icon">◇</div><small>Приватность</small><b>Контроль начинается с тебя</b><div class="signal">ВНИМАНИЕ К ДЕТАЛЯМ</div></article>
+        <div class="world-caption">NEXURA / A SPACE FOR CONVERSATION</div>
+      </div>
+    </section>
+    <div class="wrap scroll-cue"><i></i> ПРОКРУТИ ВНИЗ, ЧТОБЫ ПРОЛЕТЕТЬ ЧЕРЕЗ NEXURA</div>
+    <div class="intro-band"><div class="wrap"><p><strong>Не просто список чатов.</strong> Пространство, в котором разговоры находят своё место.</p><span class="mono">DESIGNED TO FEEL SIMPLE</span></div></div>
+
+    <div class="world-scroll" id="journey" aria-label="Путешествие по возможностям Nexura">
+      <div class="world-sticky">
+        <div class="world-story">
+          <div class="eyebrow">МИР NEXURA / 01—04</div>
+          <h2 id="worldTitle">Начни с разговора.</h2>
+          <p id="worldText">Открой личный диалог, чтобы быть ближе к тем, кто важен. Всё начинается с простого сообщения.</p>
+          <div class="world-progress" aria-label="Прогресс путешествия"><span class="active"></span><span></span><span></span><span></span><b class="world-counter" id="worldCounter">01 / 04</b></div>
+        </div>
+        <div class="flight-stage" id="flightStage">
+          <div class="flight-grid"></div>
+          <article class="flight-scene" data-scene="0" aria-hidden="false"><div class="scene-card"><span class="scene-label">01 / PRIVATE CONVERSATIONS</span><div class="scene-floor"></div><div class="scene-window"><div class="scene-glyph">✉</div></div><div class="scene-orbit"></div><div class="scene-bubble one">Ты уже близко 👋</div><div class="scene-bubble two">Я на связи</div><span class="scene-caption">ЛИЧНЫЕ ДИАЛОГИ</span></div></article>
+          <article class="flight-scene" data-scene="1" aria-hidden="true"><div class="scene-card"><span class="scene-label">02 / GROUP SPACES</span><div class="scene-floor"></div><div class="scene-window" style="width:210px;height:180px"><div class="scene-glyph">⌘</div></div><div class="scene-avatar a">☾</div><div class="scene-avatar b">✦</div><div class="scene-avatar c">⌁</div><span class="scene-caption">ГРУППЫ И СВОИ ЛЮДИ</span></div></article>
+          <article class="flight-scene" data-scene="2" aria-hidden="true"><div class="scene-card"><span class="scene-label">03 / VOICE & VIDEO</span><div class="scene-floor"></div><div class="scene-window"><div class="scene-glyph">◖</div></div><div class="scene-bars"><i></i><i></i><i></i><i></i></div><span class="scene-caption">ГОЛОС И ВИДЕОСВЯЗЬ</span></div></article>
+          <article class="flight-scene" data-scene="3" aria-hidden="true"><div class="scene-card"><span class="scene-label">04 / PRIVACY BY DESIGN</span><div class="scene-floor"></div><div class="scene-window" style="background:transparent;border:0;box-shadow:none"><div class="scene-shield">✓</div></div><div class="scene-orbit"></div><span class="scene-caption">ОСОЗНАННОЕ ОТНОШЕНИЕ К ПРИВАТНОСТИ</span></div></article>
+        </div>
+        <div class="world-mobile-note">ПРОКРУТКА УПРАВЛЯЕТ ДВИЖЕНИЕМ СЦЕН</div>
       </div>
     </div>
-    <section id="news"><div class="wrap"><div class="section-head"><div class="kicker">Новости Nexura</div><h2>Вышла новая версия Nexura</h2><p>Версия 0.8.0 доступна для скачивания. Это начало открытого развития Nexura вместе с первыми пользователями.</p></div><div class="download" style="padding:28px 24px"><div class="status"><span class="status-dot"></span>РЕЛИЗ 0.8.0 ОПУБЛИКОВАН</div><h2>Добро пожаловать в Nexura</h2><p>Установочный APK можно бесплатно скачать с официальной страницы GitHub Releases. Веб-версия также доступна для предварительного знакомства; её возможности пока ограничены.</p><a class="btn" href="https://github.com/NikolasConnor/nexura-messenger/releases/download/v0.8.0/Nexura.apk">↓ Скачать Nexura 0.8.0</a></div></div></section>
+
     <section id="features">
       <div class="wrap">
-        <div class="section-head"><div class="kicker">Возможности</div><h2>Всё нужное для общения —<br>без лишнего шума</h2><p>Знакомые инструменты мессенджера в цельном, спокойном интерфейсе.</p></div>
-        <div class="features">
-          <article class="feature"><div class="feature-icon">💬</div><h3>Личные и групповые чаты</h3><p>Общайтесь один на один или собирайте друзей в общие беседы.</p></article>
-          <article class="feature"><div class="feature-icon">🔐</div><h3>Защита переписки</h3><p>Для поддерживаемых диалогов предусмотрено сквозное шифрование. Возможности защиты зависят от реализации и версии приложения.</p></article>
-          <article class="feature"><div class="feature-icon">🎙️</div><h3>Голосовые сообщения</h3><p>Когда проще сказать, чем печатать — отправляйте голосовые.</p></article>
-          <article class="feature"><div class="feature-icon">🖼️</div><h3>Фото и файлы</h3><p>Делитесь медиа и вложениями прямо в переписке.</p></article>
-          <article class="feature"><div class="feature-icon">🟣</div><h3>Статус присутствия</h3><p>Настраивайте отображение статуса и управляйте тем, что видят другие.</p></article>
-          <article class="feature"><div class="feature-icon">✨</div><h3>Понятная навигация</h3><p>Чаты, поиск, настройки и основные действия — в привычной структуре.</p></article>
+        <div class="section-top reveal"><div><div class="eyebrow">ИНСТРУМЕНТЫ ОБЩЕНИЯ</div><h2>Всё нужное.<br>Ничего лишнего.</h2></div><p>Знакомые функции мессенджера в едином интерфейсе. Nexura развивается постепенно — доступность отдельных возможностей зависит от версии.</p></div>
+        <div class="feature-grid">
+          <article class="feature reveal"><span class="feature-index">01 / CHAT</span><div class="feature-art"><i class="art-ring"></i><i class="art-dot"></i><i class="art-chat"></i></div><div class="feature-icon">✉</div><h3>Личные диалоги</h3><p>Общайся один на один, находи собеседников и возвращайся к важным разговорам.</p></article>
+          <article class="feature reveal"><span class="feature-index">02 / GROUPS</span><div class="feature-art"><i class="art-ring"></i><i class="art-dot"></i></div><div class="feature-icon">⌘</div><h3>Группы</h3><p>Собирай друзей и команды в общих пространствах.</p></article>
+          <article class="feature reveal"><span class="feature-index">03 / MEDIA</span><div class="feature-art"><i class="art-chat"></i><i class="art-dot" style="left:48px;top:62px"></i></div><div class="feature-icon">▧</div><h3>Фото и вложения</h3><p>Делись изображениями и файлами в переписке.</p></article>
+          <article class="feature reveal"><span class="feature-index">04 / CALLS</span><div class="feature-art"><i class="art-ring"></i><i class="art-dot" style="left:68px;top:48px"></i></div><div class="feature-icon">◖</div><h3>Аудио и видеозвонки</h3><p>Звонки — часть направления развития Nexura. Доступность и стабильность зависят от текущей сборки и серверной инфраструктуры.</p></article>
+          <article class="feature reveal"><span class="feature-index">05 / PRESENCE</span><div class="feature-art"><i class="art-ring"></i><i class="art-chat"></i></div><div class="feature-icon">◉</div><h3>Присутствие и настройки</h3><p>Работа над контролем видимости статуса и настройками приватности.</p></article>
+          <article class="feature reveal"><span class="feature-index">06 / SECURITY</span><div class="feature-art"><i class="art-lock"></i></div><div class="feature-icon">◇</div><h3>Защита переписки</h3><p>Сквозное шифрование реализуется для поддерживаемых сценариев. Не все типы данных и чатов уже защищены E2EE.</p></article>
         </div>
       </div>
     </section>
+
     <section id="privacy">
-      <div class="wrap privacy">
-        <div class="privacy-art" aria-hidden="true">🛡️</div>
-        <div><div class="kicker">Приватность — в основе</div><h2>Личное общение должно оставаться личным.</h2><p>Nexura создаётся с акцентом на защиту переписки и контроль над аккаунтом. Мы не обещаем абсолютную безопасность: перед использованием важно ознакомиться с возможностями и ограничениями конкретной версии.</p><div class="checks"><div><span>✓</span>Шифрование в поддерживаемых переписках</div><div><span>✓</span>Настройки видимости статуса и отметок прочтения</div><div><span>✓</span>Работа над управлением аккаунтом и ключами</div></div><p><a href="privacy.html" style="color:#c9b2ff;text-decoration:underline">Политика конфиденциальности →</a></p></div>
-      </div>
-    </section>
-    <section id="how">
-      <div class="wrap">
-        <div class="section-head"><div class="kicker">Начало работы</div><h2>Начать просто</h2><p>Установи Android-приложение или открой предварительную веб-версию в браузере.</p></div>
-        <div class="steps">
-          <article class="step"><div class="step-num">01 / УСТАНОВКА</div><h3>Скачайте APK</h3><p>Загрузите официальный установочный файл Nexura v0.8.0 с GitHub Releases.</p></article>
-          <article class="step"><div class="step-num">02 / АККАУНТ</div><h3>Создайте аккаунт</h3><p>Войдите доступным способом и завершите настройку своего профиля.</p></article>
-          <article class="step"><div class="step-num">03 / ОБЩЕНИЕ</div><h3>Найдите собеседников</h3><p>Откройте личный диалог или создайте группу для друзей.</p></article>
+      <div class="wrap privacy-panel reveal">
+        <div class="privacy-visual" aria-hidden="true"><div class="privacy-emblem">✓</div></div>
+        <div><div class="eyebrow">ПРИВАТНОСТЬ — ЭТО ПРОЦЕСС</div><h2>Твои разговоры заслуживают внимания.</h2><p>Мы проектируем Nexura с учётом безопасности аккаунта, переписки и пользовательского контроля. При этом честно говорим о текущих границах реализации: сквозное шифрование доступно не во всех сценариях, а абсолютную безопасность не может гарантировать ни один сервис.</p>
+          <div class="privacy-list"><div><span>✳</span>Шифрование для поддерживаемых типов переписок</div><div><span>✳</span>Работа над управлением устройствами и ключами</div><div><span>✳</span>Понятная информация об ограничениях продукта</div></div>
+          <p><a href="privacy.html" style="color:var(--mint);font-size:12px">Подробнее о конфиденциальности ↗</a></p>
         </div>
       </div>
     </section>
-    <section id="lab">
-      <div class="wrap">
-        <div class="section-head"><div class="kicker">Nexura Lab</div><h2>Насколько ты готов к безопасному общению?</h2><p>Небольшая проверка цифровых привычек. Отметь пункты, которые уже соблюдаешь.</p></div>
-        <div class="lab">
-          <p class="lab-intro">Это не проверка приложения и не аудит безопасности — только полезная памятка для повседневного общения.</p>
-          <div class="lab-list">
-            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>У меня уникальный пароль</strong><small>Не использую один пароль на разных сервисах.</small></span></label>
-            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>Я никому не передаю коды входа</strong><small>Код подтверждения предназначен только для меня.</small></span></label>
-            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>Я проверяю, кому отправляю файлы</strong><small>Перед отправкой проверяю чат и получателя.</small></span></label>
-            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>На устройстве есть блокировка</strong><small>Использую PIN-код, пароль или биометрию.</small></span></label>
-            <label class="lab-item"><input class="lab-check" type="checkbox"><span><strong>Я обновляю приложения</strong><small>Устанавливаю обновления из доверенных источников.</small></span></label>
-          </div>
-          <div class="lab-result" aria-live="polite"><strong id="lab-score">0 из 5 пунктов отмечено</strong><span id="lab-message">Начни с первого пункта — маленькие привычки важны.</span></div>
-          <p class="lab-note">Отметки обрабатываются только в этой странице: они не отправляются на сервер и не сохраняются.</p>
-        </div>
+
+    <section id="release">
+      <div class="wrap release-panel reveal">
+        <div><div class="eyebrow">ТЕКУЩИЙ ПУБЛИЧНЫЙ РЕЛИЗ</div><h2>Твоё место<br>в Nexura начинается здесь.</h2><p>Android-приложение версии 0.8.0 доступно для бесплатного скачивания. Устанавливай APK только из официального источника.</p><div class="release-meta"><span>ANDROID</span><span>VERSION 0.8.0</span><span>GITHUB RELEASE</span></div></div>
+        <div class="release-actions"><a class="button" href="https://github.com/NikolasConnor/nexura-messenger/releases/download/v0.8.0/Nexura.apk">↓ Скачать APK</a><a class="button secondary" href="https://github.com/NikolasConnor/nexura-messenger/releases/tag/v0.8.0" target="_blank" rel="noopener noreferrer">Страница релиза ↗</a><a class="button secondary" href="app/">Веб-версия ↗</a></div>
       </div>
     </section>
-    <section id="roadmap">
-      <div class="wrap">
-        <div class="section-head"><div class="kicker">Развитие проекта</div><h2>Nexura становится лучше шаг за шагом</h2><p>Показываем направления работы открыто — без обещаний точных дат и неподтверждённых функций.</p></div>
-        <div class="roadmap">
-          <article class="roadmap-card"><div class="roadmap-top"><h3>💬 Надёжность чатов</h3><span class="roadmap-tag">В работе</span></div><p>Улучшаем отправку сообщений, отображение переписок и обработку сетевых ошибок.</p></article>
-          <article class="roadmap-card"><div class="roadmap-top"><h3>👥 Группы и контакты</h3><span class="roadmap-tag">В работе</span></div><p>Дорабатываем создание групп, участников и поиск собеседников.</p></article>
-          <article class="roadmap-card"><div class="roadmap-top"><h3>🔔 Уведомления</h3><span class="roadmap-tag planned">Развитие</span></div><p>Работа над доставкой push-уведомлений и удобным управлением ими.</p></article>
-          <article class="roadmap-card"><div class="roadmap-top"><h3>🔐 Приватность и ключи</h3><span class="roadmap-tag planned">Развитие</span></div><p>Проверка сценариев шифрования, хранения ключей и защиты аккаунта.</p></article>
-        </div>
-        <div class="feedback"><div><strong>Есть идея или нашли ошибку?</strong><p>Расскажите о ней в проекте Nexura. Не прикладывайте пароли, токены и личную переписку.</p></div><a class="btn secondary" href="https://github.com/NikolasConnor/nexura-messenger/issues" target="_blank" rel="noopener noreferrer">Предложить улучшение ↗</a></div>
-      </div>
-    </section>
+
     <section id="faq">
-      <div class="wrap">
-        <div class="section-head"><div class="kicker">FAQ</div><h2>Частые вопросы</h2><p>Коротко о текущем статусе проекта.</p></div>
-        <div class="faq">
-          <details><summary>Можно ли уже скачать Nexura?</summary><p>Да. Публичный релиз Nexura 0.8.0 уже опубликован. APK доступен бесплатно по кнопке «Скачать для Android» и по прямой ссылке на GitHub Releases.</p></details>
-          <details><summary>На каких устройствах будет работать приложение?</summary><p>Nexura разрабатывается для Android. Совместимость зависит от версии Android и устройства. Если установка не удаётся, проверьте системную версию Android и свободное место на устройстве.</p></details>
-          <details><summary>Все ли переписки зашифрованы?</summary><p>Нет. Сквозное шифрование реализовано не для всех типов переписок и функций. Не отправляйте чувствительную информацию, исходя из предположения, что абсолютно все данные уже защищены сквозным шифрованием.</p></details>
-          <details><summary>Веб-версия уже полностью готова?</summary><p>Веб-версия доступна в предварительном режиме, но пока имеет ограничения и не заменяет Android-релиз. Основной публичный релиз 0.8.0 предназначен для Android.</p></details>
-          <details><summary>Куда сообщить об ошибке?</summary><p>Откройте страницу проекта на GitHub и создайте обращение с описанием проблемы. Не публикуйте там пароли, токены, личные сообщения или другие секретные данные.</p></details>
+      <div class="wrap faq-grid">
+        <div class="faq-intro reveal"><div class="eyebrow">FAQ / ПОДРОБНЕЕ</div><h2>Хорошие вопросы — честные ответы.</h2><p>Рассказываем о текущем состоянии проекта без обещаний того, чего ещё нет.</p></div>
+        <div class="faq reveal">
+          <details><summary>Можно ли уже скачать Nexura?</summary><p>Да. Публичный Android-релиз 0.8.0 опубликован. APK можно бесплатно скачать по официальной ссылке на GitHub Releases.</p></details>
+          <details><summary>На каких устройствах работает приложение?</summary><p>Nexura разрабатывается для Android. Совместимость зависит от версии Android и характеристик устройства.</p></details>
+          <details><summary>Все ли переписки защищены сквозным шифрованием?</summary><p>Нет. E2EE реализовано не для всех типов переписок и функций. Не отправляй чувствительные сведения, исходя из предположения, что абсолютно все данные уже зашифрованы сквозным образом.</p></details>
+          <details><summary>Веб-версия полностью готова?</summary><p>Нет. Веб-версия доступна в предварительном режиме и имеет ограничения. Основной публичный релиз — Android-приложение.</p></details>
+          <details><summary>Где сообщить об ошибке или предложить идею?</summary><p>Создай обращение в GitHub проекта. Не публикуй пароли, токены, приватные ключи и личную переписку.</p></details>
         </div>
       </div>
     </section>
-    <section id="download">
-      <div class="wrap download">
-        <div class="kicker">Релиз 0.8.0 · Android</div><h2>Nexura уже доступна для скачивания</h2><p>Публичный релиз Nexura 0.8.0 уже опубликован. Скачайте официальный APK бесплатно напрямую с GitHub Releases.</p><a class="btn" href="https://github.com/NikolasConnor/nexura-messenger/releases/download/v0.8.0/Nexura.apk">↓ Скачать Nexura APK <span>v0.8.0</span></a><p style="margin-top:18px;font-size:12px">Если Android предупредит об установке приложения из внешнего источника, разреши установку для браузера, из которого скачан файл. Устанавливай APK только с официальной страницы Nexura.</p><p style="margin-top:12px"><a class="btn secondary" href="app/">Открыть веб-версию ↗</a></p>
-      </div>
+
+    <section class="final-cta">
+      <div class="wrap"><div class="eyebrow" style="justify-content:center">YOUR SPACE. YOUR PEOPLE.</div><h2>Пусть важное будет ближе.</h2><p>Nexura — пространство, которое мы создаём шаг за шагом. Присоединяйся к развитию проекта.</p><div class="final-actions"><a class="button" href="https://github.com/NikolasConnor/nexura-messenger/releases/download/v0.8.0/Nexura.apk">Скачать Nexura <span>↓</span></a><a class="button secondary" href="https://github.com/NikolasConnor/nexura-messenger" target="_blank" rel="noopener noreferrer">Следить за проектом ↗</a></div></div>
     </section>
   </main>
-  <footer><div class="wrap footer-row"><a class="brand" href="#"><span class="brand-mark">✦</span>Nexura</a><div class="footer-links"><a href="privacy.html">Конфиденциальность</a><a href="mailto:nexuragroupoficial@gmail.com">Контакт: nexuragroupoficial@gmail.com</a><a href="https://github.com/NikolasConnor/nexura-messenger" target="_blank" rel="noopener noreferrer">GitHub проекта ↗</a></div><span>Nexura Messenger · Android 0.8.0</span></div></footer>
+  <footer><div class="wrap footer-row"><a class="brand" href="#"><span class="brand-symbol">N</span><span>Nexura</span></a><div class="footer-links"><a href="privacy.html">Конфиденциальность</a><a href="mailto:nexuragroupoficial@gmail.com">Контакт</a><a href="https://github.com/NikolasConnor/nexura-messenger" target="_blank" rel="noopener noreferrer">GitHub ↗</a></div><span class="copyright">© <span id="year"></span> NEXURA MESSENGER</span></div></footer>
   <script>
-    document.getElementById('year').textContent=new Date().getFullYear();
-    const labChecks=[...document.querySelectorAll('.lab-check')],labScore=document.getElementById('lab-score'),labMessage=document.getElementById('lab-message');
-    function updateLab(){const n=labChecks.filter(x=>x.checked).length;labScore.textContent=n+' из 5 пунктов отмечено';labMessage.textContent=n===5?'Отлично! Продолжай придерживаться этих привычек.':n>=3?'Хороший результат. Осталось закрепить ещё пару привычек.':n>0?'Хорошее начало — проверь остальные пункты.':'Начни с первого пункта — маленькие привычки важны.'}
-    labChecks.forEach(x=>x.addEventListener('change',updateLab));
-    const menu=document.getElementById('menuToggle'),nav=document.getElementById('navLinks');
-    menu.addEventListener('click',()=>{const open=nav.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'Закрыть меню':'Открыть меню');menu.textContent=open?'✕':'☰'});
-    nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{nav.classList.remove('open');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','Открыть меню');menu.textContent='☰'}));
+    (() => {
+      const header = document.getElementById('header');
+      const menu = document.getElementById('menuToggle');
+      const nav = document.getElementById('navLinks');
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const world = document.querySelector('.world-scroll');
+      const scenes = [...document.querySelectorAll('.flight-scene')];
+      const bars = [...document.querySelectorAll('.world-progress span')];
+      const title = document.getElementById('worldTitle');
+      const copy = document.getElementById('worldText');
+      const counter = document.getElementById('worldCounter');
+      const story = [
+        ['Начни с разговора.','Открой личный диалог, чтобы быть ближе к тем, кто важен. Всё начинается с простого сообщения.'],
+        ['Собери своих.','Создавай группы для друзей и команд. Общие темы и люди — в одном пространстве.'],
+        ['Будь на связи.','Голосовые и видеосценарии — часть направления развития Nexura. Доступность зависит от версии и состояния инфраструктуры.'],
+        ['Помни о важном.','Мы последовательно развиваем защиту переписки, управление ключами и прозрачность ограничений.']
+      ];
+      const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+      let ticking = false;
+      function paint(){
+        header.classList.toggle('scrolled', window.scrollY > 20);
+        if(world && scenes.length && !reduced){
+          const rect = world.getBoundingClientRect();
+          const range = Math.max(1, world.offsetHeight - window.innerHeight);
+          const progress = clamp(-rect.top / range * (scenes.length - 1), 0, scenes.length - 1);
+          const active = Math.min(scenes.length - 1, Math.round(progress));
+          scenes.forEach((scene,i) => {
+            const d = i - progress;
+            const mobile = window.innerWidth <= 620;
+            const x = mobile ? 0 : d * 88;
+            const y = mobile ? d * 88 : Math.abs(d) * 3;
+            const scale = 1 - Math.min(Math.abs(d) * .17, .55);
+            const rotate = mobile ? 0 : d * -9;
+            scene.style.opacity = String(clamp(1 - Math.abs(d) * 1.15, 0, 1));
+            scene.style.transform = 'translate3d('+x+'%, '+y+'%, 0) scale('+scale+') rotateY('+rotate+'deg)';
+            scene.setAttribute('aria-hidden', i === active ? 'false' : 'true');
+          });
+          title.textContent = story[active][0];
+          copy.textContent = story[active][1];
+          counter.textContent = String(active+1).padStart(2,'0')+' / 04';
+          bars.forEach((bar,i)=>bar.classList.toggle('active',i===active));
+        }
+        ticking = false;
+      }
+      function requestPaint(){if(!ticking){ticking=true;requestAnimationFrame(paint)}}
+      window.addEventListener('scroll',requestPaint,{passive:true});
+      window.addEventListener('resize',requestPaint);
+      paint();
+      menu.addEventListener('click',()=>{
+        const open=nav.classList.toggle('open');
+        menu.setAttribute('aria-expanded',String(open));
+        menu.setAttribute('aria-label',open?'Закрыть меню':'Открыть меню');
+        menu.textContent=open?'×':'☰';
+      });
+      nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{
+        nav.classList.remove('open');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','Открыть меню');menu.textContent='☰';
+      }));
+      document.getElementById('year').textContent=new Date().getFullYear();
+      if('IntersectionObserver' in window && !reduced){
+        const observer=new IntersectionObserver(entries=>{
+          entries.forEach(entry=>{if(entry.isIntersecting){entry.target.classList.add('visible');observer.unobserve(entry.target)}});
+        },{threshold:.12});
+        document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+      } else document.querySelectorAll('.reveal').forEach(el=>el.classList.add('visible'));
+    })();
   </script>
 </body>
 </html>
