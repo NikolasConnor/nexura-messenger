@@ -183,8 +183,6 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     val lowRamDevice = remember {
         (context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).isLowRamDevice
     }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val scope = rememberCoroutineScope()
     val realtimeClient = remember(store) { SupabaseMessagesRealtime(store) }
     val localCache = remember(context) { LocalCacheStore(context.applicationContext) }
@@ -304,6 +302,29 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var readReceiptsEnabled by remember { mutableStateOf(true) }
     var notificationPrefs by remember { mutableStateOf(NotificationPreferences()) }
     var savingNotificationPrefs by remember { mutableStateOf(false) }
+    var pendingPushEnable by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (pendingPushEnable) {
+            pendingPushEnable = false
+            if (granted) {
+                val previous = notificationPrefs
+                notificationPrefs = previous.copy(pushEnabled = true)
+                savingNotificationPrefs = true
+                scope.launch {
+                    try {
+                        notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                        notice = "Push-уведомления включены."
+                    } catch (e: Exception) {
+                        notificationPrefs = previous
+                        error = e.message ?: "Не удалось сохранить уведомления"
+                    } finally { savingNotificationPrefs = false }
+                }
+            } else {
+                notificationPrefs = notificationPrefs.copy(pushEnabled = false)
+                notice = "Разрешение на уведомления не выдано. Его можно включить в настройках Android."
+            }
+        }
+    }
     var currentChatMuted by remember { mutableStateOf(false) }
     var showMuteChatDialog by remember { mutableStateOf(false) }
     var savingChatMute by remember { mutableStateOf(false) }
@@ -1754,17 +1775,24 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         checked = notificationPrefs.pushEnabled,
                                         enabled = !savingNotificationPrefs,
                                         onCheckedChange = { enabled ->
-                                            val previous = notificationPrefs
-                                            notificationPrefs = previous.copy(pushEnabled = enabled)
-                                            savingNotificationPrefs = true
-                                            scope.launch {
-                                                try {
-                                                    notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
-                                                    notice = if (enabled) "Push-уведомления включены." else "Push-уведомления выключены."
-                                                } catch (e: Exception) {
-                                                    notificationPrefs = previous
-                                                    error = e.message ?: "Не удалось сохранить уведомления"
-                                                } finally { savingNotificationPrefs = false }
+                                            if (enabled && Build.VERSION.SDK_INT >= 33 &&
+                                                !NotificationManagerCompat.from(context).areNotificationsEnabled()
+                                            ) {
+                                                pendingPushEnable = true
+                                                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                            } else {
+                                                val previous = notificationPrefs
+                                                notificationPrefs = previous.copy(pushEnabled = enabled)
+                                                savingNotificationPrefs = true
+                                                scope.launch {
+                                                    try {
+                                                        notificationPrefs = api.saveNotificationPreferences(notificationPrefs)
+                                                        notice = if (enabled) "Push-уведомления включены." else "Push-уведомления выключены."
+                                                    } catch (e: Exception) {
+                                                        notificationPrefs = previous
+                                                        error = e.message ?: "Не удалось сохранить уведомления"
+                                                    } finally { savingNotificationPrefs = false }
+                                                }
                                             }
                                         }
                                     )
