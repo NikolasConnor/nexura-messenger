@@ -134,15 +134,16 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
-private val Bg = Color(0xFF0B0914)
-private val Surface1 = Color(0xFF151126)
-private val Surface2 = Color(0xFF211A35)
-private val Accent = Color(0xFF9B6BFF)
-private val Accent2 = Color(0xFF6842D8)
-private val MainText = Color(0xFFF5F7FB)
-private val SecondaryText = Color(0xFFA4AFBF)
-private val Danger = Color(0xFFFF858D)
-private val Success = Color(0xFF8DDEB0)
+// Nexura visual system: Midnight surfaces, electric-blue actions and ice-cyan highlights.
+private val Bg = NexuraPalette.Background
+private val Surface1 = NexuraPalette.Surface
+private val Surface2 = NexuraPalette.SurfaceRaised
+private val Accent = NexuraPalette.Accent
+private val Accent2 = NexuraPalette.AccentSoft
+private val MainText = NexuraPalette.TextPrimary
+private val SecondaryText = NexuraPalette.TextSecondary
+private val Danger = NexuraPalette.Danger
+private val Success = NexuraPalette.Success
 
 private data class DeviceContact(val name: String, val phone: String, val match: ContactMatch? = null)
 
@@ -1456,8 +1457,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = Accent, secondary = Accent2, background = Bg, surface = Surface1,
-            onBackground = MainText, onSurface = MainText
+            primary = Accent,
+            secondary = Accent2,
+            tertiary = NexuraPalette.AccentGlow,
+            background = Bg,
+            surface = Surface1,
+            surfaceVariant = Surface2,
+            onBackground = MainText,
+            onSurface = MainText,
+            onPrimary = Color.White,
+            outline = NexuraPalette.Outline
         )
     ) {
         Surface(Modifier.fillMaxSize(), color = Bg) {
@@ -2587,7 +2596,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (visibleChats.isEmpty()) {
                             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Box(Modifier.size(76.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(76.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Surface2, NexuraPalette.SurfaceTint))), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Default.ChatBubbleOutline, null, tint = Accent, modifier = Modifier.size(34.dp))
                                     }
                                     Text(if (busy) "Загружаем чаты…" else if (chatFilter.isNotBlank()) "Ничего не найдено" else "Здесь пока тихо", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
@@ -2602,8 +2611,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 items(visibleChats, key = { it.id }) { chat ->
                                     Row(
                                         Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                            .clip(RoundedCornerShape(19.dp))
-                                            .background(Surface1)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(Brush.linearGradient(listOf(Surface1, NexuraPalette.SurfaceTint)))
+                                            .border(1.dp, NexuraPalette.Outline.copy(alpha = 0.72f), RoundedCornerShape(20.dp))
                                             .clickable { openChat(chat) }
                                             .padding(start = 12.dp, end = 7.dp, top = 11.dp, bottom = 11.dp),
                                         verticalAlignment = Alignment.CenterVertically
@@ -4766,13 +4776,13 @@ private fun NexuraBottomBar(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-        color = Surface1,
-        shape = RoundedCornerShape(24.dp),
-        shadowElevation = 12.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.16f))
+        color = NexuraPalette.NavSurface,
+        shape = RoundedCornerShape(25.dp),
+        shadowElevation = 16.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, NexuraPalette.Outline)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp),
+            modifier = Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
@@ -4785,26 +4795,34 @@ private fun NexuraBottomBar(
                 val active = selected == key && !profileSelected
                 Column(
                     modifier = Modifier.weight(1f).fillMaxHeight()
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(if (active) Accent.copy(alpha = 0.16f) else Color.Transparent)
-                        .clickable { onSelect(key) },
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (active) Brush.linearGradient(listOf(Accent.copy(alpha = 0.22f), Accent2.copy(alpha = 0.12f)))
+                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                        )
+                        .clickable { onSelect(key) }
+                        .padding(vertical = 3.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp))
-                    Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+                    Icon(icon, contentDescription = label, tint = if (active) Accent2 else SecondaryText, modifier = Modifier.size(21.dp))
+                    Text(label, color = if (active) MainText else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
                 }
             }
             Column(
                 modifier = Modifier.weight(1f).fillMaxHeight()
-                    .clip(RoundedCornerShape(17.dp))
-                    .background(if (profileSelected) Accent.copy(alpha = 0.16f) else Color.Transparent)
-                    .clickable { onProfile() },
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (profileSelected) Brush.linearGradient(listOf(Accent.copy(alpha = 0.22f), Accent2.copy(alpha = 0.12f)))
+                        else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                    )
+                    .clickable { onProfile() }
+                    .padding(vertical = 3.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(Icons.Default.AccountCircle, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp))
-                Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+                Icon(Icons.Default.AccountCircle, contentDescription = "Профиль", tint = if (profileSelected) Accent2 else SecondaryText, modifier = Modifier.size(21.dp))
+                Text("Профиль", color = if (profileSelected) MainText else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.Bold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }
