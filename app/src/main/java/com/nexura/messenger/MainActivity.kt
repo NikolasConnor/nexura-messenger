@@ -3060,7 +3060,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Triple("mono", "Графит", Color(0xFF17191F)), Triple("bloom", "Сакура", Color(0xFF211923)), Triple("ember", "Жар", Color(0xFF241815)),
                             Triple("geometry", "Контур", Color(0xFF171725)), Triple("pixel", "Пиксель", Color(0xFF151B25)), Triple("tide", "Прилив", Color(0xFF101F25))
                         )
-                        val bubbleOptions = listOf("Фиолетовый" to NexuraPalette.Accent, "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
+                        val bubbleOptions = listOf("Электрический синий" to NexuraPalette.Accent, "Ледяной голубой" to NexuraPalette.AccentSoft, "Индиго" to Color(0xFF405FA8), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
                             containerColor = Surface1,
