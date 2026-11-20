@@ -621,3 +621,16 @@ body{overscroll-behavior:none}
 .blocked-person{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;color:#d6e2f2}
 .text-action{border:0;background:transparent;color:#7ce7f2;font-size:11px;font-weight:700;padding:7px}
 .text-action:hover{color:#fff}
+
+.group-rename-row{display:flex;gap:9px;margin:8px 0 15px}
+.group-rename-row input{min-width:0;flex:1;border:1px solid var(--line);border-radius:10px;background:#111b2c;color:#f4f8ff;padding:11px 12px;outline:none}
+.group-rename-row input:focus{border-color:#4f8dff;box-shadow:0 0 0 3px #4f8dff20}
+.group-roster{display:grid;gap:7px;max-height:min(48vh,390px);overflow:auto}
+.group-roster-item{display:flex;align-items:center;gap:11px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#111b2c88;min-width:0}
+.group-roster-item>span{display:grid;gap:3px;min-width:0;flex:1}
+.group-roster-item>span b{font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.group-roster-item>span small{font-size:10px;color:var(--muted)}
+.group-roster-actions{display:flex;align-items:center;gap:3px;flex-wrap:wrap;justify-content:flex-end}
+.danger-text{color:#ff879b}
+.group-manage-note{font-size:10px;line-height:1.6;color:#91a4bd;padding:12px 3px 0}
+@media(max-width:560px){.group-roster-item{align-items:flex-start;flex-wrap:wrap}.group-roster-actions{width:100%;padding-left:52px;justify-content:flex-start}.group-rename-row .primary-btn{padding:10px 12px}}
