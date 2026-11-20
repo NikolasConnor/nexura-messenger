@@ -146,15 +146,17 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
-private val Bg = Color(0xFF0B0914)
-private val Surface1 = Color(0xFF151126)
-private val Surface2 = Color(0xFF211A35)
-private val Accent = Color(0xFF9B6BFF)
-private val Accent2 = Color(0xFF6842D8)
-private val MainText = Color(0xFFF5F7FB)
-private val SecondaryText = Color(0xFFA4AFBF)
-private val Danger = Color(0xFFFF858D)
-private val Success = Color(0xFF8DDEB0)
+// Nexura v0.8.0 visual refresh: midnight blue surfaces, electric-blue actions,
+// cool cyan highlights, and high-contrast text. Functional behavior is unchanged.
+private val Bg = Color(0xFF080D18)
+private val Surface1 = Color(0xFF111B2B)
+private val Surface2 = Color(0xFF1A2940)
+private val Accent = Color(0xFF4F8DFF)
+private val Accent2 = Color(0xFF356DDB)
+private val MainText = Color(0xFFF5F8FF)
+private val SecondaryText = Color(0xFFB8C5D8)
+private val Danger = Color(0xFFFF7A86)
+private val Success = Color(0xFF63D6A3)
 
 private data class DeviceContact(val name: String, val phone: String, val match: ContactMatch? = null)
 
