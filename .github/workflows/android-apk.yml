@@ -14,6 +14,9 @@ on:
       - "settings.gradle.kts"
       - "gradle/**"
       - ".github/workflows/android-apk.yml"
+  pull_request:
+    branches:
+      - design/nexura-midnight-refresh
   workflow_dispatch:
 
 permissions:
