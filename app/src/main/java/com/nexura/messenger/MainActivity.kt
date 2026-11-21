@@ -2059,22 +2059,27 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         Row(Modifier.fillMaxWidth().padding(top = if (lowDataMode) 10.dp else 18.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(23.dp))
+                                Box(
+                                    Modifier.size(46.dp).clip(RoundedCornerShape(16.dp))
+                                        .background(Brush.linearGradient(listOf(Accent, Accent2)))
+                                        .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(16.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(24.dp))
                                 }
                                 Column(Modifier.padding(start = 11.dp)) {
-                                    Text("Nexura", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = MainText, letterSpacing = (-0.6).sp)
-                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else if (homeTab == "contacts") "Каталог пользователей" else if (homeTab == "profile") "Ваш профиль" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp)
+                                    Text("Nexura", fontSize = 27.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-0.85).sp)
+                                    Text(if (homeTab == "social") "Истории и публикации" else if (homeTab == "search") "Найди новых людей" else if (homeTab == "contacts") "Каталог пользователей" else if (homeTab == "profile") "Ваш профиль" else "Ваши разговоры", color = SecondaryText, fontSize = 12.sp, letterSpacing = 0.1.sp)
                                 }
                             }
-                            Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }) {
+                            Surface(shape = RoundedCornerShape(15.dp), color = Surface1, border = androidx.compose.foundation.BorderStroke(1.dp, Surface2)) {
+                                IconButton(onClick = { createGroupOpen = true; groupTitle = ""; groupSearch = ""; groupUsers = emptyList(); selectedGroupUsers = emptySet(); error = "" }, modifier = Modifier.size(44.dp)) {
                                     Icon(Icons.Default.GroupAdd, "Создать группу", tint = MainText)
                                 }
                             }
                             Spacer(Modifier.width(7.dp))
-                            Surface(shape = CircleShape, color = Surface1) {
-                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); profileBannerUrl = p.bannerUrl; bannerPhotoUri = null; val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
+                            Surface(shape = RoundedCornerShape(15.dp), color = Surface1, border = androidx.compose.foundation.BorderStroke(1.dp, Surface2)) {
+                                IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileUsername = p.username; usernameDraft = p.username; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); profileBannerUrl = p.bannerUrl; bannerPhotoUri = null; val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }, modifier = Modifier.size(44.dp)) {
                                     Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
                                 }
                             }
@@ -2083,7 +2088,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             OutlinedTextField(
                                 value = chatFilter,
                                 onValueChange = { chatFilter = it },
-                                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp).heightIn(min = 54.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp).heightIn(min = 54.dp),
                                 singleLine = true,
                                 placeholder = { Text("Поиск по чатам", fontSize = 14.sp) },
                                 leadingIcon = { Icon(Icons.Default.Search, null, tint = SecondaryText) },
@@ -2092,8 +2097,18 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         Text("×", color = SecondaryText, fontSize = 22.sp)
                                     }
                                 },
-                                shape = RoundedCornerShape(18.dp),
-                                colors = authFieldColors()
+                                shape = RoundedCornerShape(17.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MainText,
+                                    unfocusedTextColor = MainText,
+                                    cursorColor = Accent,
+                                    focusedBorderColor = Accent.copy(alpha = 0.8f),
+                                    unfocusedBorderColor = Surface2,
+                                    focusedLabelColor = Accent,
+                                    unfocusedLabelColor = SecondaryText,
+                                    focusedContainerColor = Surface1,
+                                    unfocusedContainerColor = Surface1
+                                )
                             )
                         }
                         if (createGroupOpen) {
@@ -2468,8 +2483,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "chats") {
                         Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("Сообщения", color = MainText, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.35).sp)
-                                Text("Ваши личные и групповые чаты", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                                Text("Сообщения", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.55).sp)
+                                Text("Личные и групповые разговоры", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
                             }
                             Surface(shape = RoundedCornerShape(12.dp), color = Surface1) {
                                 Text("${visibleChats.size}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
@@ -2502,24 +2517,25 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 20.dp)) {
                                 items(visibleChats, key = { it.id }) { chat ->
                                     Row(
-                                        Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                            .clip(RoundedCornerShape(19.dp))
+                                        Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                                            .clip(RoundedCornerShape(20.dp))
                                             .background(Surface1)
+                                            .border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(20.dp))
                                             .clickable { openChat(chat) }
-                                            .padding(start = 12.dp, end = 7.dp, top = 11.dp, bottom = 11.dp),
+                                            .padding(start = 13.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0)
                                         Column(Modifier.weight(1f).padding(start = 12.dp, end = 5.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                                                Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, letterSpacing = 0.05.sp, maxLines = 1, modifier = Modifier.weight(1f))
                                                 if (chat.updated != null) {
                                                     Text(chatTimeLabel(chat.updated), color = if (chat.unreadCount > 0) Accent else SecondaryText, fontSize = 11.sp)
                                                 }
                                             }
                                             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
-                                                Text(chatPreviews[chat.id] ?: if (chat.title == "⭐ Избранное") "Личные заметки и сохранённые сообщения" else if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 5.dp).weight(1f), maxLines = 1)
+                                                Text(chatPreviews[chat.id] ?: if (chat.title == "⭐ Избранное") "Личные заметки и сохранённые сообщения" else if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, letterSpacing = 0.05.sp, modifier = Modifier.padding(start = 6.dp).weight(1f), maxLines = 1)
                                                 if (chat.unreadCount > 0) {
                                                     Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
                                                         Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
