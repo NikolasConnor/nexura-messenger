@@ -1684,10 +1684,38 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             prefer = "return=minimal")
     }
 
-    suspend fun deleteMessage(messageId: String) {
-        call("/rest/v1/messages?id=eq.${normalizeUuid(messageId)}", "PATCH",
+    suspend fun deleteMessage(chatId: String, messageId: String, e2ee: E2eeClient? = null) {
+        val uid = store.userId ?: throw IOException("Сессия истекла")
+        val chat = normalizeUuid(chatId)
+        val id = normalizeUuid(messageId)
+        val rows = JSONArray(call(
+            "/rest/v1/messages?select=id,sender_id,message_type,content,cloud_content" +
+                "&id=eq.$id&conversation_id=eq.$chat&limit=1"
+        ))
+        if (rows.length() != 1) throw IOException("Сообщение не найдено")
+        val row = rows.getJSONObject(0)
+        if (row.optString("sender_id") != uid) throw IOException("Удалять можно только свои сообщения")
+        if (row.optString("message_type") == "media") {
+            val crypto = e2ee ?: throw IOException("Для безопасного удаления медиа требуется E2EE-устройство")
+            val plaintext = crypto.cachedMessage(chat, id)?.toString(Charsets.UTF_8)
+                ?: decryptCloudHistory(chat, rows)[id]
+                ?: throw IOException("Не удалось безопасно прочитать метаданные вложения. Файл не удалён.")
+            val media = E2eeMediaCrypto.parsePayload(plaintext)
+                ?: throw IOException("Метаданные вложения повреждены. Файл не удалён.")
+            val path = media.optString("path")
+            val parts = path.split("/")
+            if (parts.size != 3 || parts[0] != chat || parts[1] != uid ||
+                !parts[2].matches(Regex("^[0-9a-fA-F-]{36}\\.enc$"))) {
+                throw IOException("Путь вложения не прошёл проверку безопасности. Файл не удалён.")
+            }
+            // Remove the encrypted object first. If Storage refuses, keep the message visible.
+            call("/storage/v1/object/nexura-chat-media/$path", "DELETE")
+        }
+        call("/rest/v1/messages?id=eq.$id&conversation_id=eq.$chat&sender_id=eq.$uid", "PATCH",
             JSONObject().put("deleted_at", java.time.Instant.now().toString()).toString(),
             prefer = "return=minimal")
+        File(storeMediaCacheDir(), "$id.dec").delete()
+        File(storeMediaCacheDir(), "$id.dec.sha256").delete()
     }
 
     /**
