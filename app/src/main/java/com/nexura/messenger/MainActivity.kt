@@ -3948,7 +3948,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 }
                                                             )
                                                         }
-                                                        if (mine && msg.messageType == "text") {
+                                                        if (mine) {
                                                             HorizontalDivider(color = SecondaryText.copy(alpha = 0.14f))
                                                             Text(
                                                                 "УПРАВЛЕНИЕ",
@@ -3958,7 +3958,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                 letterSpacing = 1.sp,
                                                                 modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 3.dp)
                                                             )
-                                                            if (!msg.securityWarning && (pinnedMessageId != msg.id || canManagePins)) {
+                                                            if (msg.messageType == "text" && !msg.securityWarning &&
+                                                                (pinnedMessageId != msg.id || canManagePins)) {
                                                                 DropdownMenuItem(
                                                                     text = { Text("Изменить") },
                                                                     leadingIcon = { Text("✎", color = Accent, fontSize = 17.sp) },
@@ -3972,7 +3973,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                                     openMessageMenu = null
                                                                     scope.launch {
                                                                         try {
-                                                                            api.deleteMessage(msg.id)
+                                                                            api.deleteMessage(chat.id, msg.id, e2eeClient)
                                                                             messages = messages.filterNot { it.id == msg.id }
                                                                             messageReactions = messageReactions - msg.id
                                                                             if (pinnedMessageId == msg.id) pinnedMessageId = null
