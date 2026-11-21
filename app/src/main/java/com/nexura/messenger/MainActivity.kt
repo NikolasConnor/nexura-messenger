@@ -5099,31 +5099,31 @@ private fun OwnProfileScreen(
     onOpenPhoto: (SocialMediaItem) -> Unit
 ) {
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).animateContentSize()) {
-        Box(Modifier.fillMaxWidth().height(184.dp).clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2)))) {
+        Box(Modifier.fillMaxWidth().height(196.dp).clip(RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)).background(Brush.linearGradient(listOf(Color(0xFF1A2940), Color(0xFF356DDB), Color(0xFF080D18))))) {
             if (isVideoCover(bannerUrl)) MutedVideoBanner(bannerUrl, Modifier.fillMaxSize())
             else if (bannerUrl.isNotBlank()) AsyncImage(model = bannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x55000000)))))
             TextButton(onClick = onEdit, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)) { Text("Изменить профиль", color = Color.White) }
         }
         Row(Modifier.fillMaxWidth().padding(start = 20.dp).offset(y = (-42).dp), verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.size(94.dp).clip(CircleShape).border(4.dp, Surface1, CircleShape).background(Surface1), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(98.dp).clip(CircleShape).border(4.dp, Surface1, CircleShape).background(Surface1), contentAlignment = Alignment.Center) {
                 if (avatar.startsWith("http")) AsyncImage(model = avatar, contentDescription = "Аватар профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 else Text(avatar.ifBlank { "🙂" }, fontSize = 38.sp)
             }
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).offset(y = (-30).dp)) {
-            Text(name.ifBlank { "Ваш профиль" }, color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text(name.ifBlank { "Ваш профиль" }, color = MainText, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.45).sp)
             if (username.isNotBlank()) Text("@$username", color = Accent, fontSize = 13.sp)
             if (bio.isNotBlank()) Text(bio, color = SecondaryText, fontSize = 13.sp, modifier = Modifier.padding(top = 9.dp))
             Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Истории", color = MainText, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                Text("Истории", color = MainText, fontWeight = FontWeight.Bold, fontSize = 18.sp, letterSpacing = (-0.2).sp, modifier = Modifier.weight(1f))
                 Text("${stories.size}", color = SecondaryText, fontSize = 12.sp)
                 IconButton(onClick = onAddStory, enabled = !busy) { Icon(Icons.Default.Add, "Добавить историю", tint = Accent) }
             }
             if (stories.isEmpty()) Text("У вас пока нет историй", color = SecondaryText, fontSize = 12.sp)
             else LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 items(stories, key = { it.id }) { item ->
-                    Box(Modifier.size(92.dp).clip(RoundedCornerShape(15.dp)).background(Surface2).clickable { onOpenStory(item) }) {
+                    Box(Modifier.size(92.dp).clip(RoundedCornerShape(16.dp)).background(Surface2).border(1.dp, Accent.copy(alpha = 0.22f), RoundedCornerShape(16.dp)).clickable { onOpenStory(item) }) {
                         if (item.mediaType == "video") {
                             Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.PlayArrow, "Видеоистория", tint = Color.White, modifier = Modifier.size(30.dp))
@@ -5169,7 +5169,7 @@ private fun PeopleDirectoryScreen(
                 Text("Люди", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp)
                 Text("Найдите собеседника в Nexura", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
             }
-            Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Color(0xFF4F8DFF), Color(0xFF7CE7F2)))), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.GroupAdd, null, tint = Color.White, modifier = Modifier.size(21.dp))
             }
         }
@@ -5196,7 +5196,7 @@ private fun PeopleDirectoryScreen(
                 items(users, key = { it.id }) { person ->
                     Row(
                         Modifier.fillMaxWidth().animateItemPlacement()
-                            .clip(RoundedCornerShape(17.dp)).background(Surface1)
+                            .clip(RoundedCornerShape(18.dp)).background(Surface1).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
                             .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 420f))
                             .clickable { onOpenProfile(person) }
                             .padding(horizontal = 12.dp, vertical = 11.dp),
