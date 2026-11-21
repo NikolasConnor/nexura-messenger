@@ -2483,11 +2483,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "chats") {
                         Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("Сообщения", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.55).sp)
+                                Text("Сообщения", color = MainText, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.7).sp)
                                 Text("Личные и групповые разговоры", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
                             }
-                            Surface(shape = RoundedCornerShape(12.dp), color = Surface1) {
-                                Text("${visibleChats.size}", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
+                            Surface(shape = RoundedCornerShape(13.dp), color = Surface1, border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.22f))) {
+                                Text("${visibleChats.size}", color = Color(0xFF7CE7F2), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
                             }
                         }
                         LazyRow(
@@ -2503,7 +2503,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (visibleChats.isEmpty()) {
                             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Box(Modifier.size(76.dp).clip(CircleShape).background(Surface2), contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(80.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Surface2, Color(0xFF1A2940)))).border(1.dp, Accent.copy(alpha = 0.22f), CircleShape), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Default.ChatBubbleOutline, null, tint = Accent, modifier = Modifier.size(34.dp))
                                     }
                                     Text(if (busy) "Загружаем чаты…" else if (chatFilter.isNotBlank()) "Ничего не найдено" else "Здесь пока тихо", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
@@ -2537,7 +2537,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 Icon(if (chat.kind == "group") Icons.Default.GroupAdd else Icons.Default.ChatBubbleOutline, null, tint = SecondaryText, modifier = Modifier.size(13.dp))
                                                 Text(chatPreviews[chat.id] ?: if (chat.title == "⭐ Избранное") "Личные заметки и сохранённые сообщения" else if (chat.kind == "group") "Групповой чат" else "Начните общение", color = SecondaryText, fontSize = 12.sp, letterSpacing = 0.05.sp, modifier = Modifier.padding(start = 6.dp).weight(1f), maxLines = 1)
                                                 if (chat.unreadCount > 0) {
-                                                    Box(Modifier.clip(CircleShape).background(Accent).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
+                                                    Box(Modifier.clip(CircleShape) .background(Color(0xFF4F8DFF)).defaultMinSize(minWidth = 22.dp).padding(horizontal = 7.dp, vertical = 3.dp), contentAlignment = Alignment.Center) {
                                                         Text(chat.unreadCount.coerceAtMost(99).toString(), color = Bg, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                 }
