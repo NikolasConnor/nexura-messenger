@@ -45,7 +45,8 @@ object AudioTranscriber {
     suspend fun transcribe(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         var temporaryAudio: File? = null
-        val audioFile = when (uri.scheme?.lowercase()) {
+        try {
+            val audioFile = when (uri.scheme?.lowercase()) {
             "file" -> File(uri.path ?: throw IOException("Не найден локальный аудиофайл"))
             "content" -> {
                 val copied = File.createTempFile("nexura-transcribe-", ".audio", app.cacheDir)
@@ -67,8 +68,7 @@ object AudioTranscriber {
             }
             else -> throw IOException("Источник аудио не поддерживается: ${uri.scheme ?: "без схемы"}")
         }
-
-        try {
+            }
             if (!audioFile.isFile || audioFile.length() <= 0L) {
                 throw IOException("Файл голосового сообщения пуст или недоступен")
             }
