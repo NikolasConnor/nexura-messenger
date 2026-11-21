@@ -293,10 +293,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showChatOptionsMenu by remember { mutableStateOf(false) }
     var showChatModeDialog by remember { mutableStateOf(false) }
     var changingChatMode by remember { mutableStateOf(false) }
-    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
+    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF080D18)) }
     var chatWallpaperId by remember { mutableStateOf("midnight") }
     var chatWallpaperImage by remember { mutableStateOf<String?>(null) }
-    var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
+    var chatBubbleColor by remember { mutableStateOf(Color(0xFF356DDB)) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceFile by remember { mutableStateOf<File?>(null) }
@@ -436,15 +436,15 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             .edit().putString("active_chat_id", selected?.id).apply()
         selected?.id?.let { chatId ->
             val prefs = context.getSharedPreferences("nexura_chat_prefs_${store.userId.orEmpty()}", Context.MODE_PRIVATE)
-            chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
+            chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF080D18.toInt()))
             chatWallpaperId = prefs.getString("wallpaper_pattern_$chatId", "midnight") ?: "midnight"
             chatWallpaperImage = prefs.getString("wallpaper_image_$chatId", null)
-            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
+            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF356DDB.toInt()))
         } ?: run {
-            chatWallpaperColor = Color(0xFF100C1D)
+            chatWallpaperColor = Color(0xFF080D18)
             chatWallpaperId = "midnight"
             chatWallpaperImage = null
-            chatBubbleColor = Color(0xFF6945C7)
+            chatBubbleColor = Color(0xFF356DDB)
         }
     }
 
@@ -2978,12 +2978,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     if (chatThemeOpen) {
                         val wallpaperOptions = listOf(
-                            Triple("midnight", "Полночь", Color(0xFF100C1D)), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
+                            Triple("midnight", "Полночь", Color(0xFF080D18)), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
                             Triple("forest", "Тайга", Color(0xFF101D1A)), Triple("ocean", "Глубина", Color(0xFF0D1C27)), Triple("rain", "Дождь", Color(0xFF171C27)),
                             Triple("mono", "Графит", Color(0xFF17191F)), Triple("bloom", "Сакура", Color(0xFF211923)), Triple("ember", "Жар", Color(0xFF241815)),
                             Triple("geometry", "Контур", Color(0xFF171725)), Triple("pixel", "Пиксель", Color(0xFF151B25)), Triple("tide", "Прилив", Color(0xFF101F25))
                         )
-                        val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
+                        val bubbleOptions = listOf("Electric Blue" to Color(0xFF356DDB), "Глубокий синий" to Color(0xFF304B83), "Ледяной" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Графит" to Color(0xFF414B59), "Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Розовый" to Color(0xFF79445F))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
                             containerColor = Surface1,
@@ -3284,7 +3284,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     ) {
                         Column(Modifier.fillMaxSize()) {
                         Row(
-                            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
+                            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Surface2.copy(alpha = 0.92f)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = { selected = null; peerReadReceiptAt = null; messages = emptyList(); replyTarget = null; loadChats() }) {
@@ -3669,7 +3669,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 topStart = 20.dp, topEnd = 20.dp,
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
-                                            )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                            )).background(if (mine) chatBubbleColor else Surface2)
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
@@ -4059,7 +4059,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                             if (error.isNotBlank()) Text(error, color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
                             Column(
-                                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).padding(horizontal = 10.dp, vertical = 9.dp)
+                                Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Surface1, Bg))).padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
                             if (replyTarget != null) {
                                 Row(
@@ -4126,11 +4126,11 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         draft = it
                                         chatDrafts[chat.id] = it
                                     },
-                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 132.dp),
+                                    modifier = Modifier.weight(1f).padding(vertical = 1.dp).heightIn(min = 50.dp, max = 132.dp),
                                     placeholder = { Text("Сообщение", fontSize = 14.sp, color = SecondaryText) },
                                     minLines = 1,
                                     maxLines = 4,
-                                    shape = RoundedCornerShape(25.dp),
+                                    shape = RoundedCornerShape(19.dp),
                                     textStyle = androidx.compose.ui.text.TextStyle(
                                         color = MainText,
                                         fontSize = 15.sp,
