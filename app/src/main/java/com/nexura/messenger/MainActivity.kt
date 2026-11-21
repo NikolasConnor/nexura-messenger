@@ -1609,9 +1609,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { settingsOpen = false; error = ""; notice = "" }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
-                            Text("Настройки", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Text("Настройки", color = MainText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.55).sp)
                         }
-                        Text("АККАУНТ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("АККАУНТ", color = Color(0xFF7CE7F2), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.15.sp)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(18.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1703,7 +1703,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         Text("УВЕДОМЛЕНИЯ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(18.dp)), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
@@ -1808,7 +1808,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         Text("СЕТЬ И ТРАФИК", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(18.dp)), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
@@ -1835,7 +1835,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         }
                         Text("ПРИВАТНОСТЬ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                        Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 20.dp).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(18.dp)), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
