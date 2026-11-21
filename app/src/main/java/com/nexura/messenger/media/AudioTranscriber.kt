@@ -47,28 +47,28 @@ object AudioTranscriber {
         var temporaryAudio: File? = null
         try {
             val audioFile = when (uri.scheme?.lowercase()) {
-            "file" -> File(uri.path ?: throw IOException("Не найден локальный аудиофайл"))
-            "content" -> {
-                val copied = File.createTempFile("nexura-transcribe-", ".audio", app.cacheDir)
-                temporaryAudio = copied
-                val input = app.contentResolver.openInputStream(uri)
-                    ?: throw IOException("Не удалось открыть голосовое сообщение")
-                input.use { source ->
-                    copied.outputStream().buffered().use { output ->
-                        copyBounded(source, output, MAX_AUDIO_BYTES)
+                "file" -> File(uri.path ?: throw IOException("Не найден локальный аудиофайл"))
+                "content" -> {
+                    val copied = File.createTempFile("nexura-transcribe-", ".audio", app.cacheDir)
+                    temporaryAudio = copied
+                    val input = app.contentResolver.openInputStream(uri)
+                        ?: throw IOException("Не удалось открыть голосовое сообщение")
+                    input.use { source ->
+                        copied.outputStream().buffered().use { output ->
+                            copyBounded(source, output, MAX_AUDIO_BYTES)
+                        }
                     }
+                    copied
                 }
-                copied
+                "http", "https" -> {
+                    val copied = File.createTempFile("nexura-transcribe-", ".audio", app.cacheDir)
+                    temporaryAudio = copied
+                    downloadAudio(uri, copied)
+                    copied
+                }
+                else -> throw IOException("Источник аудио не поддерживается: ${uri.scheme ?: "без схемы"}")
             }
-            "http", "https" -> {
-                val copied = File.createTempFile("nexura-transcribe-", ".audio", app.cacheDir)
-                temporaryAudio = copied
-                downloadAudio(uri, copied)
-                copied
-            }
-            else -> throw IOException("Источник аудио не поддерживается: ${uri.scheme ?: "без схемы"}")
-        }
-            }
+
             if (!audioFile.isFile || audioFile.length() <= 0L) {
                 throw IOException("Файл голосового сообщения пуст или недоступен")
             }
