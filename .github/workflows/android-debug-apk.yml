@@ -2,7 +2,7 @@ name: Nexura 0.6.1 — media and voice transcription test APK
 # Build verification for Android UX, account identity, and Compose animation updates.
 on:
   push:
-    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins, feature/media-reliability-transcription, feature/nexura-0.6.1-media-transcription, feature/nexura-profile-polish-2026-11 ]
+    branches: [ test/rebuild-v0.2.0-new, feature/pinned-jump-saved-messages-group-management, feature/android-usernames-contacts-reactions-pins, feature/media-reliability-transcription, feature/nexura-0.6.1-media-transcription, feature/nexura-profile-polish-2026-11, design/v0.8.0-interface-refresh ]
     paths:
       - "app/**"
       - "crypto-core/**"
