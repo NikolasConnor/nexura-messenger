@@ -1445,16 +1445,16 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             when {
                 !signedIn -> {
                     Column(
-                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF121D32), Bg, Bg)))
+                        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF1A2940), Bg, Bg)))
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 24.dp, vertical = 28.dp),
                         verticalArrangement = Arrangement.Top
                     ) {
-                        Box(Modifier.size(62.dp).clip(RoundedCornerShape(20.dp)).background(Brush.linearGradient(listOf(Accent, Accent2))), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(64.dp).clip(RoundedCornerShape(21.dp)).background(Brush.linearGradient(listOf(Color(0xFF4F8DFF), Color(0xFF7CE7F2)))).border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(21.dp)), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(31.dp))
                         }
                         Spacer(Modifier.height(22.dp))
-                        Text("nexura", fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-1).sp)
+                        Text("nexura", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = MainText, letterSpacing = (-1.2).sp)
                         Text("Твоё пространство для общения", color = SecondaryText, fontSize = 15.sp, modifier = Modifier.padding(top = 5.dp, bottom = 28.dp))
                         OutlinedButton(
                             onClick = {
@@ -2331,7 +2331,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("Сообщество", color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                                        Text("Сообщество", color = MainText, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.45).sp)
                                         Text("Истории и фотографии пользователей", color = SecondaryText, fontSize = 12.sp)
                                     }
                                     TextButton(onClick = { socialArchiveOpen = !socialArchiveOpen }) {
@@ -2350,7 +2350,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     Text("Архив историй · только вы", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 20.dp, bottom = 8.dp))
                                     if (socialArchive.isEmpty()) Text("Истории старше 24 часов появятся здесь. Архив виден только вам.", color = SecondaryText, fontSize = 12.sp)
                                     socialArchive.forEach { item ->
-                                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(16.dp)).background(Surface1).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(17.dp)).background(Surface1).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(17.dp)).padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
                                             if (item.mediaType == "video") {
                                                 Box(
                                                     Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)).background(Surface2)
@@ -4405,16 +4405,16 @@ private fun PeerProfileDialog(
 ) {
     Dialog(onDismissRequest = onClose) {
         Card(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp).border(1.dp, Surface2.copy(alpha = 0.8f), RoundedCornerShape(26.dp)),
             colors = CardDefaults.cardColors(containerColor = Surface1),
-            shape = RoundedCornerShape(24.dp)
+            shape = RoundedCornerShape(26.dp)
         ) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                    Text("Профиль", color = MainText, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterStart))
+                    Text("Профиль", color = MainText, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.35).sp, modifier = Modifier.align(Alignment.CenterStart))
                     IconButton(onClick = onClose) { Text("×", color = SecondaryText, fontSize = 24.sp) }
                 }
-                Box(Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2)))) {
+                Box(Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(17.dp)).background(Brush.linearGradient(listOf(Color(0xFF1A2940), Color(0xFF356DDB), Color(0xFF080D18))))) {
                     if (isVideoCover(profile.bannerUrl)) MutedVideoBanner(profile.bannerUrl, Modifier.fillMaxSize())
                     else if (profile.bannerUrl.isNotBlank()) AsyncImage(model = profile.bannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 }
