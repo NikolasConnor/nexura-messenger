@@ -45,17 +45,27 @@ object AudioTranscriber {
     suspend fun transcribe(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         var temporaryAudio: File? = null
-        val audioFile = when (uri.scheme) {
+        val audioFile = when (uri.scheme?.lowercase()) {
             "file" -> File(uri.path ?: throw IOException("Не найден локальный аудиофайл"))
             "content" -> {
                 val copied = File.createTempFile("nexura-transcribe-", ".audio", app.cacheDir)
                 temporaryAudio = copied
-                app.contentResolver.openInputStream(uri)?.use { input ->
-                    copied.outputStream().buffered().use { output -> input.copyTo(output) }
-                } ?: throw IOException("Не удалось прочитать голосовое сообщение")
+                val input = app.contentResolver.openInputStream(uri)
+                    ?: throw IOException("Не удалось открыть голосовое сообщение")
+                input.use { source ->
+                    copied.outputStream().buffered().use { output ->
+                        copyBounded(source, output, MAX_AUDIO_BYTES)
+                    }
+                }
                 copied
             }
-            else -> throw IOException("Формат источника голосового сообщения не поддерживается")
+            "http", "https" -> {
+                val copied = File.createTempFile("nexura-transcribe-", ".audio", app.cacheDir)
+                temporaryAudio = copied
+                downloadAudio(uri, copied)
+                copied
+            }
+            else -> throw IOException("Источник аудио не поддерживается: ${uri.scheme ?: "без схемы"}")
         }
 
         try {
@@ -83,6 +93,46 @@ object AudioTranscriber {
             }
         } finally {
             temporaryAudio?.delete()
+        }
+    }
+
+    private fun downloadAudio(uri: Uri, destination: File) {
+        val connection = (URL(uri.toString()).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+            requestMethod = "GET"
+            setRequestProperty("Accept", "audio/*,application/octet-stream;q=0.9,*/*;q=0.5")
+        }
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                throw IOException("Не удалось получить аудио из хранилища (HTTP $status)")
+            }
+            if (connection.contentLengthLong > MAX_AUDIO_BYTES) {
+                throw IOException("Голосовое сообщение превышает лимит расшифровки 25 МБ")
+            }
+            connection.inputStream.use { input ->
+                destination.outputStream().buffered().use { output ->
+                    copyBounded(input, output, MAX_AUDIO_BYTES)
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun copyBounded(input: java.io.InputStream, output: java.io.OutputStream, limit: Long) {
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > limit) {
+                throw IOException("Голосовое сообщение превышает лимит расшифровки 25 МБ")
+            }
+            output.write(buffer, 0, read)
         }
     }
 
