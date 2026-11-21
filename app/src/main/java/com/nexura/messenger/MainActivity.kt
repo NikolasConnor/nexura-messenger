@@ -869,6 +869,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
 
 
     fun openChat(chat: ChatItem, jumpToMessageId: String? = null) {
+        // Always switch back to the chats destination before selecting a conversation.
+        // This keeps newly-created direct chats from inheriting another tab's UI state.
+        homeTab = "chats"
         selected?.let { previous -> chatDrafts[previous.id] = draft }
         selected = chat
         peerReadReceiptAt = null
