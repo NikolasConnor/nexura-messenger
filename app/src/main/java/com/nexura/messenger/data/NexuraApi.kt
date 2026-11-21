@@ -1758,7 +1758,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
             prefer = "return=minimal"
         )
         if (wasPinned) setPinnedMessage(chatId, replacementId)
-        deleteMessage(oldMessageId)
+        deleteMessage(chatId, oldMessageId, e2ee)
     }
 
     suspend fun messageReactions(chatId: String): Map<String, List<MessageReaction>> {
