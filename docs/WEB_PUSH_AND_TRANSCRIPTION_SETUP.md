@@ -10,7 +10,7 @@ No transcription server, Docker container, API key, or transcription URL is requ
 
 ## Web Push
 
-Web Push delivery is implemented by the Supabase Edge Function `send-chat-push` and can work independently of Firebase Cloud Messaging.
+Web Push delivery for chat messages is implemented by `send-chat-push`; incoming audio/video call alerts use `send-call-push`. Both can deliver to browser subscriptions independently of Firebase Cloud Messaging. Keep the two Edge Function sources in `supabase/functions/` deployed to the same Supabase project.
 
 Check Supabase Dashboard → Project → Edge Functions → Secrets for existing `WEB_PUSH_VAPID_PUBLIC_KEY` and `WEB_PUSH_VAPID_PRIVATE_KEY` values. If they already exist, reuse that exact public key; do not generate a new pair, because rotating VAPID keys invalidates existing browser subscriptions.
 
@@ -22,7 +22,7 @@ npx --yes web-push generate-vapid-keys --json
 
 Keep the private key out of Git and out of chat.
 
-Set Supabase Edge Function secrets:
+Set Supabase Edge Function secrets (shared by chat and incoming-call push):
 - `WEB_PUSH_VAPID_PUBLIC_KEY`
 - `WEB_PUSH_VAPID_PRIVATE_KEY`
 - `WEB_PUSH_VAPID_SUBJECT=https://nikolasconnor.github.io/nexura-messenger/`
