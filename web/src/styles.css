@@ -933,12 +933,12 @@ body{overscroll-behavior:none}
 
 /* iOS / iPadOS standalone viewport and touch ergonomics */
 html{ -webkit-text-size-adjust:100%; }
-body{ padding:0; padding-top:env(safe-area-inset-top); }
+body{ padding:0; }
 button,input,textarea,select{ -webkit-tap-highlight-color:transparent; }
 button{ touch-action:manipulation; }
 .messenger{ min-height:0; height:100%; height:100dvh; }
 .sidebar,.chat-area{ padding-top:env(safe-area-inset-top); }
-.chat-area{ padding-bottom:env(safe-area-inset-bottom); }
+
 .modal-backdrop{ padding-top:max(12px,env(safe-area-inset-top)); padding-bottom:max(12px,env(safe-area-inset-bottom)); overflow-y:auto; }
 .advanced-settings-modal,.group-modal{ max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px); overflow-y:auto; overscroll-behavior:contain; }
 .settings-install-card{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;border:1px solid #4F8DFF38;border-radius:14px;background:#111C2D;margin-bottom:12px}
