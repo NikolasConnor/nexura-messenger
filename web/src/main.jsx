@@ -135,6 +135,20 @@ function AuthScreen() {
     finally { setBusy(false); }
   }
 
+  async function signInWithGoogle() {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin + window.location.pathname }
+      });
+      if (authError) throw authError;
+    } catch (e) {
+      setError(e.message || 'Не удалось войти через Google');
+      setBusy(false);
+    }
+  }
+
   return <main className="auth-shell">
     <div className="auth-art">
       <div className="brand"><span className="brand-mark"><MessageCircle size={23}/></span><span>Nexura</span></div>
@@ -158,6 +172,11 @@ function AuthScreen() {
           {notice && <div className="alert success">{notice}</div>}
           <button className="primary-btn wide" disabled={busy}>{busy?'Подожди…':mode==='login'?'Войти в Nexura':'Создать аккаунт'}</button>
         </form>
+        <div className="auth-divider"><span>или</span></div>
+        <button type="button" className="oauth-btn" onClick={signInWithGoogle} disabled={busy}>
+          <span className="google-mark" aria-hidden="true">G</span>
+          {busy ? 'Подключаем Google…' : 'Продолжить с Google'}
+        </button>
         <div className="auth-switch">{mode==='login'?'Впервые здесь?':'Уже есть аккаунт?'} <button onClick={()=>{setMode(mode==='login'?'register':'login');setError('');setNotice('')}}>{mode==='login'?'Создать аккаунт':'Войти'}</button></div>
         <div className="auth-note"><LockKeyhole size={14}/> Подключение защищено. Используется твой аккаунт Nexura.</div>
       </div>
