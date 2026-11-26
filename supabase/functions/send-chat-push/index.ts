@@ -1,11 +1,53 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const cors = { "Content-Type": "application/json" };
+const cors = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "https://nikolasconnor.github.io", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", "Vary": "Origin" };
 const enc = (value: string) => btoa(value).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const pemBytes = (pem: string) => {
   const raw = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, "");
   return Uint8Array.from(atob(raw), c => c.charCodeAt(0));
 };
+
+
+const fromB64Url = (v:string) => Uint8Array.from(atob(v.replaceAll("-","+").replaceAll("_","/")+"=".repeat((4-v.length%4)%4)),c=>c.charCodeAt(0));
+const toB64Url = (v:Uint8Array) => { let b=""; for(const x of v)b+=String.fromCharCode(x); return btoa(b).replaceAll("+","-").replaceAll("/","_").replaceAll("=",""); };
+const joinBytes = (...parts:Uint8Array[]) => { const out=new Uint8Array(parts.reduce((n,p)=>n+p.length,0)); let i=0; for(const p of parts){out.set(p,i);i+=p.length;} return out; };
+const textBytes=(v:string)=>new TextEncoder().encode(v);
+async function hmac(keyBytes:Uint8Array,data:Uint8Array){const k=await crypto.subtle.importKey("raw",keyBytes,{name:"HMAC",hash:"SHA-256"},false,["sign"]);return new Uint8Array(await crypto.subtle.sign("HMAC",k,data));}
+async function hkdfExpand(prk:Uint8Array,info:Uint8Array,length:number){let prev=new Uint8Array(0),out=new Uint8Array(0);for(let i=1;out.length<length;i++){prev=await hmac(prk,joinBytes(prev,info,new Uint8Array([i])));out=joinBytes(out,prev);}return out.slice(0,length);}
+async function webPushAuth(endpoint:string){
+ const pub=Deno.env.get("WEB_PUSH_VAPID_PUBLIC_KEY")||"",priv=Deno.env.get("WEB_PUSH_VAPID_PRIVATE_KEY")||"";
+ if(!pub||!priv)throw new Error("Web Push VAPID keys are not configured");
+ const p=fromB64Url(pub),d=fromB64Url(priv);if(p.length!==65||d.length!==32||p[0]!==4)throw new Error("Invalid VAPID key");
+ const jwk={kty:"EC",crv:"P-256",x:toB64Url(p.slice(1,33)),y:toB64Url(p.slice(33)),d:toB64Url(d),ext:true,key_ops:["sign"]};
+ const key=await crypto.subtle.importKey("jwk",jwk,{name:"ECDSA",namedCurve:"P-256"},false,["sign"]);
+ const now=Math.floor(Date.now()/1000),head=enc(JSON.stringify({typ:"JWT",alg:"ES256"}));
+ const claims=enc(JSON.stringify({aud:new URL(endpoint).origin,exp:now+43200,sub:Deno.env.get("WEB_PUSH_VAPID_SUBJECT")||"https://nikolasconnor.github.io/nexura-messenger/"}));
+ const unsigned=head+"."+claims,signature=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},key,textBytes(unsigned)));
+ return "vapid t="+unsigned+"."+toB64Url(signature)+", k="+pub;
+}
+async function encryptWebPush(sub:any,payload:string){
+ const ua=fromB64Url(sub.p256dh),auth=fromB64Url(sub.auth);
+ if(ua.length!==65||ua[0]!==4||auth.length<16)throw new Error("Invalid subscription keys");
+ const uaKey=await crypto.subtle.importKey("raw",ua,{name:"ECDH",namedCurve:"P-256"},false,[]);
+ const pair=await crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"},true,["deriveBits"]);
+ const as=new Uint8Array(await crypto.subtle.exportKey("raw",pair.publicKey));
+ const shared=new Uint8Array(await crypto.subtle.deriveBits({name:"ECDH",public:uaKey},pair.privateKey,256));
+ const prkAuth=await hmac(auth,shared);
+ const ikm=await hkdfExpand(prkAuth,joinBytes(textBytes("WebPush: info\0"),ua,as),32);
+ const salt=crypto.getRandomValues(new Uint8Array(16)),prk=await hmac(salt,ikm);
+ const cek=await hkdfExpand(prk,textBytes("Content-Encoding: aes128gcm\0"),16);
+ const nonce=await hkdfExpand(prk,textBytes("Content-Encoding: nonce\0"),12);
+ const aes=await crypto.subtle.importKey("raw",cek,{name:"AES-GCM"},false,["encrypt"]);
+ const cipher=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:nonce},aes,joinBytes(textBytes(payload),new Uint8Array([2]))));
+ const head=new Uint8Array(86);head.set(salt);new DataView(head.buffer).setUint32(16,4096,false);head[20]=65;head.set(as,21);
+ return joinBytes(head,cipher);
+}
+async function sendWebPush(sub:any,payload:Record<string,string>){
+ const auth=await webPushAuth(sub.endpoint),body=await encryptWebPush(sub,JSON.stringify(payload));
+ const response=await fetch(sub.endpoint,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/octet-stream","Content-Encoding":"aes128gcm",TTL:"86400",Urgency:"high"},body});
+ if(response.ok)return {ok:true,stale:false};
+ await response.text();return {ok:false,stale:response.status===404||response.status===410};
+}
 
 async function firebaseAccessToken(service: any): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
@@ -83,7 +125,8 @@ async function sendToFcm(token: string, service: any, accessToken: string, data:
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });
   try {
     const url = Deno.env.get("SUPABASE_URL")!;
     const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -150,76 +193,74 @@ Deno.serve(async (req: Request) => {
 
     const recipientIds = recipients.map((member: any) => member.user_id);
     const inList = recipientIds.join(",");
-    const [tokensResponse, prefsResponse, conversationResponse] = await Promise.all([
+    const [tokensResponse, prefsResponse, conversationResponse, senderProfileResponse, webPushResponse] = await Promise.all([
       fetch(url + "/rest/v1/device_tokens?select=user_id,token&user_id=in.(" + inList + ")", { headers }),
       fetch(url + "/rest/v1/notification_preferences?select=user_id,push_enabled&user_id=in.(" + inList + ")", { headers }),
-      fetch(url + "/rest/v1/conversations?select=kind,title&id=eq." + encodeURIComponent(conversationId) + "&limit=1", { headers })
+      fetch(url + "/rest/v1/conversations?select=kind,title&id=eq." + encodeURIComponent(conversationId) + "&limit=1", { headers }),
+      fetch(url + "/rest/v1/profiles?select=display_name,username&id=eq." + encodeURIComponent(user.id) + "&limit=1", { headers }),
+      fetch(url + "/rest/v1/web_push_subscriptions?select=user_id,endpoint,p256dh,auth&user_id=in.(" + inList + ")", { headers })
     ]);
-    if (!tokensResponse.ok || !prefsResponse.ok || !conversationResponse.ok) {
-      throw new Error("Unable to load notification recipients");
-    }
-    const tokens = await tokensResponse.json();
-    const prefs = await prefsResponse.json();
-    const conversationRows = await conversationResponse.json();
+    if (!tokensResponse.ok || !prefsResponse.ok || !conversationResponse.ok || !senderProfileResponse.ok || !webPushResponse.ok) throw new Error("Unable to load notification recipients");
+    const tokens = await tokensResponse.json(), prefs = await prefsResponse.json();
+    const conversationRows = await conversationResponse.json(), senderProfiles = await senderProfileResponse.json();
+    const webSubscriptions = await webPushResponse.json();
     const disabledUsers = new Set(
       prefs.filter((item: any) => item.push_enabled === false).map((item: any) => item.user_id)
     );
     const enabledTokens = tokens.filter((item: any) => !disabledUsers.has(item.user_id));
+    const enabledWebSubscriptions = webSubscriptions.filter((item:any) => !disabledUsers.has(item.user_id));
     const disabled = new Set(recipientIds.filter((id: string) => disabledUsers.has(id))).size;
-    if (!enabledTokens.length) {
-      return Response.json({
-        sent: 0, targeted: 0, muted, disabled, failed: 0,
-        no_device_tokens: tokens.length === 0
-      }, { headers: cors });
-    }
+    if (!enabledTokens.length && !enabledWebSubscriptions.length) return Response.json({
+      sent:0,targeted:0,muted,disabled,failed:0,no_device_tokens:tokens.length===0,
+      no_web_push_subscriptions:webSubscriptions.length===0
+    },{headers:cors});
 
     const conversation = conversationRows[0] ?? {};
-    const title = conversation.kind === "group" && typeof conversation.title === "string" && conversation.title.trim()
+    const sender = senderProfiles[0] ?? {};
+    const senderName = (typeof sender.display_name === "string" && sender.display_name.trim()
+      ? sender.display_name.trim()
+      : typeof sender.username === "string" && sender.username.trim()
+        ? "@" + sender.username.trim()
+        : "Пользователь").slice(0, 80);
+    const isGroup = conversation.kind === "group";
+    const title = isGroup && typeof conversation.title === "string" && conversation.title.trim()
       ? conversation.title.trim().slice(0, 80)
-      : "Nexura";
+      : senderName;
     const data: Record<string, string> = {
       type: "chat_message",
       title,
-      body: "Новое сообщение",
+      sender_name: senderName,
+      conversation_kind: isGroup ? "group" : "direct",
+      body: isGroup ? senderName + ": Новое сообщение" : "Новое сообщение",
       conversation_id: conversationId
     };
     if (typeof messageId === "string") data.message_id = messageId;
 
     const service = JSON.parse(serviceJson);
-    const accessToken = await firebaseAccessToken(service);
-    const results = await Promise.all(enabledTokens.map((item: any) =>
-      sendToFcm(item.token, service, accessToken, data)
-    ));
-    const accepted = results.filter(result => result.ok).length;
-    const failed = results.filter(result => !result.ok).length;
-    const retryableFailed = results.filter(result => result.retryable).length;
-    const staleTokens = enabledTokens
-      .filter((_: any, index: number) => results[index].stale)
-      .map((item: any) => item.token);
-
-    if (staleTokens.length) {
-      const staleList = staleTokens.map((token: string) => encodeURIComponent(token)).join(",");
-      await fetch(url + "/rest/v1/device_tokens?token=in.(" + staleList + ")", {
-        method: "DELETE", headers
-      });
-    }
-
-    const failureClasses: Record<string, number> = {};
-    for (const result of results) {
-      if (!result.ok) failureClasses[result.failure] = (failureClasses[result.failure] ?? 0) + 1;
-    }
+    const fcmResults = enabledTokens.length ? await (async()=>{
+      const accessToken=await firebaseAccessToken(service);
+      return await Promise.all(enabledTokens.map((item:any)=>sendToFcm(item.token,service,accessToken,data)));
+    })() : [];
+    const vapidReady=!!(Deno.env.get("WEB_PUSH_VAPID_PUBLIC_KEY")&&Deno.env.get("WEB_PUSH_VAPID_PRIVATE_KEY"));
+    const webResults=vapidReady?await Promise.all(enabledWebSubscriptions.map(async(item:any)=>{
+      try{return await sendWebPush(item,{title,body:data.body,conversation_id:conversationId,message_id:typeof messageId==="string"?messageId:""});}
+      catch(error){console.error("Web Push delivery failed:",error);return {ok:false,stale:false};}
+    })):[];
+    const accepted=fcmResults.filter(x=>x.ok).length,failed=fcmResults.filter(x=>!x.ok).length;
+    const retryableFailed=fcmResults.filter(x=>x.retryable).length;
+    const staleTokens=enabledTokens.filter((_:any,i:number)=>fcmResults[i].stale).map((x:any)=>x.token);
+    if(staleTokens.length){const list=staleTokens.map((x:string)=>encodeURIComponent(x)).join(",");await fetch(url+"/rest/v1/device_tokens?token=in.("+list+")",{method:"DELETE",headers});}
+    const staleWeb=enabledWebSubscriptions.filter((_:any,i:number)=>webResults[i]?.stale).map((x:any)=>x.endpoint);
+    if(staleWeb.length){const list=staleWeb.map((x:string)=>encodeURIComponent(x)).join(",");await fetch(url+"/rest/v1/web_push_subscriptions?endpoint=in.("+list+")",{method:"DELETE",headers});}
+    const webAccepted=webResults.filter(x=>x.ok).length;
     return Response.json({
-      sent: accepted,
-      targeted: enabledTokens.length,
-      accepted_by_fcm: accepted,
-      failed,
-      retryable_failed: retryableFailed,
-      muted,
-      disabled,
-      stale: staleTokens.length,
-      no_device_tokens: tokens.length === 0,
-      failure_classes: failureClasses
-    }, { headers: cors });
+      sent:accepted+webAccepted,targeted:enabledTokens.length+enabledWebSubscriptions.length,
+      accepted_by_fcm:accepted,accepted_by_web_push:webAccepted,
+      failed:failed+webResults.filter(x=>!x.ok&&!x.stale).length,retryable_failed:retryableFailed,
+      muted,disabled,stale:staleTokens.length+staleWeb.length,
+      no_device_tokens:tokens.length===0,no_web_push_subscriptions:webSubscriptions.length===0,
+      web_push_configured:vapidReady
+    },{headers:cors});
   } catch (error) {
     console.error("send-chat-push:", error);
     return Response.json({ error: "Push delivery failed" }, { status: 500, headers: cors });
