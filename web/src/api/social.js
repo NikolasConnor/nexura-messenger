@@ -15,7 +15,20 @@ export async function loadProfile(supabase, userId) {
   if (data?.banner_url?.startsWith('social:')) {
     const { data: signed, error: signError } = await supabase.storage.from(SOCIAL_BUCKET)
       .createSignedUrl(data.banner_url.slice(7), 7 * 24 * 60 * 60);
-    if (!signError) data.banner_display_url = signed.signedUrl;
+    if (signError) throw new Error('Не удалось открыть видеообложку: ' + signError.message);
+    data.banner_display_url = signed.signedUrl;
+  } else if (data?.banner_url?.startsWith('http')) {
+    // Older image banners were stored as public URLs. Resolve them through
+    // Storage again so private buckets and expired cached URLs still work.
+    const marker = '/storage/v1/object/public/' + AVATAR_BUCKET + '/';
+    const index = data.banner_url.indexOf(marker);
+    if (index >= 0) {
+      const path = decodeURIComponent(data.banner_url.slice(index + marker.length).split('?')[0]);
+      const { data: signed, error: signError } = await supabase.storage.from(AVATAR_BUCKET)
+        .createSignedUrl(path, 7 * 24 * 60 * 60);
+      if (signError) throw new Error('Не удалось открыть фотообложку: ' + signError.message);
+      data.banner_display_url = signed.signedUrl;
+    } else data.banner_display_url = data.banner_url;
   }
   return data;
 }
