@@ -132,8 +132,9 @@ Deno.serve(async (req: Request) => {
     const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const serviceJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON");
-    if (!serviceJson) {
-      return Response.json({ error: "Firebase service account secret is not configured" }, { status: 503, headers: cors });
+    const vapidReady = !!(Deno.env.get("WEB_PUSH_VAPID_PUBLIC_KEY") && Deno.env.get("WEB_PUSH_VAPID_PRIVATE_KEY"));
+    if (!serviceJson && !vapidReady) {
+      return Response.json({ error: "No push delivery provider is configured" }, { status: 503, headers: cors });
     }
 
     const auth = req.headers.get("Authorization") ?? "";
@@ -236,12 +237,11 @@ Deno.serve(async (req: Request) => {
     };
     if (typeof messageId === "string") data.message_id = messageId;
 
-    const service = JSON.parse(serviceJson);
-    const fcmResults = enabledTokens.length ? await (async()=>{
+    const service = serviceJson ? JSON.parse(serviceJson) : null;
+    const fcmResults = service && enabledTokens.length ? await (async()=>{
       const accessToken=await firebaseAccessToken(service);
       return await Promise.all(enabledTokens.map((item:any)=>sendToFcm(item.token,service,accessToken,data)));
     })() : [];
-    const vapidReady=!!(Deno.env.get("WEB_PUSH_VAPID_PUBLIC_KEY")&&Deno.env.get("WEB_PUSH_VAPID_PRIVATE_KEY"));
     const webResults=vapidReady?await Promise.all(enabledWebSubscriptions.map(async(item:any)=>{
       try{return await sendWebPush(item,{title,body:data.body,conversation_id:conversationId,message_id:typeof messageId==="string"?messageId:""});}
       catch(error){console.error("Web Push delivery failed:",error);return {ok:false,stale:false};}
