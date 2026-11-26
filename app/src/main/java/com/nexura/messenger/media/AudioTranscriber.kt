@@ -31,7 +31,7 @@ import java.nio.ByteOrder
 import java.util.zip.ZipInputStream
 
 /**
- * Offline Russian voice-message transcription.
+ * Offline multilingual voice-message transcription.
  *
  * The encrypted attachment is already decrypted into the app's private media cache before
  * this class is called. Audio decoding and recognition stay on-device; only the first-use
@@ -131,6 +131,11 @@ object AudioTranscriber {
                     model.close()
                 }
             }
+        } catch (error: LinkageError) {
+            throw IOException(
+                "Модуль распознавания речи не загрузился. Обновите Nexura до последней версии и повторите попытку.",
+                error
+            )
         } finally {
             temporaryAudio?.delete()
         }
