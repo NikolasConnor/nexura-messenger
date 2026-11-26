@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-debug-apk:
-    name: Build debug APK
+    name: Build debug APK with E2EE JNI
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -24,6 +24,35 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: latest
+          accept-android-sdk-licenses: true
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018"
+
+      - name: Set up Rust for Android
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Configure Android NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.4 --locked
+
+      - name: Build native E2EE JNI libraries
+        working-directory: crypto-jni
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release
+
+      - name: Verify native libraries before packaging
+        run: |
+          set -euo pipefail
+          test -s app/src/main/jniLibs/arm64-v8a/libnexura_e2ee_jni.so
+          test -s app/src/main/jniLibs/armeabi-v7a/libnexura_e2ee_jni.so
+          test -s app/src/main/jniLibs/x86_64/libnexura_e2ee_jni.so
+
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -32,10 +61,22 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
+      - name: Verify JNI libraries are packaged in APK
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libnexura_e2ee_jni.so'
+          unzip -l "$APK" | grep -F 'lib/armeabi-v7a/libnexura_e2ee_jni.so'
+          unzip -l "$APK" | grep -F 'lib/x86_64/libnexura_e2ee_jni.so'
+
+      - name: Run unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Upload test APK
         uses: actions/upload-artifact@v4
         with:
-          name: nexura-0.8.0-test-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: nexura-0.8.2-test-debug-with-e2ee
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
