@@ -42,9 +42,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test encrypted browser backup and recovery
+      - name: Run web security and behavior contract tests
         working-directory: web
-        run: node --test src/crypto/backup.test.js
+        run: node --test src/crypto/backup.test.js src/auth-contract.test.js
 
       - name: Build Nexura Web
         working-directory: web
