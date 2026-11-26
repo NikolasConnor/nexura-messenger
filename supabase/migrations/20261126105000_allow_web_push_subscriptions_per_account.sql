@@ -1,0 +1,2 @@
+alter table public.web_push_subscriptions drop constraint web_push_subscriptions_endpoint_key;
+alter table public.web_push_subscriptions add constraint web_push_subscriptions_user_endpoint_key unique (user_id, endpoint);
