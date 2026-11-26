@@ -1032,7 +1032,7 @@ function App() {
       auth: data.keys.auth,
       expiration_time: subscription.expirationTime,
       updated_at: new Date().toISOString()
-    }, { onConflict: 'endpoint' });
+    }, { onConflict: 'user_id,endpoint' });
     if (error) throw error;
     return subscription;
   }
