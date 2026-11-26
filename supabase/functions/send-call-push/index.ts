@@ -14,7 +14,8 @@ const fromB64Url = (v:string) => Uint8Array.from(atob(v.replaceAll("-","+").repl
 const toB64Url = (v:Uint8Array) => { let b=""; for(const x of v)b+=String.fromCharCode(x); return btoa(b).replaceAll("+","-").replaceAll("/","_").replaceAll("=",""); };
 const joinBytes = (...parts:Uint8Array[]) => { const out=new Uint8Array(parts.reduce((n,p)=>n+p.length,0)); let i=0; for(const p of parts){out.set(p,i);i+=p.length;} return out; };
 const textBytes=(v:string)=>new TextEncoder().encode(v);
-async function hmac(keyBytes:Uint8Array,data:Uint8Array){const k=await crypto.subtle.importKey("raw",keyBytes,{name:"HMAC",hash:"SHA-256"},false,["sign"]);return new Uint8Array(await crypto.subtle.sign("HMAC",k,data));}
+const bytesBuffer=(value:Uint8Array):ArrayBuffer=>{const copy=new Uint8Array(value.length);copy.set(value);return copy.buffer;};
+async function hmac(keyBytes:Uint8Array,data:Uint8Array){const k=await crypto.subtle.importKey("raw",bytesBuffer(keyBytes),{name:"HMAC",hash:"SHA-256"},false,["sign"]);return new Uint8Array(await crypto.subtle.sign("HMAC",k,bytesBuffer(data)));}
 async function hkdfExpand(prk:Uint8Array,info:Uint8Array,length:number){let prev=new Uint8Array(0),out=new Uint8Array(0);for(let i=1;out.length<length;i++){prev=await hmac(prk,joinBytes(prev,info,new Uint8Array([i])));out=joinBytes(out,prev);}return out.slice(0,length);}
 async function webPushAuth(endpoint:string){
  const pub=Deno.env.get("WEB_PUSH_VAPID_PUBLIC_KEY")||"",priv=Deno.env.get("WEB_PUSH_VAPID_PRIVATE_KEY")||"";
@@ -24,13 +25,13 @@ async function webPushAuth(endpoint:string){
  const key=await crypto.subtle.importKey("jwk",jwk,{name:"ECDSA",namedCurve:"P-256"},false,["sign"]);
  const now=Math.floor(Date.now()/1000),head=enc(JSON.stringify({typ:"JWT",alg:"ES256"}));
  const claims=enc(JSON.stringify({aud:new URL(endpoint).origin,exp:now+43200,sub:Deno.env.get("WEB_PUSH_VAPID_SUBJECT")||"https://nikolasconnor.github.io/nexura-messenger/"}));
- const unsigned=head+"."+claims,signature=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},key,textBytes(unsigned)));
+ const unsigned=head+"."+claims,signature=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},key,bytesBuffer(textBytes(unsigned))));
  return "vapid t="+unsigned+"."+toB64Url(signature)+", k="+pub;
 }
 async function encryptWebPush(sub:any,payload:string){
  const ua=fromB64Url(sub.p256dh),auth=fromB64Url(sub.auth);
  if(ua.length!==65||ua[0]!==4||auth.length<16)throw new Error("Invalid subscription keys");
- const uaKey=await crypto.subtle.importKey("raw",ua,{name:"ECDH",namedCurve:"P-256"},false,[]);
+ const uaKey=await crypto.subtle.importKey("raw",bytesBuffer(ua),{name:"ECDH",namedCurve:"P-256"},false,[]);
  const pair=await crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"},true,["deriveBits"]);
  const as=new Uint8Array(await crypto.subtle.exportKey("raw",pair.publicKey));
  const shared=new Uint8Array(await crypto.subtle.deriveBits({name:"ECDH",public:uaKey},pair.privateKey,256));
@@ -39,8 +40,8 @@ async function encryptWebPush(sub:any,payload:string){
  const salt=crypto.getRandomValues(new Uint8Array(16)),prk=await hmac(salt,ikm);
  const cek=await hkdfExpand(prk,textBytes("Content-Encoding: aes128gcm\0"),16);
  const nonce=await hkdfExpand(prk,textBytes("Content-Encoding: nonce\0"),12);
- const aes=await crypto.subtle.importKey("raw",cek,{name:"AES-GCM"},false,["encrypt"]);
- const cipher=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:nonce},aes,joinBytes(textBytes(payload),new Uint8Array([2]))));
+ const aes=await crypto.subtle.importKey("raw",bytesBuffer(cek),{name:"AES-GCM"},false,["encrypt"]);
+ const cipher=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:bytesBuffer(nonce)},aes,bytesBuffer(joinBytes(textBytes(payload),new Uint8Array([2])))));
  const head=new Uint8Array(86);head.set(salt);new DataView(head.buffer).setUint32(16,4096,false);head[20]=65;head.set(as,21);
  return joinBytes(head,cipher);
 }
@@ -61,9 +62,9 @@ async function firebaseAccessToken(service: any): Promise<string> {
     iat: now,
     exp: now + 3600
   }));
-  const key = await crypto.subtle.importKey("pkcs8", pemBytes(service.private_key),
+  const key = await crypto.subtle.importKey("pkcs8", bytesBuffer(pemBytes(service.private_key)),
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
-  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned));
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, bytesBuffer(new TextEncoder().encode(unsigned)));
   const assertion = unsigned + "." + enc(String.fromCharCode(...new Uint8Array(signature)));
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
