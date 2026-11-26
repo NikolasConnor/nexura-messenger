@@ -3556,6 +3556,64 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Text(if (busy) "Загружаем сообщения…" else "Напишите первое сообщение 👋", color = SecondaryText, fontSize = 13.sp)
                             }
+                            // The first-message composer is part of the empty-chat branch itself.
+                            // It remains mounted while history is empty/loading and supports text + attachments.
+                            Column(
+                                Modifier.fillMaxWidth()
+                                    .background(Brush.verticalGradient(listOf(Surface1, Bg)))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    IconButton(
+                                        onClick = { mediaPicker.launch(arrayOf("*/*")) },
+                                        enabled = !sendingImage && !recordingVoice,
+                                        modifier = Modifier.size(44.dp).clip(CircleShape).background(Surface2)
+                                    ) {
+                                        Icon(Icons.Default.Add, "Прикрепить фото или файл", tint = Accent)
+                                    }
+                                    Spacer(Modifier.width(7.dp))
+                                    OutlinedTextField(
+                                        value = draft,
+                                        onValueChange = { draft = it; chatDrafts[chat.id] = it },
+                                        modifier = Modifier.weight(1f).heightIn(min = 50.dp, max = 132.dp),
+                                        placeholder = { Text("Сообщение", fontSize = 14.sp, color = SecondaryText) },
+                                        minLines = 1,
+                                        maxLines = 4,
+                                        shape = RoundedCornerShape(19.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = MainText,
+                                            unfocusedTextColor = MainText,
+                                            cursorColor = Accent,
+                                            focusedContainerColor = Surface2,
+                                            unfocusedContainerColor = Surface2,
+                                            focusedBorderColor = Accent.copy(alpha = 0.65f),
+                                            unfocusedBorderColor = Color.Transparent
+                                        ),
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                        keyboardActions = KeyboardActions(onSend = {
+                                            val text = draft.trim()
+                                            val media = pendingMediaUri
+                                            if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
+                                            else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
+                                        })
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                    val hasFirstMessageContent = draft.isNotBlank() || pendingMediaUri != null
+                                    IconButton(
+                                        onClick = {
+                                            val text = draft.trim()
+                                            val media = pendingMediaUri
+                                            if (media != null && !sendingImage) sendPendingMedia(chat, media, text, replyTarget?.id)
+                                            else if (text.isNotEmpty()) sendSecureMessage(chat, text, replyTarget?.id)
+                                        },
+                                        enabled = hasFirstMessageContent && !sendingImage,
+                                        modifier = Modifier.size(46.dp).clip(CircleShape)
+                                            .background(Brush.linearGradient(listOf(Accent, Accent2)))
+                                    ) {
+                                        Icon(Icons.Default.Send, "Отправить первое сообщение", tint = Bg)
+                                    }
+                                }
+                            }
                         } else {
                             if (visibleMessages.isEmpty()) {
                                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -4056,8 +4114,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 }
                             }
 
-                        Column(
-                            // Insets are handled once by the chat viewport above, not by this child.
+                        if (messages.isNotEmpty()) Column(
+                            // The regular composer is used once history contains messages.
+                            // Empty history has its dedicated composer in the branch above.
                             Modifier.fillMaxWidth()
                         ) {
                             if (recordingVoice) Text("● Запись голосового сообщения… нажмите ■, чтобы отправить", color = Danger, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp))
