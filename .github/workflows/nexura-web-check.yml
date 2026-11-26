@@ -44,7 +44,7 @@ jobs:
 
       - name: Run web security and behavior contract tests
         working-directory: web
-        run: node --test src/crypto/backup.test.js src/auth-contract.test.js
+        run: node --test src/crypto/backup.test.js src/auth-contract.test.js src/voice/transcription.test.js
 
       - name: Build Nexura Web
         working-directory: web
