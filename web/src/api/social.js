@@ -15,8 +15,8 @@ export async function loadProfile(supabase, userId) {
   if (data?.banner_url?.startsWith('social:')) {
     const { data: signed, error: signError } = await supabase.storage.from(SOCIAL_BUCKET)
       .createSignedUrl(data.banner_url.slice(7), 7 * 24 * 60 * 60);
-    if (signError) throw new Error('Не удалось открыть видеообложку: ' + signError.message);
-    data.banner_display_url = signed.signedUrl;
+    if (!signError) data.banner_display_url = signed.signedUrl;
+    else data.banner_display_error = signError.message;
   } else if (data?.banner_url?.startsWith('http')) {
     // Older image banners were stored as public URLs. Resolve them through
     // Storage again so private buckets and expired cached URLs still work.
@@ -26,8 +26,8 @@ export async function loadProfile(supabase, userId) {
       const path = decodeURIComponent(data.banner_url.slice(index + marker.length).split('?')[0]);
       const { data: signed, error: signError } = await supabase.storage.from(AVATAR_BUCKET)
         .createSignedUrl(path, 7 * 24 * 60 * 60);
-      if (signError) throw new Error('Не удалось открыть фотообложку: ' + signError.message);
-      data.banner_display_url = signed.signedUrl;
+      if (!signError) data.banner_display_url = signed.signedUrl;
+      else data.banner_display_error = signError.message;
     } else data.banner_display_url = data.banner_url;
   }
   return data;
@@ -78,7 +78,15 @@ export async function loadProfilePhotos(supabase, userId) {
     .select('id,user_id,storage_path,caption,created_at').eq('user_id', userId)
     .order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
-  return Promise.all((data || []).map(async row => ({ ...row, media_type: 'image', url: await socialSignedUrl(supabase, row.storage_path) })));
+  const resolved = await Promise.all((data || []).map(async row => {
+    try {
+      return { ...row, media_type: 'image', url: await socialSignedUrl(supabase, row.storage_path) };
+    } catch (mediaError) {
+      console.warn('Nexura: skipping unavailable profile photo', row.id, mediaError?.message);
+      return null;
+    }
+  }));
+  return resolved.filter(Boolean);
 }
 
 export async function loadStories(supabase, { userId = null, activeOnly = true } = {}) {
