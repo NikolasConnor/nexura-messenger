@@ -1419,6 +1419,7 @@ function App() {
       supabase.removeChannel(own);
       if(current.room){current.ending=true;current.room.disconnect().catch(()=>{});}
       (current.audioElements||[]).forEach(element=>{try{element.pause();element.remove();}catch{}});
+      (current.videoElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
       callRef.current={};
     };
   },[session?.user?.id]);
@@ -1430,7 +1431,7 @@ function App() {
     if(result!=='ok')throw new Error('Сервер сигнализации не подтвердил доставку');
   }
 
-  async function connectCallRoom({callId,peerUserId,conversationId,sendAnswer=false}) {
+  async function connectCallRoom({callId,peerUserId,conversationId,sendAnswer=false,video=false}) {
     const current=callRef.current;
     if(current.callId!==callId||current.room)return;
     const {data,error}=await supabase.functions.invoke('livekit-token',{
@@ -1441,15 +1442,21 @@ function App() {
     const room=new Room({adaptiveStream:true,dynacast:true});
     callRef.current={...callRef.current,room,ending:false};
     room.on(RoomEvent.TrackSubscribed,(track)=>{
-      if(track.kind!==Track.Kind.Audio)return;
       const element=track.attach();
       element.autoplay=true;element.setAttribute('playsinline','');
-      document.body.appendChild(element);
-      callRef.current.audioElements=[...(callRef.current.audioElements||[]),element];
+      if(track.kind===Track.Kind.Audio){
+        document.body.appendChild(element);
+        callRef.current.audioElements=[...(callRef.current.audioElements||[]),element];
+      }else if(track.kind===Track.Kind.Video){
+        element.className='nexura-call-video-remote';element.playsInline=true;
+        document.body.appendChild(element);
+        callRef.current.videoElements=[...(callRef.current.videoElements||[]),element];
+      }else track.detach().forEach(node=>node.remove());
     });
     room.on(RoomEvent.TrackUnsubscribed,(track)=>{
       track.detach().forEach(element=>{element.remove();});
       callRef.current.audioElements=(callRef.current.audioElements||[]).filter(element=>element.isConnected);
+      callRef.current.videoElements=(callRef.current.videoElements||[]).filter(element=>element.isConnected);
     });
     room.on(RoomEvent.ParticipantConnected,()=>{
       setCallUi(previous=>previous?{...previous,connected:true,status:'На связи',connectedAt:previous.connectedAt||Date.now()}:previous);
@@ -1463,8 +1470,18 @@ function App() {
     await room.connect(data.server_url,data.token);
     if(callRef.current.callId!==callId){await room.disconnect();return;}
     await room.localParticipant.setMicrophoneEnabled(true);
-    setCallUi(previous=>previous?{...previous,status:room.remoteParticipants.size?'На связи':'Ожидаем собеседника…',connected:room.remoteParticipants.size>0,connectedAt:room.remoteParticipants.size?(previous.connectedAt||Date.now()):previous.connectedAt}:previous);
-    if(sendAnswer)await sendCallSignal({type:'answer',call_id:callId,from:session.user.id,to:peerUserId});
+    if(video){
+      await room.localParticipant.setCameraEnabled(true);
+      const publication=[...room.localParticipant.videoTrackPublications.values()].find(item=>item.track);
+      if(publication?.track){
+        const preview=publication.track.attach();preview.className='nexura-call-video-local';
+        preview.autoplay=true;preview.muted=true;preview.playsInline=true;
+        document.body.appendChild(preview);
+        callRef.current.videoElements=[...(callRef.current.videoElements||[]),preview];
+      }
+    }
+    setCallUi(previous=>previous?{...previous,status:room.remoteParticipants.size?'На связи':'Ожидаем собеседника…',connected:room.remoteParticipants.size>0,connectedAt:room.remoteParticipants.size?(previous.connectedAt||Date.now()):previous.connectedAt,video,cameraEnabled:video}:previous);
+    if(sendAnswer)await sendCallSignal({type:'answer',call_id:callId,from:session.user.id,to:peerUserId,video});
   }
 
   async function receiveCallSignal(signal) {
@@ -1487,7 +1504,7 @@ function App() {
         }
         const {data:peer,error:peerError}=await supabase.from('profiles').select('display_name,username').eq('id',signal.from).maybeSingle();
         if(peerError)throw peerError;
-        setIncomingCall({callId:id,peerUserId:signal.from,peerName:peer?.display_name||peer?.username||'Входящий вызов',conversationId});
+        setIncomingCall({callId:id,peerUserId:signal.from,peerName:peer?.display_name||peer?.username||'Входящий вызов',conversationId,video:!!signal.video});
         await sendCallSignal({type:'ringing',call_id:id,from:session.user.id,to:signal.from});
       }catch(error){setNotice('Не удалось принять сигнал звонка: '+error.message);}
       return;
@@ -1497,7 +1514,7 @@ function App() {
     if(type==='answer'){
       clearTimeout(callRef.current.timeout);
       setCallUi(previous=>previous?{...previous,status:'Соединяем…'}:previous);
-      try{await connectCallRoom({callId:id,peerUserId:callRef.current.peerUserId,conversationId:callRef.current.conversationId,sendAnswer:false});}
+      try{await connectCallRoom({callId:id,peerUserId:callRef.current.peerUserId,conversationId:callRef.current.conversationId,sendAnswer:false,video:!!callRef.current.video});}
       catch(error){setNotice('Не удалось подключить звонок: '+error.message);await endCall(false);}
       return;
     }
@@ -1514,6 +1531,7 @@ function App() {
     current.ending=true;
     if(current.room){try{await current.room.disconnect();}catch{}}
     (current.audioElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
+    (current.videoElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
     if(current.peerChannel)await supabase.removeChannel(current.peerChannel);
     callRef.current=current.ownChannel?{ownChannel:current.ownChannel}:{};
     setCallUi(null);setIncomingCall(null);
@@ -1527,8 +1545,8 @@ function App() {
       permissionStream.getTracks().forEach(track=>track.stop());
       await ensureCallChannels(selected.peerUserId);
       const callId=crypto.randomUUID();
-      callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null};
-      setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Вызов…',connected:false,muted:false});
+      callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null,video:false};
+      setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Вызов…',connected:false,muted:false,video:false});
       await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:false,sent_at:Date.now()});
       callRef.current.timeout=setTimeout(async()=>{
         if(callRef.current.callId!==callId)return;
@@ -1538,19 +1556,38 @@ function App() {
     }catch(error){await finishCallLocal();setNotice('Не удалось начать звонок: '+error.message);}
   }
 
+  async function startVideoCall() {
+    if(!selected||selected.kind!=='direct'||!selected.peerUserId||callRef.current.callId||incomingCall)return;
+    try{
+      if(!navigator.mediaDevices?.getUserMedia)throw new Error('Браузер не поддерживает видеозвонки');
+      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true,video:true});
+      permissionStream.getTracks().forEach(track=>track.stop());
+      await ensureCallChannels(selected.peerUserId);
+      const callId=crypto.randomUUID();
+      callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null,video:true};
+      setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Видеовызов…',connected:false,muted:false,video:true,cameraEnabled:true});
+      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:true,sent_at:Date.now()});
+      callRef.current.timeout=setTimeout(async()=>{
+        if(callRef.current.callId!==callId)return;
+        await sendCallSignal({type:'end',call_id:callId,from:session.user.id,to:selected.peerUserId}).catch(()=>{});
+        await finishCallLocal();setNotice('Нет ответа');
+      },35000);
+    }catch(error){await finishCallLocal();setNotice('Не удалось начать видеозвонок: '+error.message);}
+  }
+
   async function acceptIncomingCall() {
     const incoming=incomingCall;
     if(!incoming)return;
     if(!incoming.conversationId){setNotice('Открой личный чат с этим пользователем и повтори приём звонка.');return;}
     try{
       if(!navigator.mediaDevices?.getUserMedia)throw new Error('Браузер не поддерживает аудиозвонки');
-      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true,video:!!incoming.video});
       permissionStream.getTracks().forEach(track=>track.stop());
-    }catch(error){setNotice('Для звонка разреши доступ к микрофону: '+error.message);return;}
-    callRef.current={...callRef.current,callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId};
+    }catch(error){setNotice('Разреши Nexura доступ к микрофону'+(incoming.video?' и камере':'')+': '+error.message);return;}
+    callRef.current={...callRef.current,callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId,video:!!incoming.video};
     setIncomingCall(null);
-    setCallUi({callId:incoming.callId,peerName:incoming.peerName,direction:'incoming',status:'Соединяем…',connected:false,muted:false});
-    try{await connectCallRoom({callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId,sendAnswer:true});}
+    setCallUi({callId:incoming.callId,peerName:incoming.peerName,direction:'incoming',status:'Соединяем…',connected:false,muted:false,video:!!incoming.video,cameraEnabled:!!incoming.video});
+    try{await connectCallRoom({callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId,sendAnswer:true,video:!!incoming.video});}
     catch(error){setNotice('Не удалось подключиться к звонку: '+error.message);await endCall(false);}
   }
 
@@ -1574,6 +1611,13 @@ function App() {
     const muted=!callUi?.muted;
     try{await room.localParticipant.setMicrophoneEnabled(!muted);setCallUi(previous=>previous?{...previous,muted}:previous);}
     catch(error){setNotice('Не удалось изменить микрофон: '+error.message);}
+  }
+
+  async function toggleCallCamera() {
+    const room=callRef.current.room;if(!room||!callUi?.video)return;
+    const enabled=!callUi.cameraEnabled;
+    try{await room.localParticipant.setCameraEnabled(enabled);setCallUi(previous=>previous?{...previous,cameraEnabled:enabled}:previous);}
+    catch(error){setNotice('Не удалось изменить камеру: '+error.message);}
   }
 
   async function openSavedMessages() {
@@ -2064,7 +2108,7 @@ function App() {
       </section> : activeTab==='people' ? <div className="people-page"><button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p><div className="people-tools"><button className="secondary-btn" onClick={syncBrowserContacts} disabled={contactSyncBusy}>{contactSyncBusy?'Проверяем…':'Синхронизировать контакты'}</button><button className="primary-btn" onClick={shareNexuraInvite}>Пригласить друзей</button><small>Браузер попросит выбрать контакты вручную. На сервер отправляются только выбранные номера для поиска совпадений.</small></div></div>
       {contactMatches.length>0&&<section className="contact-matches"><div className="web-section-heading"><h3>Знакомые в Nexura</h3><span>{contactMatches.length}</span></div><div className="contact-match-grid">{contactMatches.map(person=><article key={person.user_id} className="contact-match-item"><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.phone||''}</small></span><button className="primary-btn" onClick={()=>createDirectChat({id:person.user_id,title:person.display_name||'Пользователь',avatar:person.avatar_url})}><MessageCircle size={14}/> Написать</button></article>)}</div></section>}
       <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>{storiesFeed.length ? `${storiesFeed.length} активных публикаций` : 'Свежие публикации участников'}</span></div><div className="stories-feed-actions"><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading} title="Обновить истории"><RefreshCw size={15}/> Обновить</button><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')} aria-label={`Открыть историю: ${item.profile?.display_name||item.profile?.username||'Участник'}`}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline preload="metadata"/>:<img src={item.url} alt="История" loading="lazy"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{storiesFeedLoading&&!storiesFeed.length&&<div className="social-empty stories-feed-empty">Загружаем истории…</div>}{!storiesFeedLoading&&!storiesFeed.length&&<div className="stories-feed-empty"><div className="social-empty">{storiesFeedError ? `Не удалось загрузить истории: ${storiesFeedError}` : 'Пока нет активных историй. Будь первым — опубликуй свою в профиле.'}</div><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading}><RefreshCw size={15}/> Повторить загрузку</button></div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_visible&&peerPresence?.is_online?'в сети':peerPresence?.is_visible&&peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><button className="icon-button" onClick={toggleConversationMode} title="Режим шифрования" aria-label="Режим шифрования"><LockKeyhole size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_visible&&peerPresence?.is_online?'в сети':peerPresence?.is_visible&&peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<><button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Аудиозвонок" aria-label="Аудиозвонок"><Phone size={17}/></button><button className="icon-button" onClick={startVideoCall} disabled={!!callUi||!!incomingCall} title="Видеозвонок" aria-label="Видеозвонок"><Video size={17}/></button></>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><button className="icon-button" onClick={toggleConversationMode} title="Режим шифрования" aria-label="Режим шифрования"><LockKeyhole size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
           <button onClick={()=>toggleFavoriteChat(selected.id)}><Star size={15} fill={favoriteChatIds.includes(selected.id)?'currentColor':'none'}/>{favoriteChatIds.includes(selected.id)?'Убрать из избранного':'В избранное'}</button>
           <button onClick={()=>{setChatSearchOpen(value=>!value);setChatSearchQuery('');setChatToolsOpen(false);}}><Search size={15}/>Поиск по переписке</button>
           <button onClick={()=>{setChatGalleryOpen(true);setChatToolsOpen(false);}}><ImageIcon size={15}/>Медиа и ссылки</button>
@@ -2193,8 +2237,8 @@ function App() {
         </form>
       </section>
     </div>}
-    {incomingCall&&<div className="modal-backdrop call-backdrop"><section className="call-modal incoming-call-modal"><div className="call-avatar"><Phone size={27}/></div><div className="eyebrow">ВХОДЯЩИЙ ЗВОНОК</div><h3>{incomingCall.peerName}</h3><p>Вам звонят в Nexura</p><div className="call-controls"><button className="call-decline" onClick={declineIncomingCall}><PhoneOff size={19}/> Отклонить</button><button className="call-accept" onClick={acceptIncomingCall}><Phone size={19}/> Принять</button></div></section></div>}
-    {callUi&&<div className="call-floating-panel"><div className="call-floating-info"><span className="call-live-dot"/><div><b>{callUi.peerName}</b><small>{callUi.status}</small></div></div><div className="call-floating-actions"><button onClick={toggleCallMute} title={callUi.muted?'Включить микрофон':'Выключить микрофон'}>{callUi.muted?<MicOff size={17}/>:<Mic size={17}/>}</button><button className="call-hangup" onClick={()=>endCall(true)} title="Завершить звонок"><PhoneOff size={17}/></button></div></div>}
+    {incomingCall&&<div className="modal-backdrop call-backdrop"><section className="call-modal incoming-call-modal"><div className="call-avatar"><Phone size={27}/></div><div className="eyebrow">{incomingCall.video?'ВХОДЯЩИЙ ВИДЕОЗВОНОК':'ВХОДЯЩИЙ ЗВОНОК'}</div><h3>{incomingCall.peerName}</h3><p>{incomingCall.video?'Вам звонят по видео в Nexura':'Вам звонят в Nexura'}</p><div className="call-controls"><button className="call-decline" onClick={declineIncomingCall}><PhoneOff size={19}/> Отклонить</button><button className="call-accept" onClick={acceptIncomingCall}><Phone size={19}/> Принять</button></div></section></div>}
+    {callUi&&<div className="call-floating-panel"><div className="call-floating-info"><span className="call-live-dot"/><div><b>{callUi.peerName}</b><small>{callUi.video?'Видеозвонок · ':''}{callUi.status}</small></div></div><div className="call-floating-actions"><button onClick={toggleCallMute} title={callUi.muted?'Включить микрофон':'Выключить микрофон'}>{callUi.muted?<MicOff size={17}/>:<Mic size={17}/>}</button>{callUi.video&&<button onClick={toggleCallCamera} title={callUi.cameraEnabled?'Выключить камеру':'Включить камеру'}>{callUi.cameraEnabled?<Video size={17}/>:<Video size={17}/>}</button>}<button className="call-hangup" onClick={()=>endCall(true)} title="Завершить звонок"><PhoneOff size={17}/></button></div></div>}
     {viewedProfile && <div className="modal-backdrop profile-view-backdrop" onClick={()=>setViewedProfile(null)}><section className="web-user-profile-modal" onClick={event=>event.stopPropagation()}>
       <button className="profile-modal-close" onClick={()=>setViewedProfile(null)} aria-label="Закрыть"><X size={19}/></button>
       <div className="web-profile-cover user-cover">{viewedProfile.banner_display_url ? (viewedProfile.banner_url?.startsWith('social:')?<video src={viewedProfile.banner_display_url} autoPlay muted loop playsInline/>:<img src={viewedProfile.banner_display_url} alt="Обложка"/>) : <div className="cover-placeholder"><UserRound size={30}/></div>}</div>
