@@ -1,4 +1,4 @@
-FROM ubuntu:24.04 AS whisper-build
+FROM python:3.12-slim AS whisper-build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake git ca-certificates curl && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git /src/whisper.cpp
