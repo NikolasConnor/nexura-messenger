@@ -81,7 +81,7 @@ let sharedVoiceUrl = '';
 const browserVoiceUrls = new Set();
 let sharedVoiceMeta = { title:'', subtitle:'', playing:false, current:0, duration:0, speed:1, active:false };
 function publishVoiceState(patch={}) { sharedVoiceMeta={...sharedVoiceMeta,...patch}; if(typeof window!=='undefined') window.dispatchEvent(new CustomEvent('nexura:voice-state',{detail:sharedVoiceMeta})); }
-function MediaMessage({ payload, supabase, chatTitle }) {
+function MediaMessage({ payload, supabase, chatTitle, messageId, userId }) {
   const [url,setUrl]=useState('');
   const [blob,setBlob]=useState(null);
   const [error,setError]=useState('');
@@ -106,6 +106,13 @@ function MediaMessage({ payload, supabase, chatTitle }) {
     return()=>{alive=false;if(objectUrl){browserVoiceUrls.delete(objectUrl);if(objectUrl!==sharedVoiceUrl)URL.revokeObjectURL(objectUrl);}};
   },[payload.path,supabase]);
   useEffect(()=>{const sync=e=>setPlayerState(e.detail||sharedVoiceMeta);window.addEventListener('nexura:voice-state',sync);return()=>window.removeEventListener('nexura:voice-state',sync);},[]);
+  useEffect(()=>{
+    let alive=true;
+    if(userId&&messageId)loadEncryptedRecord(userId,'voice-transcript:'+messageId)
+      .then(record=>{if(alive&&typeof record?.text==='string')setTranscript(record.text);})
+      .catch(()=>{});
+    return()=>{alive=false;};
+  },[userId,messageId]);
   const isCurrent=!!url&&sharedVoiceUrl===url,playing=isCurrent&&playerState.playing,current=isCurrent?playerState.current:0,duration=isCurrent?playerState.duration:0;
   const toggle=async()=>{
     if(!sharedVoiceAudio||!url)return;
@@ -133,6 +140,7 @@ function MediaMessage({ payload, supabase, chatTitle }) {
         else if(info?.status==='done')setTranscriptionStatus('Модель готова. Распознаём речь…');
       });
       setTranscript(text);setTranscriptExpanded(true);setTranscriptionStatus('');
+      if(userId&&messageId)saveEncryptedRecords(userId,[['voice-transcript:'+messageId,{text}]]).catch(()=>{});
     }catch(e){setTranscriptionError(e?.message||'Не удалось расшифровать голосовое сообщение');setTranscriptionStatus('');}
     finally{setTranscribing(false);}
   };
@@ -1957,7 +1965,7 @@ function App() {
                 <div className="message-shell">
                   <div className="message-bubble">
                     {m.reply_to_id && <button className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}><span>↪ {replyMessage?.sender_id===session.user.id?'Вы':selected.title}</span><b>{replyMessage?.content || 'Ответ на сообщение'}</b></button>}
-                    {m.uploading ? <div className="pending-chat-media"><PendingMediaPreview file={m.localMediaFile}/><div><b>{m.localMediaFile?.name || 'Вложение'}</b><small>{outgoingMediaStatus[m.id]==='failed'?'Не отправлено': 'Отправляется…'}</small>{outgoingMediaStatus[m.id]==='failed' && <button type="button" onClick={()=>retryMediaMessage(m)}>Повторить</button>}</div></div> : m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : parseMediaPayload(m.content) ? <MediaMessage payload={parseMediaPayload(m.content)} supabase={supabase} chatTitle={selected.title}/> : <div className="message-content">{m.content}</div>}
+                    {m.uploading ? <div className="pending-chat-media"><PendingMediaPreview file={m.localMediaFile}/><div><b>{m.localMediaFile?.name || 'Вложение'}</b><small>{outgoingMediaStatus[m.id]==='failed'?'Не отправлено': 'Отправляется…'}</small>{outgoingMediaStatus[m.id]==='failed' && <button type="button" onClick={()=>retryMediaMessage(m)}>Повторить</button>}</div></div> : m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : parseMediaPayload(m.content) ? <MediaMessage payload={parseMediaPayload(m.content)} supabase={supabase} chatTitle={selected.title} messageId={m.id} userId={session.user.id}/> : <div className="message-content">{m.content}</div>}
                     <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && <span className="media-send-status">{outgoingMediaStatus[m.id]==='sending'?'◷':outgoingMediaStatus[m.id]==='failed'?'!':'✓'}</span>}</div>
                   </div>
                   <div className={"message-tools "+(reactions.length?"has-reactions":"")}>
@@ -2021,7 +2029,7 @@ function App() {
     </section></div>}
     {chatGalleryOpen&&<div className="modal-backdrop" onClick={()=>setChatGalleryOpen(false)}><section className="group-modal chat-gallery-modal" onClick={event=>event.stopPropagation()}>
       <div className="modal-head"><div><div className="eyebrow">МАТЕРИАЛЫ ПЕРЕПИСКИ</div><h3>Медиа и ссылки</h3></div><button className="icon-button" onClick={()=>setChatGalleryOpen(false)}><X size={18}/></button></div>
-      <div className="chat-gallery-list">{chatGalleryItems.map(item=><div className="chat-gallery-item" key={item.id}>{parseMediaPayload(item.content)?<MediaMessage payload={parseMediaPayload(item.content)} supabase={supabase} chatTitle={selected?.title}/>:<a href={String(item.content).match(/https?:\/\/[^\s<>]+/i)?.[0]} target="_blank" rel="noreferrer">{String(item.content).slice(0,180)}</a>}<small>{timeLabel(item.created_at)}</small></div>)}{!chatGalleryItems.length&&<div className="social-empty">В загруженной истории пока нет медиа и ссылок.</div>}</div>
+      <div className="chat-gallery-list">{chatGalleryItems.map(item=><div className="chat-gallery-item" key={item.id}>{parseMediaPayload(item.content)?<MediaMessage payload={parseMediaPayload(item.content)} supabase={supabase} chatTitle={selected?.title} messageId={item.id} userId={session.user.id}/>:<a href={String(item.content).match(/https?:\/\/[^\s<>]+/i)?.[0]} target="_blank" rel="noreferrer">{String(item.content).slice(0,180)}</a>}<small>{timeLabel(item.created_at)}</small></div>)}{!chatGalleryItems.length&&<div className="social-empty">В загруженной истории пока нет медиа и ссылок.</div>}</div>
       <p className="settings-description">Показаны материалы из уже загруженных сообщений.</p>
     </section></div>}
     {chatThemeOpen && <div className="modal-backdrop" onClick={()=>setChatThemeOpen(false)}><section className="group-modal theme-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">ПЕРСОНАЛИЗАЦИЯ</div><h3>Оформление чата</h3></div><button className="icon-button" onClick={()=>setChatThemeOpen(false)} aria-label="Закрыть">×</button></div><p className="theme-description">Выбери оформление переписки. Настройка сохраняется на этом устройстве.</p><div className="theme-presets">{[{id:'violet',name:'Nexura',wall:'#100d19',bubble:'#49366a',mine:'#49366a'},{id:'midnight',name:'Полночь',wall:'#0b1420',bubble:'#1d3447',mine:'#285879'},{id:'ocean',name:'Океан',wall:'#0b1920',bubble:'#173b42',mine:'#176b70'},{id:'rose',name:'Розовый',wall:'#1b1019',bubble:'#422338',mine:'#713b5b'},{id:'graphite',name:'Графит',wall:'#111318',bubble:'#292d35',mine:'#3f4a60'}].map(theme=><button type="button" key={theme.id} className={'theme-preset '+((chatTheme.id||'violet')===theme.id?'active':'')} onClick={()=>applyChatTheme(theme)}><span className="theme-preview" style={{background:theme.wall}}><i style={{background:theme.bubble}}/><i style={{background:theme.mine}}/></span><b>{theme.name}</b></button>)}</div><div className="theme-modal-foot"><span>Изменения применяются сразу</span><button className="primary-btn" onClick={()=>{applyChatTheme({});setChatThemeOpen(false)}}>Сбросить</button></div></section></div>}
