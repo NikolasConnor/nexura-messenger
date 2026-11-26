@@ -319,7 +319,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
             chatWallpaperId = prefs.getString("wallpaper_pattern_$chatId", "midnight") ?: "midnight"
             chatWallpaperImage = prefs.getString("wallpaper_image_$chatId", null)
-            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
+            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF2865C7.toInt()))
         } ?: run {
             chatWallpaperColor = Color(0xFF080D18)
             chatWallpaperId = "midnight"
@@ -2151,7 +2151,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Triple("mono", "Графит", Color(0xFF17191F)), Triple("bloom", "Сакура", Color(0xFF211923)), Triple("ember", "Жар", Color(0xFF241815)),
                             Triple("geometry", "Контур", Color(0xFF171725)), Triple("pixel", "Пиксель", Color(0xFF151B25)), Triple("tide", "Прилив", Color(0xFF101F25))
                         )
-                        val bubbleOptions = listOf("Синий" to Color(0xFF2865C7), "Графитовый синий" to Color(0xFF1A2940), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
+                        val bubbleOptions = listOf("Электрический синий" to Color(0xFF4F8DFF), "Графитовый синий" to Color(0xFF1A2940), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
                             containerColor = Surface1,
