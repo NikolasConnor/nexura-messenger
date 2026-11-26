@@ -47,7 +47,7 @@ jobs:
 
       - name: Test encrypted browser backup and recovery
         working-directory: web
-        run: node --test src/crypto/backup.test.js
+        run: node --test src/crypto/backup.test.js src/api/social.test.js
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
