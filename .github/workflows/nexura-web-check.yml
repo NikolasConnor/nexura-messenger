@@ -16,6 +16,7 @@ on:
       - "web/**"
       - "crypto-wasm/**"
       - "services/transcription/**"
+      - "supabase/functions/send-call-push/**"
       - ".github/workflows/nexura-web-check.yml"
 
 permissions:
