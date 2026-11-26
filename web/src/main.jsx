@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, MicOff, Bell, Pin, Star, Clock } from 'lucide-react';
 import './styles.css';
-const NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY = 'BIj_8OWtr60he5EeUm-LOay_IHrLG2BOowpQNZT_XY_3Ib2b2yCisA6QnpknDGEc3os8mXKqKorzt3FaFDqgSbY';
+const NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY = String(import.meta.env.VITE_NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
 function decodeVapidPublicKey(value) {
   const padding = '='.repeat((4 - value.length % 4) % 4);
   const raw = atob(value.replace(/-/g, '+').replace(/_/g, '/') + padding);
@@ -1025,6 +1025,7 @@ function App() {
 
   async function ensureWebPushSubscription() {
     if (!session?.user?.id) throw new Error('Сессия истекла');
+    if (!NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY) throw new Error('Web Push ещё не настроен администратором Nexura.');
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Этот браузер не поддерживает Web Push');
     const registration = await navigator.serviceWorker.ready;
     let subscription = await registration.pushManager.getSubscription();
