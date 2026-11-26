@@ -1081,6 +1081,15 @@ function App() {
     } catch (error) { console.warn('Nexura Web Push trigger failed:', error?.message); }
   }
 
+  async function triggerCallPush(conversationId, recipientUserId, callId, video=false) {
+    try {
+      const { error } = await supabase.functions.invoke('send-call-push', {
+        body: { conversation_id:conversationId, recipient_user_id:recipientUserId, call_id:callId, video, sent_at:Date.now() }
+      });
+      if (error) console.warn('Nexura call push trigger failed:', error.message);
+    } catch (error) { console.warn('Nexura call push trigger failed:', error?.message); }
+  }
+
   useEffect(() => {
     if (!session?.user?.id || !notificationPrefs.push_enabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     ensureWebPushSubscription().catch(error => console.warn('Nexura Web Push subscription unavailable:', error?.message));
@@ -1513,6 +1522,7 @@ function App() {
     if(!signal||signal.to!==session.user.id||!signal.from||signal.from===session.user.id)return;
     const type=signal.type, id=signal.call_id;
     if(!id)return;
+    if(type==='offer'&&Number.isFinite(Number(signal.sent_at))&&Date.now()-Number(signal.sent_at)>35_000){setNotice('Пропущенный вызов');return;}
     if(type==='offer'){
       if(callRef.current.callId||incomingCall){
         await ensureCallChannels(signal.from).catch(()=>{});
@@ -1521,7 +1531,7 @@ function App() {
       }
       try{
         await ensureCallChannels(signal.from);
-        let conversationId=selected?.peerUserId===signal.from?selected.id:null;
+        let conversationId=signal.conversation_id||(selected?.peerUserId===signal.from?selected.id:null);
         if(!conversationId){
           const {data,error}=await supabase.rpc('create_direct_conversation',{p_other_user_id:signal.from});
           if(error)throw error;
@@ -1572,7 +1582,9 @@ function App() {
       const callId=crypto.randomUUID();
       callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null,video:false};
       setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Вызов…',connected:false,muted:false,video:false});
-      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:false,sent_at:Date.now()});
+      const sentAt=Date.now();
+      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:false,sent_at:sentAt});
+      void triggerCallPush(selected.id,selected.peerUserId,callId,false);
       callRef.current.timeout=setTimeout(async()=>{
         if(callRef.current.callId!==callId)return;
         await sendCallSignal({type:'end',call_id:callId,from:session.user.id,to:selected.peerUserId}).catch(()=>{});
@@ -1591,7 +1603,9 @@ function App() {
       const callId=crypto.randomUUID();
       callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null,video:true};
       setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Видеовызов…',connected:false,muted:false,video:true,cameraEnabled:true});
-      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:true,sent_at:Date.now()});
+      const sentAt=Date.now();
+      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:true,sent_at:sentAt});
+      void triggerCallPush(selected.id,selected.peerUserId,callId,true);
       callRef.current.timeout=setTimeout(async()=>{
         if(callRef.current.callId!==callId)return;
         await sendCallSignal({type:'end',call_id:callId,from:session.user.id,to:selected.peerUserId}).catch(()=>{});
