@@ -14,6 +14,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app /models
+USER appuser
 ENV WHISPER_MODEL=/models/ggml-tiny-q5_1.bin MAX_UPLOAD_BYTES=20971520 MAX_AUDIO_SECONDS=300
 EXPOSE 8080
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
