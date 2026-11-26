@@ -50,7 +50,6 @@ jobs:
       - name: Build Nexura Web
         working-directory: web
         env:
-          VITE_NEXURA_TRANSCRIPTION_URL: ${{ vars.NEXURA_TRANSCRIPTION_URL }}
           VITE_NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY: ${{ vars.NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY }}
         run: |
           npm install --no-audit --no-fund
