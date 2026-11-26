@@ -171,6 +171,8 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [profilePhotos, setProfilePhotos] = useState([]);
   const [profileStories, setProfileStories] = useState([]);
+  const [profileStoryArchive, setProfileStoryArchive] = useState([]);
+  const [storyArchiveOpen, setStoryArchiveOpen] = useState(false);
   const [storiesFeed, setStoriesFeed] = useState([]);
   const [storiesFeedLoading, setStoriesFeedLoading] = useState(false);
   const [storiesFeedError, setStoriesFeedError] = useState('');
@@ -674,7 +676,7 @@ function App() {
       if(error)throw error;
       const {error:storageError}=await supabase.storage.from('nexura-social-media').remove([socialViewer.storage_path]);
       if(storageError)throw storageError;
-      if(socialViewer.kind==='story'){setProfileStories(previous=>previous.filter(item=>item.id!==socialViewer.id));setStoriesFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
+      if(socialViewer.kind==='story'){setProfileStories(previous=>previous.filter(item=>item.id!==socialViewer.id));setProfileStoryArchive(previous=>previous.filter(item=>item.id!==socialViewer.id));setStoriesFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
       else setProfilePhotos(previous=>previous.filter(item=>item.id!==socialViewer.id));
       setSocialViewer(null);setNotice('Публикация удалена');
     }catch(error){setNotice('Не удалось удалить публикацию: '+error.message);}
@@ -684,11 +686,12 @@ function App() {
   async function loadOwnSocial() {
     if (!session?.user?.id) return;
     try {
-      const [photos, stories] = await Promise.all([
+      const [photos, stories, archive] = await Promise.all([
         loadProfilePhotos(supabase, session.user.id),
-        loadStories(supabase, {userId:session.user.id, activeOnly:true})
+        loadStories(supabase, {userId:session.user.id, activeOnly:true}),
+        loadStories(supabase, {userId:session.user.id, activeOnly:false})
       ]);
-      setProfilePhotos(photos); setProfileStories(stories);
+      setProfilePhotos(photos); setProfileStories(stories); setProfileStoryArchive(archive);
     } catch(error) { setNotice('Не удалось загрузить публикации: '+error.message); }
   }
 
@@ -1835,8 +1838,8 @@ function App() {
         </div>
         <div className="web-profile-heading"><Avatar className="web-profile-avatar" value={profile?.avatar_url} name={profile?.display_name}/><div className="web-profile-title"><h2>{profile?.display_name||'Твой профиль'}</h2><span>{profile?.username?'@'+profile.username:'Username не задан'}</span>{profile?.bio&&<p>{profile.bio}</p>}{profile?.age&&<small>{profile.age} лет</small>}</div><button className="primary-btn" onClick={()=>{setProfileEditDraft({display_name:profile?.display_name||'',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂',bio:profile?.bio||'',age:profile?.age==null?'':String(profile.age)});setProfileEdit(true);}}>Изменить профиль</button></div>
         <label className="social-caption-field">Подпись к следующей публикации<input value={socialCaption} onChange={event=>setSocialCaption(event.target.value)} placeholder="Добавь описание (необязательно)" maxLength={500}/></label>
-        <div className="web-social-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Публикации доступны 24 часа</span></div><button className="social-add-button" onClick={()=>storyInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={storyInputRef} type="file" accept="image/*,video/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('story',file);event.target.value='';}}/></div>
-          <div className="web-social-grid stories-grid">{profileStories.map(item=><button key={item.id} className="web-story-card" onClick={()=>openSocialItem(item,'story')}><div className="web-story-media">{item.media_type==='video'?<video src={item.url} muted playsInline/>:<img src={item.url} alt="История"/>}<span><Play size={16}/></span></div><small>{new Date(item.created_at).toLocaleDateString('ru-RU')}</small></button>)}{!profileStories.length&&<div className="social-empty">У тебя пока нет историй. Добавь фото или видео.</div>}</div>
+        <div className="web-social-section"><div className="web-section-heading"><div><h3>Истории</h3><span>Публикации доступны 24 часа</span></div><div className="stories-feed-actions"><button className="social-add-button" onClick={()=>setStoryArchiveOpen(value=>!value)}><Clock size={15}/>{storyArchiveOpen?'Активные':'Архив'} ({profileStoryArchive.length})</button><button className="social-add-button" onClick={()=>storyInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button></div><input ref={storyInputRef} type="file" accept="image/*,video/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('story',file);event.target.value='';}}/></div>
+          {storyArchiveOpen ? <div className="web-social-grid stories-grid">{profileStoryArchive.map(item=><button key={item.id} className="web-story-card archived-story-card" onClick={()=>openSocialItem(item,'story')}><div className="web-story-media">{item.media_type==='video'?<video src={item.url} muted playsInline/>:<img src={item.url} alt="История из архива"/>}<span><Clock size={16}/></span></div><small>{new Date(item.created_at).toLocaleDateString('ru-RU')}</small></button>)}{!profileStoryArchive.length&&<div className="social-empty">Архив пока пуст. Истории появятся здесь после окончания 24 часов.</div>}</div> : <div className="web-social-grid stories-grid">{profileStories.map(item=><button key={item.id} className="web-story-card" onClick={()=>openSocialItem(item,'story')}><div className="web-story-media">{item.media_type==='video'?<video src={item.url} muted playsInline/>:<img src={item.url} alt="История"/>}<span><Play size={16}/></span></div><small>{new Date(item.created_at).toLocaleDateString('ru-RU')}</small></button>)}{!profileStories.length&&<div className="social-empty">У тебя пока нет историй. Добавь фото или видео.</div>}</div>}
         </div>
         <div className="web-social-section"><div className="web-section-heading"><div><h3>Фотографии</h3><span>Твоя галерея профиля</span></div><button className="social-add-button" onClick={()=>photoInputRef.current?.click()} disabled={socialBusy}><Plus size={16}/> Добавить</button><input ref={photoInputRef} type="file" accept="image/*" className="visually-hidden-file" onChange={event=>{const file=event.target.files?.[0];if(file)publishProfileMedia('photo',file);event.target.value='';}}/></div>
           <div className="web-social-grid">{profilePhotos.map(item=><button key={item.id} className="web-photo-card" onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Фотография профиля'}/></button>)}{!profilePhotos.length&&<div className="social-empty">Здесь будут фотографии твоего профиля.</div>}</div>
