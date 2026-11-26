@@ -270,7 +270,12 @@ function App() {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('chats');
   const [chatListFilter, setChatListFilter] = useState('all');
-  const [favoriteChatIds, setFavoriteChatIds] = useState(() => { try { return JSON.parse(localStorage.getItem('nexura_favorite_chat_ids') || '[]'); } catch { return []; } });
+  const [favoriteChatIds, setFavoriteChatIds] = useState([]);
+  useEffect(() => {
+    if (!session?.user?.id) { setFavoriteChatIds([]); return; }
+    try { const saved = JSON.parse(localStorage.getItem('nexura_favorite_chat_ids:' + session.user.id) || '[]'); setFavoriteChatIds(Array.isArray(saved) ? saved : []); }
+    catch { setFavoriteChatIds([]); }
+  }, [session?.user?.id]);
   const [cryptoRuntimeError, setCryptoRuntimeError] = useState('');
   const [contactQuery, setContactQuery] = useState('');
   const [contactResults, setContactResults] = useState([]);
@@ -1145,7 +1150,7 @@ function App() {
   function toggleFavoriteChat(chatId) {
     setFavoriteChatIds(previous => {
       const next = previous.includes(chatId) ? previous.filter(id => id !== chatId) : [...previous, chatId];
-      try { localStorage.setItem('nexura_favorite_chat_ids', JSON.stringify(next)); } catch {}
+      try { if (session?.user?.id) localStorage.setItem('nexura_favorite_chat_ids:' + session.user.id, JSON.stringify(next)); } catch {}
       return next;
     });
   }
