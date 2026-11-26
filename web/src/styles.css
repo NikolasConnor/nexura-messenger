@@ -929,3 +929,31 @@ body{overscroll-behavior:none}
   .chat-area:not(:has(.composer)) .welcome-pane{padding-bottom:96px}
   .chat-filter-row{padding-bottom:8px}
 }
+
+
+/* iOS / iPadOS standalone viewport and touch ergonomics */
+html{ -webkit-text-size-adjust:100%; }
+body{ padding:0; padding-top:env(safe-area-inset-top); }
+button,input,textarea,select{ -webkit-tap-highlight-color:transparent; }
+button{ touch-action:manipulation; }
+.messenger{ min-height:0; height:100%; height:100dvh; }
+.sidebar,.chat-area{ padding-top:env(safe-area-inset-top); }
+.chat-area{ padding-bottom:env(safe-area-inset-bottom); }
+.modal-backdrop{ padding-top:max(12px,env(safe-area-inset-top)); padding-bottom:max(12px,env(safe-area-inset-bottom)); overflow-y:auto; }
+.advanced-settings-modal,.group-modal{ max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px); overflow-y:auto; overscroll-behavior:contain; }
+.settings-install-card{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;border:1px solid #4F8DFF38;border-radius:14px;background:#111C2D;margin-bottom:12px}
+.settings-install-card>div{display:grid;gap:5px;min-width:0}
+.settings-install-card b{font-size:13px;color:#eaf2ff}
+.settings-install-card small{font-size:11px;line-height:1.5;color:#9eabc0}
+.settings-install-card .primary-btn{flex:0 0 auto;white-space:nowrap}
+@media(max-width:520px){
+ .settings-install-card{align-items:flex-start;flex-direction:column}
+ .settings-install-card .primary-btn{width:100%}
+ .advanced-settings-modal,.group-modal{width:min(100%,560px);border-radius:18px 18px 0 0;margin-top:auto}
+ .modal-backdrop{align-items:flex-end;padding-left:0;padding-right:0}
+ .composer textarea{max-height:120px}
+}
+@media(display-mode:standalone){
+ .messenger{height:100dvh}
+ .mobile-bottom-nav{bottom:max(8px,env(safe-area-inset-bottom))}
+}
