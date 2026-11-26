@@ -46,7 +46,7 @@ async function encryptWebPush(sub:any,payload:string){
 }
 async function sendWebPush(sub:any,payload:Record<string,string>){
  const auth=await webPushAuth(sub.endpoint),body=await encryptWebPush(sub,JSON.stringify(payload));
- const response=await fetch(sub.endpoint,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/octet-stream","Content-Encoding":"aes128gcm",TTL:"86400",Urgency:"high"},body});
+ const response=await fetch(sub.endpoint,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/octet-stream","Content-Encoding":"aes128gcm",TTL:"35",Urgency:"high"},body});
  if(response.ok)return {ok:true,stale:false};
  await response.text();return {ok:false,stale:response.status===404||response.status===410};
 }
@@ -120,6 +120,12 @@ Deno.serve(async (req: Request) => {
     if (user.id === recipientId) return Response.json({ error: "Invalid recipient" }, { status: 400, headers: cors });
 
     const headers = { apikey: serviceKey, Authorization: "Bearer " + serviceKey };
+    const conversationResponse = await fetch(url + "/rest/v1/conversations?select=id,kind&id=eq." + encodeURIComponent(conversationId) + "&limit=1", { headers });
+    if (!conversationResponse.ok) throw new Error("Unable to verify conversation");
+    const conversations = await conversationResponse.json();
+    if (!Array.isArray(conversations) || conversations.length !== 1 || conversations[0].kind !== "direct") {
+      return Response.json({ error: "Direct conversation required" }, { status: 403, headers: cors });
+    }
     const membersResponse = await fetch(url + "/rest/v1/conversation_members?select=user_id,muted_until&conversation_id=eq." +
       encodeURIComponent(conversationId), { headers });
     if (!membersResponse.ok) throw new Error("Unable to verify conversation membership");
