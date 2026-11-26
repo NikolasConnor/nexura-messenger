@@ -269,6 +269,13 @@ function App() {
   const [notice, setNotice] = useState('');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('chats');
+  const [chatListFilter, setChatListFilter] = useState('all');
+  const [favoriteChatIds, setFavoriteChatIds] = useState([]);
+  useEffect(() => {
+    if (!session?.user?.id) { setFavoriteChatIds([]); return; }
+    try { const saved = JSON.parse(localStorage.getItem('nexura_favorite_chat_ids:' + session.user.id) || '[]'); setFavoriteChatIds(Array.isArray(saved) ? saved : []); }
+    catch { setFavoriteChatIds([]); }
+  }, [session?.user?.id]);
   const [cryptoRuntimeError, setCryptoRuntimeError] = useState('');
   const [contactQuery, setContactQuery] = useState('');
   const [contactResults, setContactResults] = useState([]);
@@ -1134,11 +1141,23 @@ function App() {
     } catch(error) { if(error?.name!=='AbortError')setNotice('Не удалось поделиться ссылкой: '+error.message); }
   }
 
-  const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(search.toLowerCase())), [chats, search]);
+  const visibleChats = useMemo(() => chats
+    .filter(c => c.title.toLowerCase().includes(search.toLowerCase()))
+    .filter(c => chatListFilter === 'unread' ? c.unread > 0 : chatListFilter === 'favorites' ? favoriteChatIds.includes(c.id) : true)
+    .sort((a,b) => Number(favoriteChatIds.includes(b.id)) - Number(favoriteChatIds.includes(a.id)) || new Date(b.updated || 0) - new Date(a.updated || 0)),
+    [chats, search, chatListFilter, favoriteChatIds]);
+
+  function toggleFavoriteChat(chatId) {
+    setFavoriteChatIds(previous => {
+      const next = previous.includes(chatId) ? previous.filter(id => id !== chatId) : [...previous, chatId];
+      try { if (session?.user?.id) localStorage.setItem('nexura_favorite_chat_ids:' + session.user.id, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
-    if (!session || activeTab !== 'contacts' || contactQuery.trim().length < 2) {
+    if (!session || activeTab !== 'search' || contactQuery.trim().length < 2) {
       setContactResults([]);
       setContactBusy(false);
       return;
@@ -1884,14 +1903,18 @@ function App() {
       <div className="side-top"><div className="brand"><span className="brand-mark"><MessageCircle size={21}/></span><span>Nexura</span><small>WEB</small></div><div className="side-actions"><button className="icon-button" onClick={()=>setGroupOpen(true)} title="Создать группу"><Plus size={18}/></button><button className="icon-button" onClick={loadChats} title="Обновить"><RefreshCw size={17}/></button></div></div>
       <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={openProfileSettings} title="Редактировать профиль"><Settings size={17}/></button><button className="icon-button" onClick={openAdvancedSettings} title="Настройки приватности и безопасности"><ShieldCheck size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
       <div className="side-tabs side-tabs-expanded">
-        <button className={activeTab==='chats'?'active':''} onClick={()=>{setActiveTab('chats');setViewedProfile(null);}}><MessageCircle size={16}/> Чаты</button>
-        <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setMobileChatOpen(false);setPeopleOffset(0);setPeople([]);}}><Users size={16}/> Люди</button>
+        <button className={activeTab==='chats'?'active':''} onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);setViewedProfile(null);}}><MessageCircle size={16}/> Чаты</button>
+        <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setMobileChatOpen(false);setPeopleOffset(0);setPeople([]);}}><Users size={16}/> Контакты</button>
+        <button className={activeTab==='search'?'active':''} onClick={()=>{setActiveTab('search');setMobileChatOpen(false);setContactQuery('');setContactResults([]);}}><Search size={16}/> Поиск</button>
         <button className={activeTab==='profile'?'active':''} onClick={openOwnProfile}><UserRound size={16}/> Профиль</button>
         <button onClick={openAdvancedSettings}><Settings size={16}/> Настройки</button>
       </div>
-      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КАТАЛОГ ПОЛЬЗОВАТЕЛЕЙ':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
-      <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
+      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КОНТАКТЫ':activeTab==='search'?'ПОИСК':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:activeTab==='search'?contactResults.length:0}</span></div>
+      <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:activeTab==='search'?contactQuery:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):activeTab==='search'?setContactQuery(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
       {activeTab==='chats'&&<button className="saved-messages-shortcut" onClick={openSavedMessages}><Star size={16} fill="currentColor"/> Избранное</button>}
+      {activeTab==='chats'&&<div className="chat-filter-row" role="group" aria-label="Фильтр чатов">
+        {[['all','Все'],['unread','Непрочитанные'],['favorites','Избранное']].map(([value,label])=><button key={value} className={chatListFilter===value?'active':''} onClick={()=>setChatListFilter(value)}>{label}</button>)}
+      </div>}
       <div className="chat-list">
         {activeTab==='chats' ? <>
           {loadingChats && chats.length===0 && <div className="chat-skeleton-list" aria-label="Загружаем чаты">{Array.from({length:5},(_,i)=><div className="chat-skeleton" key={i}><i/><span><b/><small/></span><em/></div>)}</div>}
@@ -1912,13 +1935,21 @@ function App() {
           </button>)}
           {peopleBusy && <div className="list-hint">Загружаем пользователей…</div>}
           {!peopleBusy && peopleHasMore && <button className="load-more-people" onClick={()=>loadPeople()}>{people.length?'Показать ещё':'Загрузить людей'}</button>}
-        </> : <div className="empty-list"><><UserRound size={24}/><b>Профиль открыт</b><span>Управляй своими публикациями в основной области.</span></></div>}
+        </> : activeTab==='search' ? <>{contactResults.map(person=><button key={person.id} className="chat-item" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar} name={person.title}/><div className="chat-meta"><b>{person.title||'Пользователь'}</b><span>{person.username?'@'+person.username:'Пользователь Nexura'}</span></div><div className="contact-open"><UserRoundSearch size={16}/></div></button>)}{contactBusy&&<div className="list-hint">Ищем пользователей…</div>}</> : <div className="empty-list"><><UserRound size={24}/><b>Профиль открыт</b><span>Управляй своими публикациями в основной области.</span></></div>}
       </div>
       <div className="sidebar-foot"><ShieldCheck size={15}/> Nexura · веб-клиент</div>
     </aside>
-    <main className={'chat-area '+(mobileChatOpen||activeTab==='people'||activeTab==='profile'?'mobile-visible':'')}>
+    <main className={'chat-area '+(mobileChatOpen||activeTab==='people'||activeTab==='search'||activeTab==='profile'?'mobile-visible':'')}>
       {notice && <div className="toast">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
-      {activeTab==='profile' ? <section className="web-profile-page"><button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button>
+      {activeTab==='search' ? <section className="web-search-page">
+        <button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button>
+        <div className="people-page-heading"><div className="eyebrow">ПОИСК NEXURA</div><h2>Найти людей</h2><p>Ищи собеседников по имени или username и начинай личную переписку.</p>
+          <div className="web-search-form"><Search size={18}/><input value={contactQuery} onChange={event=>setContactQuery(event.target.value)} placeholder="Имя или @username" autoComplete="off"/><button className="primary-btn" onClick={()=>setContactQuery(value=>value.trim())} disabled={contactBusy||contactQuery.trim().length<2}>{contactBusy?'Ищем…':'Найти'}</button></div>
+        </div>
+        <div className="web-search-results">{contactBusy&&<div className="social-empty">Ищем пользователей…</div>}{!contactBusy&&contactQuery.trim().length<2&&<div className="social-empty">Введи минимум два символа, чтобы начать поиск.</div>}{!contactBusy&&contactQuery.trim().length>=2&&!contactResults.length&&<div className="social-empty">Ничего не найдено. Попробуй другое имя или username.</div>}
+          {contactResults.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar} name={person.title}/><span><b>{person.title||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>Открой профиль, чтобы узнать больше об участнике.</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.title||person.username||'Пользователь',avatar:person.avatar})}><MessageCircle size={15}/> Написать</button></div></article>)}
+        </div>
+      </section> : activeTab==='profile' ? <section className="web-profile-page"><button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button>
         <div className="web-profile-cover" onClick={()=>bannerInputRef.current?.click()}>
           {profile?.banner_display_url || profile?.banner_url?.startsWith('http') ? (profile.banner_url?.startsWith('social:') ? <video src={profile.banner_display_url} autoPlay muted loop playsInline/> : <img src={profile.banner_url} alt="Обложка профиля"/>) : <div className="cover-placeholder"><ImageIcon size={34}/><b>Добавь обложку профиля</b><span>Фото или видео без звука</span></div>}
           <button className="cover-edit" onClick={event=>{event.stopPropagation();bannerInputRef.current?.click();}}><Camera size={15}/> Изменить обложку</button>
@@ -1936,6 +1967,7 @@ function App() {
       {contactMatches.length>0&&<section className="contact-matches"><div className="web-section-heading"><h3>Знакомые в Nexura</h3><span>{contactMatches.length}</span></div><div className="contact-match-grid">{contactMatches.map(person=><article key={person.user_id} className="contact-match-item"><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.phone||''}</small></span><button className="primary-btn" onClick={()=>createDirectChat({id:person.user_id,title:person.display_name||'Пользователь',avatar:person.avatar_url})}><MessageCircle size={14}/> Написать</button></article>)}</div></section>}
       <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>{storiesFeed.length ? `${storiesFeed.length} активных публикаций` : 'Свежие публикации участников'}</span></div><div className="stories-feed-actions"><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading} title="Обновить истории"><RefreshCw size={15}/> Обновить</button><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')} aria-label={`Открыть историю: ${item.profile?.display_name||item.profile?.username||'Участник'}`}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline preload="metadata"/>:<img src={item.url} alt="История" loading="lazy"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{storiesFeedLoading&&!storiesFeed.length&&<div className="social-empty stories-feed-empty">Загружаем истории…</div>}{!storiesFeedLoading&&!storiesFeed.length&&<div className="stories-feed-empty"><div className="social-empty">{storiesFeedError ? `Не удалось загрузить истории: ${storiesFeedError}` : 'Пока нет активных историй. Будь первым — опубликуй свою в профиле.'}</div><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading}><RefreshCw size={15}/> Повторить загрузку</button></div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
         <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_visible&&peerPresence?.is_online?'в сети':peerPresence?.is_visible&&peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><button className="icon-button" onClick={toggleConversationMode} title="Режим шифрования" aria-label="Режим шифрования"><LockKeyhole size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
+          <button onClick={()=>toggleFavoriteChat(selected.id)}><Star size={15} fill={favoriteChatIds.includes(selected.id)?'currentColor':'none'}/>{favoriteChatIds.includes(selected.id)?'Убрать из избранного':'В избранное'}</button>
           <button onClick={()=>{setChatSearchOpen(value=>!value);setChatSearchQuery('');setChatToolsOpen(false);}}><Search size={15}/>Поиск по переписке</button>
           <button onClick={()=>{setChatGalleryOpen(true);setChatToolsOpen(false);}}><ImageIcon size={15}/>Медиа и ссылки</button>
           <button onClick={()=>changeChatMute(chatMutedUntil&&new Date(chatMutedUntil)>new Date()?null:60*60*1000)}><Bell size={15}/>{chatMutedUntil&&new Date(chatMutedUntil)>new Date()?'Включить уведомления':'Отключить на час'}</button>
@@ -2009,6 +2041,12 @@ function App() {
         </>
       }
     </main>
+    {!mobileChatOpen&&<nav className="mobile-bottom-nav" aria-label="Основная навигация">
+      <button className={activeTab==='chats'?'active':''} onClick={()=>{setActiveTab('chats');setViewedProfile(null);}}><MessageCircle size={20}/><span>Чаты</span></button>
+      <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setPeopleOffset(0);setPeople([]);}}><Users size={20}/><span>Контакты</span></button>
+      <button className={activeTab==='search'?'active':''} onClick={()=>{setActiveTab('search');setContactQuery('');setContactResults([]);}}><Search size={20}/><span>Поиск</span></button>
+      <button className={activeTab==='profile'?'active':''} onClick={openOwnProfile}><UserRound size={20}/><span>Профиль</span></button>
+    </nav>}
     {activeMenuMessage && createPortal(<div className="message-context-menu message-context-menu-floating" style={{top:messageMenuPosition.top,left:messageMenuPosition.left}} role="menu" aria-label="Действия с сообщением" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setReplyTarget(activeMenuMessage);setEditingMessageId(null);setMessageMenu(null);}}><Reply size={15}/>Ответить</button>
       <button role="menuitem" onClick={()=>{copyMessage(activeMenuMessage);setMessageMenu(null);}}><Copy size={15}/>Копировать</button>{!activeMenuMessage.encrypted&&!activeMenuMessage.decryptionError&&<button role="menuitem" onClick={()=>saveMessageToSaved(activeMenuMessage)}><Star size={15}/>Сохранить в Избранное</button>}<button role="menuitem" onClick={()=>togglePinnedChatMessage(activeMenuMessage)}><Pin size={15}/>{pinnedMessageId===activeMenuMessage.id?'Открепить':'Закрепить в чате'}</button>

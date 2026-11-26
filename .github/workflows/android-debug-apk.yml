@@ -10,6 +10,16 @@ on:
       - "settings.gradle.kts"
       - "gradle/**"
       - ".github/workflows/android-debug-apk.yml"
+  pull_request:
+    branches: [ release/public-apk-site ]
+    paths:
+      - "app/**"
+      - "crypto-core/**"
+      - "crypto-jni/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - ".github/workflows/android-debug-apk.yml"
   workflow_dispatch:
 permissions:
   contents: read
