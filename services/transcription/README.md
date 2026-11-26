@@ -6,16 +6,14 @@ This service runs whisper.cpp locally. Audio is decrypted by the Nexura Web clie
 
 Requirements: Docker with Compose, outbound access to download the image/model during the first build, and a public HTTPS reverse proxy/tunnel for the Web client to reach the service.
 
-Create an environment file at services/transcription/.env (never commit it) with:
+From the repository root, copy the template and edit the publishable key (never commit the real .env file):
 
-- SUPABASE_URL=https://lyhzawblxcvpgpjrkspc.supabase.co
-- SUPABASE_ANON_KEY=<the project's publishable/anon key>
-- CORS_ORIGINS=https://nikolasconnor.github.io
+    cp services/transcription/.env.example services/transcription/.env
 
-Build and run:
+Set SUPABASE_ANON_KEY in that file to the project's publishable/anon key. Then build and start the resource-limited container:
 
-    docker build -t nexura-transcription ./services/transcription
-    docker run -d --name nexura-transcription --restart unless-stopped --env-file services/transcription/.env -p 127.0.0.1:8080:8080 --memory=1200m --cpus=2 nexura-transcription
+    cd services/transcription
+    docker compose up -d --build
 
 Put the service behind HTTPS and expose only the reverse-proxy endpoint. Do not expose port 8080 directly to the public internet. The example binds the service to localhost on the host.
 
