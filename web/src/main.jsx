@@ -5,6 +5,13 @@ import { createClient } from '@supabase/supabase-js';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, MicOff, Bell, Pin, Star, Clock } from 'lucide-react';
 import './styles.css';
+const NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY = 'BIj_8OWtr60he5EeUm-LOay_IHrLG2BOowpQNZT_XY_3Ib2b2yCisA6QnpknDGEc3os8mXKqKorzt3FaFDqgSbY';
+function decodeVapidPublicKey(value) {
+  const padding = '='.repeat((4 - value.length % 4) % 4);
+  const raw = atob(value.replace(/-/g, '+').replace(/_/g, '/') + padding);
+  return Uint8Array.from(raw, char => char.charCodeAt(0));
+}
+
 import { initializeOlm } from './crypto/olm.js';
 import { loadEncryptedRecord, exportEncryptedRecords, importEncryptedRecords, loadEncryptedRecordsByPrefix, removeEncryptedRecord, saveEncryptedRecords } from './crypto/secure-store.js';
 import { createRecoveryCode, encryptBackup, decryptBackup } from './crypto/backup.js';
@@ -1007,6 +1014,43 @@ function App() {
     } catch (error) { console.debug('Nexura notification unavailable', error?.message); }
   }
 
+  async function ensureWebPushSubscription() {
+    if (!session?.user?.id) throw new Error('Сессия истекла');
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Этот браузер не поддерживает Web Push');
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: decodeVapidPublicKey(NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY)
+    });
+    const data = subscription.toJSON();
+    if (!subscription.endpoint || !data.keys?.p256dh || !data.keys?.auth) throw new Error('Браузер не вернул ключи Web Push');
+    const { error } = await supabase.from('web_push_subscriptions').upsert({
+      user_id: session.user.id,
+      endpoint: subscription.endpoint,
+      p256dh: data.keys.p256dh,
+      auth: data.keys.auth,
+      expiration_time: subscription.expirationTime,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'endpoint' });
+    if (error) throw error;
+    return subscription;
+  }
+
+  async function triggerChatPush(conversationId, messageId) {
+    try {
+      const { error } = await supabase.functions.invoke('send-chat-push', {
+        body: { conversation_id: conversationId, message_id: messageId }
+      });
+      if (error) console.warn('Nexura Web Push trigger failed:', error.message);
+    } catch (error) { console.warn('Nexura Web Push trigger failed:', error?.message); }
+  }
+
+  useEffect(() => {
+    if (!session?.user?.id || !notificationPrefs.push_enabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    ensureWebPushSubscription().catch(error => console.warn('Nexura Web Push subscription unavailable:', error?.message));
+  }, [session?.user?.id, notificationPrefs.push_enabled]);
+
   async function saveNotificationSetting(key,value) {
     setSettingsBusy(true);
     try {
@@ -1019,6 +1063,7 @@ function App() {
       if(key==='push_enabled'&&value&&typeof Notification!=='undefined'&&Notification.permission==='denied') {
         throw new Error('Уведомления запрещены в настройках браузера');
       }
+      if(key==='push_enabled'&&value) await ensureWebPushSubscription();
       const next={...notificationPrefs,[key]:value};
       const {error}=await supabase.from('notification_preferences').upsert({
         user_id:session.user.id,...next,updated_at:new Date().toISOString()
@@ -1138,6 +1183,7 @@ function App() {
         if(chat.chatMode==='cloud')await sendCloudMessage(supabase,payload);
         else if(item.kind==='group')await sendBrowserGroupMessage(supabase,payload);
         else await sendBrowserDirectMessage(supabase,{...payload,peerUserId:item.peerUserId});
+        void triggerChatPush(item.conversationId,item.id);
         await removeEncryptedRecord(session.user.id,record.recordId);
         setScheduledCount(value=>Math.max(0,value-1));setNotice('Отложенное сообщение отправлено в чат «'+(chat.title||item.chatTitle)+'».');
         loadChats({silent:true});
@@ -1795,6 +1841,7 @@ function App() {
             ? await sendBrowserGroupMessage(supabase,payload)
             : await sendBrowserDirectMessage(supabase,{...payload,peerUserId:selected.peerUserId});
         setMessages(previous => [...previous, sent]);
+        void triggerChatPush(selected.id, messageId);
       }
       setDraft('');
       setReplyTarget(null);
