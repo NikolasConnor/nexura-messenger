@@ -906,3 +906,26 @@ body{overscroll-behavior:none}
 .message-bubble{background:#1A2940}
 .mine .message-bubble{background:#263F62;border-color:rgba(120,170,255,.16)}
 @media(max-width:800px){.sidebar{background:#080D18}.side-tabs{position:sticky;top:0;z-index:3;padding:5px;background:#080D18}.side-tabs button{min-height:42px}.chat-header{min-height:68px}.messages-pane{overscroll-behavior:contain}.composer{padding-bottom:max(12px,env(safe-area-inset-bottom))}}
+
+
+/* Android-aligned mobile navigation and chat filters */
+.chat-filter-row{display:flex;gap:6px;padding:0 0 9px;flex:0 0 auto}
+.chat-filter-row button{flex:1;min-width:0;padding:8px 5px;border:1px solid rgba(160,190,230,.12);border-radius:10px;background:#080D18;color:#9eabc0;font-size:10px;font-weight:650;white-space:nowrap}
+.chat-filter-row button.active{border-color:#4F8DFF66;background:#4F8DFF1c;color:#C6DCFF}
+.mobile-bottom-nav{display:none}
+.web-search-page{width:100%;height:100%;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:clamp(18px,3vw,38px) clamp(14px,4vw,52px) 72px;max-width:1000px;margin:0 auto}
+.web-search-form{display:flex;align-items:center;gap:10px;margin-top:18px;padding:7px 8px 7px 14px;border:1px solid #4F8DFF35;border-radius:14px;background:#080D18;color:#9eabc0}
+.web-search-form input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:#f5f7fb;padding:10px 2px;font-size:13px}
+.web-search-form .primary-btn{padding:10px 16px}
+.web-search-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:12px;margin-top:18px}
+@media(max-width:800px){
+  .sidebar .side-tabs-expanded{display:none}
+  .mobile-bottom-nav{position:fixed;z-index:40;left:12px;right:12px;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:6px;border:1px solid #4F8DFF30;border-radius:22px;background:rgba(17,28,45,.96);box-shadow:0 10px 35px #0009;backdrop-filter:blur(18px)}
+  .mobile-bottom-nav button{min-width:0;min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:0;border-radius:15px;background:transparent;color:#9eabc0;font-size:10px;font-weight:600}
+  .mobile-bottom-nav button.active{background:#4F8DFF20;color:#8DB8FF}
+  .mobile-bottom-nav button span{white-space:nowrap}
+  .sidebar{padding-bottom:88px}
+  .chat-area>.web-profile-page,.chat-area>.people-page,.chat-area>.web-search-page{padding-bottom:100px}
+  .chat-area:not(:has(.composer)) .welcome-pane{padding-bottom:96px}
+  .chat-filter-row{padding-bottom:8px}
+}
