@@ -404,13 +404,35 @@ function App() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     const onWorkerMessage = event => {
-      if (event.data?.type !== 'NEXURA_OPEN_CONVERSATION' || !event.data.conversationId) return;
-      const target = chats.find(item => item.id === event.data.conversationId);
-      if (target) { setActiveTab('chats'); setSelected(target); setMobileChatOpen(true); }
+      const data=event.data||{};
+      if(data.type==='NEXURA_INCOMING_CALL'){
+        if(!session?.user?.id||!data.callId||!data.callerId)return;
+        const target=chats.find(item=>item.id===data.conversationId);
+        if(target){setActiveTab('chats');setSelected(target);setMobileChatOpen(true);}
+        void receiveCallSignal({type:'offer',call_id:data.callId,from:data.callerId,to:session.user.id,conversation_id:data.conversationId,video:!!data.video,sent_at:data.sentAt});
+        return;
+      }
+      if(data.type!=='NEXURA_OPEN_CONVERSATION'||!data.conversationId)return;
+      const target=chats.find(item=>item.id===data.conversationId);
+      if(target){setActiveTab('chats');setSelected(target);setMobileChatOpen(true);}
     };
-    navigator.serviceWorker.addEventListener('message', onWorkerMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', onWorkerMessage);
-  }, [chats]);
+    navigator.serviceWorker.addEventListener('message',onWorkerMessage);
+    return()=>navigator.serviceWorker.removeEventListener('message',onWorkerMessage);
+  },[chats,session?.user?.id]);
+
+  useEffect(()=>{
+    if(!session?.user?.id)return;
+    const params=new URLSearchParams(window.location.search);
+    const callId=params.get('nexura_call'),callerId=params.get('nexura_caller');
+    if(!callId||!callerId)return;
+    const conversationId=params.get('nexura_conversation')||'';
+    const video=params.get('nexura_video')==='1';
+    const sentAt=Number(params.get('nexura_sent_at'))||Date.now();
+    ['nexura_call','nexura_caller','nexura_conversation','nexura_video','nexura_sent_at'].forEach(key=>params.delete(key));
+    const query=params.toString();
+    window.history.replaceState({},'',window.location.pathname+(query?'?'+query:'')+window.location.hash);
+    void receiveCallSignal({type:'offer',call_id:callId,from:callerId,to:session.user.id,conversation_id:conversationId,video,sent_at:sentAt});
+  },[session?.user?.id]);
 
   const chatLoadSeq = useRef(0);
   const loadChats = useCallback(async ({ silent = false } = {}) => {
