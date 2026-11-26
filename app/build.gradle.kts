@@ -11,8 +11,8 @@ android {
         applicationId = "com.nexura.messenger"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.8.1"
+        versionCode = 8
+        versionName = "0.8.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures {
