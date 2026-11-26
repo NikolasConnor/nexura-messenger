@@ -32,30 +32,48 @@ self.addEventListener('push', event => {
   const title = payload.title || payload.notification?.title || 'Nexura';
   const body = payload.body || payload.notification?.body || 'Новое сообщение';
   const conversationId = payload.conversation_id || payload.data?.conversation_id || '';
+  const type = payload.type || payload.data?.type || 'chat_message';
+  const callId = payload.call_id || payload.data?.call_id || '';
+  const callerId = payload.caller_id || payload.data?.caller_id || '';
+  const video = payload.video === true || payload.video === 'true' || payload.data?.video === 'true';
+  const sentAt = Number(payload.sent_at || payload.data?.sent_at || Date.now());
   event.waitUntil(self.registration.showNotification(title, {
     body,
     icon: './icon.svg',
     badge: './icon.svg',
-    tag: conversationId ? 'nexura-chat-' + conversationId : 'nexura-message',
-    renotify: false,
-    data: { conversationId, url: './' },
+    tag: type === 'incoming_call' ? 'nexura-call-' + callId : conversationId ? 'nexura-chat-' + conversationId : 'nexura-message',
+    renotify: type === 'incoming_call',
+    requireInteraction: type === 'incoming_call',
+    data: { type, conversationId, callId, callerId, video, sentAt, url: './' },
     timestamp: Date.now()
   }));
 });
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const conversationId = event.notification.data?.conversationId || '';
-  const targetUrl = new URL('./', self.location.href).href;
+  const data = event.notification.data || {};
+  const conversationId = data.conversationId || '';
+  const callMessage = {
+    type: 'NEXURA_INCOMING_CALL', conversationId, callId: data.callId,
+    callerId: data.callerId, video: !!data.video, sentAt: data.sentAt
+  };
+  const target = new URL('./', self.location.href);
+  if (data.type === 'incoming_call') {
+    target.searchParams.set('nexura_call', data.callId || '');
+    target.searchParams.set('nexura_caller', data.callerId || '');
+    target.searchParams.set('nexura_conversation', conversationId);
+    target.searchParams.set('nexura_video', data.video ? '1' : '0');
+    target.searchParams.set('nexura_sent_at', String(data.sentAt || Date.now()));
+  }
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) {
       if ('focus' in client) {
         await client.focus();
-        client.postMessage({ type: 'NEXURA_OPEN_CONVERSATION', conversationId });
+        client.postMessage(data.type === 'incoming_call' ? callMessage : { type: 'NEXURA_OPEN_CONVERSATION', conversationId });
         return;
       }
     }
-    await self.clients.openWindow(targetUrl);
+    await self.clients.openWindow(target.href);
   })());
 });
