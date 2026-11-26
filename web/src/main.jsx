@@ -214,6 +214,9 @@ function AuthScreen() {
 function App() {
   const [session, setSession] = useState(null);
   const [initializing, setInitializing] = useState(true);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [isStandalone, setIsStandalone] = useState(() => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true);
+  const [isIosDevice] = useState(() => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
   const [profile, setProfile] = useState(null);
   const [profilePhotos, setProfilePhotos] = useState([]);
   const [profileStories, setProfileStories] = useState([]);
@@ -371,11 +374,31 @@ function App() {
   },[session?.user?.id]);
 
   useEffect(() => {
+    const onInstall = event => { event.preventDefault(); setInstallPrompt(event); };
+    const onInstalled = () => { setInstallPrompt(null); setIsStandalone(true); setNotice('Nexura установлена на устройство.'); };
+    window.addEventListener('beforeinstallprompt', onInstall);
+    window.addEventListener('appinstalled', onInstalled);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(error => console.warn('Nexura service worker registration failed', error));
+    return () => { window.removeEventListener('beforeinstallprompt', onInstall); window.removeEventListener('appinstalled', onInstalled); };
+  }, []);
+
+  useEffect(() => {
     let alive = true;
     supabase.auth.getSession().then(({ data }) => { if (alive) { setSession(data.session); setInitializing(false); } });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => { setSession(next); setInitializing(false); });
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const onWorkerMessage = event => {
+      if (event.data?.type !== 'NEXURA_OPEN_CONVERSATION' || !event.data.conversationId) return;
+      const target = chats.find(item => item.id === event.data.conversationId);
+      if (target) { setActiveTab('chats'); setSelected(target); setMobileChatOpen(true); }
+    };
+    navigator.serviceWorker.addEventListener('message', onWorkerMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onWorkerMessage);
+  }, [chats]);
 
   const chatLoadSeq = useRef(0);
   const loadChats = useCallback(async ({ silent = false } = {}) => {
@@ -628,17 +651,13 @@ function App() {
         if(message?.sender_id===session.user.id||!message?.conversation_id)return;
         if(!notificationPrefs.push_enabled||typeof Notification==='undefined'||Notification.permission!=='granted'||!document.hidden)return;
         const chat=chats.find(item=>item.id===message.conversation_id);
-        const notification=new Notification('Nexura', {
+        void showWebNotification('Nexura', {
           body:chat?'Новое сообщение от '+chat.title:'Новое сообщение',
           tag:'nexura-chat-'+message.conversation_id,
-          silent:!notificationPrefs.sound_enabled
+          data:{conversationId:message.conversation_id},
+          silent:!notificationPrefs.sound_enabled,
+          icon:'./icon.svg', badge:'./icon.svg'
         });
-        notification.onclick=()=>{
-          window.focus();
-          const target=chats.find(item=>item.id===message.conversation_id);
-          if(target){setActiveTab('chats');setSelected(target);setMobileChatOpen(true);}
-          notification.close();
-        };
       })
       .subscribe();
     return () => {
@@ -967,10 +986,32 @@ function App() {
     await loadOwnSocial();
   }
 
+  async function installNexura() {
+    if (isStandalone) { setNotice('Nexura уже установлена на устройство.'); return; }
+    if (installPrompt) {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice?.outcome === 'accepted') setNotice('Nexura добавлена на главный экран.');
+      setInstallPrompt(null);
+      return;
+    }
+    setNotice(isIosDevice ? 'На iPhone открой Nexura в Safari, нажми «Поделиться» → «На экран Домой» → включи «Открывать как веб-приложение» → «Добавить».' : 'Открой меню браузера и выбери «Установить приложение» или «Добавить на главный экран».');
+  }
+
+  async function showWebNotification(title, options = {}) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready : null;
+      if (registration?.showNotification) await registration.showNotification(title, options);
+      else if (!isIosDevice) new Notification(title, options);
+    } catch (error) { console.debug('Nexura notification unavailable', error?.message); }
+  }
+
   async function saveNotificationSetting(key,value) {
     setSettingsBusy(true);
     try {
       if(key==='push_enabled'&&value&&typeof Notification!=='undefined'&&Notification.permission==='default') {
+        if (isIosDevice && !isStandalone) throw new Error('На iPhone сначала добавь Nexura на экран «Домой», затем включи уведомления в установленном приложении.');
         const permission=await Notification.requestPermission();
         setBrowserNotificationPermission(permission);
         if(permission!=='granted') throw new Error('Браузер не разрешил уведомления');
@@ -2128,7 +2169,9 @@ function App() {
         <div className="settings-info-note"><ShieldCheck size={17}/> Изменения применяются к аккаунту Nexura и синхронизируются между устройствами.</div>
       </div>}
       {settingsSection==='notifications'&&<div className="advanced-settings-content">
-        <p className="settings-description">Уведомления в браузере показываются, пока веб-клиент открыт. Получение уведомлений при полностью закрытом браузере требует отдельной настройки PWA Push.</p>
+        <div className="settings-install-card"><div><b>{isStandalone?'Nexura установлена':'Установить Nexura на телефон'}</b><small>{isIosDevice?'На iPhone установка выполняется через меню «Поделиться» в Safari.':'Установи Nexura как приложение, чтобы открывать её отдельным окном.'}</small></div><button className="primary-btn" type="button" onClick={installNexura} disabled={isStandalone}>{isStandalone?'Установлено':isIosDevice?'Как установить':'Установить'}</button></div>
+        {isIosDevice&&!isStandalone&&<div className="settings-info-note">iPhone: Safari → «Поделиться» → «На экран Домой» → включи «Открывать как веб-приложение» → «Добавить». Web Push на iPhone работает только у установленного приложения на iOS 16.4 или новее.</div>}
+        <p className="settings-description">Системные уведомления при открытом клиенте работают через Service Worker. Для доставки при полностью закрытом приложении нужна регистрация Web Push на сервере.</p>
         <div className="settings-permission"><span>Разрешение браузера</span><b>{browserNotificationPermission==='granted'?'Разрешено':browserNotificationPermission==='denied'?'Запрещено':browserNotificationPermission==='unsupported'?'Не поддерживается':'Не запрошено'}</b></div>
         <div className="setting-toggle-row"><span><b>Новые сообщения</b><small>Показывать системные уведомления браузера.</small></span><input type="checkbox" checked={notificationPrefs.push_enabled} disabled={settingsBusy||browserNotificationPermission==='unsupported'} onChange={e=>saveNotificationSetting('push_enabled',e.target.checked)}/></div>
         <div className="setting-toggle-row"><span><b>Звуковой сигнал</b><small>Настройка сохраняется для аккаунта; воспроизведение зависит от разрешений браузера.</small></span><input type="checkbox" checked={notificationPrefs.sound_enabled} disabled={settingsBusy} onChange={e=>saveNotificationSetting('sound_enabled',e.target.checked)}/></div>
