@@ -187,6 +187,7 @@ function App() {
   const [socialViewer, setSocialViewer] = useState(null);
   const [socialComments, setSocialComments] = useState([]);
   const [socialCommentDraft, setSocialCommentDraft] = useState('');
+  const [socialReplyDraft, setSocialReplyDraft] = useState('');
   const [socialLiked, setSocialLiked] = useState(false);
   const [socialBusy, setSocialBusy] = useState(false);
   const [socialCaption, setSocialCaption] = useState('');
@@ -713,7 +714,7 @@ function App() {
 
   async function openSocialItem(item, kind) {
     setSocialViewer({...item, kind});
-    setSocialCommentDraft(''); setSocialComments([]);
+    setSocialCommentDraft(''); setSocialReplyDraft(''); setSocialComments([]);
     if (kind === 'photo') {
       try {
         const [{data:likes,error:likeError},{data:comments,error:commentError}] = await Promise.all([
@@ -1134,7 +1135,8 @@ function App() {
       const chat = { id, kind: 'direct', peerUserId: person.id, title: person.title, avatar: person.avatar, updated: new Date().toISOString(), unread: 0 };
       setChats(previous => [chat, ...previous.filter(item => item.id !== id)]);
       setSelected(chat); setActiveTab('chats'); setMobileChatOpen(true); setSearch('');
-    } catch (error) { setNotice('Не удалось открыть переписку: ' + error.message); }
+      return true;
+    } catch (error) { setNotice('Не удалось открыть переписку: ' + error.message); return false; }
     finally { setContactBusy(false); }
   }
 
@@ -1698,6 +1700,9 @@ function App() {
   const selectedHasCipher = messages.some(m => isEncrypted(m.content));
   const activeMenuMessage = messages.find(message => message.id === messageMenu) || null;
   const activeMenuMine = activeMenuMessage?.sender_id === session?.user?.id;
+  const socialStoryAuthor = socialViewer?.kind === 'story'
+    ? (storiesFeed.find(item => item.id === socialViewer.id)?.profile || (viewedProfile?.id === socialViewer.user_id ? viewedProfile : null))
+    : null;
 
   useEffect(()=>{
     if(!session?.user?.id)return;
@@ -1974,6 +1979,7 @@ function App() {
       <div className="social-viewer-media">{socialViewer.media_type==='video'?<video src={socialViewer.url} controls autoPlay muted playsInline/>:<img src={socialViewer.url} alt={socialViewer.caption||'Публикация'}/>}</div>
       <div className="social-viewer-content"><p>{socialViewer.caption||' '}</p><div className="social-viewer-actions"><button onClick={toggleCurrentSocialLike} disabled={socialBusy} className={socialLiked?'liked':''}><Heart size={17} fill={socialLiked?'currentColor':'none'}/> {socialViewer.likeCount||0}</button>{socialViewer.kind==='photo'&&<span><MessageSquare size={16}/> {socialComments.length}</span>}</div>
       {socialViewer.kind==='photo'&&<><div className="social-comments">{socialComments.map(comment=><div key={comment.id}><b>{comment.user_id===session.user.id?'Вы':'Участник Nexura'}</b><span>{comment.content}</span></div>)}{!socialComments.length&&<small>Комментариев пока нет.</small>}</div><form className="social-comment-form" onSubmit={submitSocialComment}><input value={socialCommentDraft} onChange={event=>setSocialCommentDraft(event.target.value)} placeholder="Написать комментарий…" maxLength={1000}/><button className="primary-btn" disabled={socialBusy||!socialCommentDraft.trim()}>Отправить</button></form></>}
+      {socialViewer.kind==='story'&&socialViewer.user_id!==session.user.id&&<form className="social-comment-form" onSubmit={async event=>{event.preventDefault();const reply=socialReplyDraft.trim();if(!reply)return;const opened=await createDirectChat({id:socialViewer.user_id,title:socialStoryAuthor?.display_name||socialStoryAuthor?.username||'Пользователь',avatar:socialStoryAuthor?.avatar_url||''});if(opened){setDraft('↩ Ответ на историю: '+(socialViewer.caption|| (socialViewer.media_type==='video'?'видео':'фото'))+'\\n'+reply);setSocialViewer(null);setSocialReplyDraft('');}}}><input value={socialReplyDraft} onChange={event=>setSocialReplyDraft(event.target.value)} placeholder="Ответить автору в личку…" maxLength={1000}/><button className="primary-btn" disabled={contactBusy||!socialReplyDraft.trim()}>Перейти в личку</button></form>}
       </div>
     </section></div>}
     {groupManagementOpen && <div className="modal-backdrop" onClick={()=>setGroupManagementOpen(false)}><section className="group-modal group-management-modal" onClick={event=>event.stopPropagation()}>
