@@ -47,7 +47,7 @@ async function encryptWebPush(sub:any,payload:string){
 }
 async function sendWebPush(sub:any,payload:Record<string,string>){
  const auth=await webPushAuth(sub.endpoint),body=await encryptWebPush(sub,JSON.stringify(payload));
- const response=await fetch(sub.endpoint,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/octet-stream","Content-Encoding":"aes128gcm",TTL:"35",Urgency:"high"},body});
+ const response=await fetch(sub.endpoint,{method:"POST",headers:{Authorization:auth,"Content-Type":"application/octet-stream","Content-Encoding":"aes128gcm",TTL:"35",Urgency:"high"},body:bytesBuffer(body)});
  if(response.ok)return {ok:true,stale:false};
  await response.text();return {ok:false,stale:response.status===404||response.status===410};
 }
