@@ -1616,8 +1616,22 @@ function App() {
   async function toggleCallCamera() {
     const room=callRef.current.room;if(!room||!callUi?.video)return;
     const enabled=!callUi.cameraEnabled;
-    try{await room.localParticipant.setCameraEnabled(enabled);setCallUi(previous=>previous?{...previous,cameraEnabled:enabled}:previous);}
-    catch(error){setNotice('Не удалось изменить камеру: '+error.message);}
+    try{
+      await room.localParticipant.setCameraEnabled(enabled);
+      const existing=(callRef.current.videoElements||[]).filter(element=>element.classList?.contains('nexura-call-video-local'));
+      existing.forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
+      callRef.current.videoElements=(callRef.current.videoElements||[]).filter(element=>!existing.includes(element));
+      if(enabled){
+        const publication=[...room.localParticipant.videoTrackPublications.values()].find(item=>item.track);
+        if(publication?.track){
+          const preview=publication.track.attach();preview.className='nexura-call-video-local';
+          preview.autoplay=true;preview.muted=true;preview.playsInline=true;
+          document.body.appendChild(preview);
+          callRef.current.videoElements=[...(callRef.current.videoElements||[]),preview];
+        }
+      }
+      setCallUi(previous=>previous?{...previous,cameraEnabled:enabled}:previous);
+    }catch(error){setNotice('Не удалось изменить камеру: '+error.message);}
   }
 
   async function openSavedMessages() {
