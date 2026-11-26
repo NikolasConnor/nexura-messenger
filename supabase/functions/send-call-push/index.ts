@@ -8,7 +8,7 @@ const cors = {
   "Vary": "Origin"
 };
 const enc = (value: string) => btoa(value).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-const pemBytes = (pem: string) => Uint8Array.from(atob(pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\\s/g, "")), c => c.charCodeAt(0));
+const pemBytes = (pem: string) => Uint8Array.from(atob(pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, "")), c => c.charCodeAt(0));
 
 const fromB64Url = (v:string) => Uint8Array.from(atob(v.replaceAll("-","+").replaceAll("_","/")+"=".repeat((4-v.length%4)%4)),c=>c.charCodeAt(0));
 const toB64Url = (v:Uint8Array) => { let b=""; for(const x of v)b+=String.fromCharCode(x); return btoa(b).replaceAll("+","-").replaceAll("/","_").replaceAll("=",""); };
