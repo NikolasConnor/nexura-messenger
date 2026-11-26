@@ -875,3 +875,5 @@ body{overscroll-behavior:none}
  .stories-feed-actions .social-add-button{padding:9px 7px;font-size:10px}
 }
 
+
+.archived-story-card{filter:saturate(.72)}.archived-story-card .web-story-media{position:relative}.archived-story-card .web-story-media:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 48%,rgba(5,10,20,.36))}
