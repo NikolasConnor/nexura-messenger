@@ -45,6 +45,10 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install Web dependencies
+        working-directory: web
+        run: npm install --legacy-peer-deps --no-audit --no-fund --no-package-lock --onnxruntime-node-install-cuda=skip
+
       - name: Test encrypted browser backup and recovery
         working-directory: web
         run: node --test src/crypto/backup.test.js src/api/social.test.js src/api/transcription.test.js
@@ -59,6 +63,4 @@ jobs:
 
       - name: Build Nexura Web
         working-directory: web
-        run: |
-          npm install --legacy-peer-deps --no-audit --no-fund --no-package-lock --onnxruntime-node-install-cuda=skip
-          npm run build
+        run: npm run build
