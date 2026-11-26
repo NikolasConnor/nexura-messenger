@@ -484,8 +484,9 @@ function App() {
   useEffect(() => {
     if (!session) { setChats([]); setSelected(null); setProfile(null); return; }
     loadChats();
-    supabase.from('profiles').select('id,display_name,username,avatar_url,bio,age').eq('id', session.user.id).maybeSingle()
-      .then(({data}) => setProfile(data));
+    loadProfile(supabase, session.user.id)
+      .then(data => setProfile(data))
+      .catch(error => setNotice('Не удалось загрузить профиль: ' + (error?.message || 'ошибка')));
   }, [session?.user?.id]);
 
   const decryptMessageRow = useCallback(async (chat, message, cloudPlaintext = null) => {
@@ -766,15 +767,21 @@ function App() {
 
   async function loadOwnSocial() {
     if (!session?.user?.id) return;
-    try {
-      const [photos, activeStories, archivedStories] = await Promise.all([
-        loadProfilePhotos(supabase, session.user.id),
-        loadStories(supabase, {userId:session.user.id, activeOnly:true}),
-        loadStories(supabase, {userId:session.user.id, activeOnly:false})
-      ]);
-      const stories=[...activeStories,...archivedStories].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-      setProfilePhotos(photos); setProfileStories(stories);
-    } catch(error) { setNotice('Не удалось загрузить публикации: '+error.message); }
+    const userId = session.user.id;
+    const results = await Promise.allSettled([
+      loadProfilePhotos(supabase, userId),
+      loadStories(supabase, {userId, activeOnly:true}),
+      loadStories(supabase, {userId, activeOnly:false})
+    ]);
+    if (results[0].status === 'fulfilled') setProfilePhotos(results[0].value);
+    else setNotice('Не удалось загрузить фотографии: ' + (results[0].reason?.message || 'ошибка'));
+    const activeStories = results[1].status === 'fulfilled' ? results[1].value : [];
+    const archivedStories = results[2].status === 'fulfilled' ? results[2].value : [];
+    if (results[1].status === 'rejected' || results[2].status === 'rejected') {
+      const failure = results[1].status === 'rejected' ? results[1].reason : results[2].reason;
+      setNotice('Не удалось загрузить часть историй: ' + (failure?.message || 'ошибка'));
+    }
+    setProfileStories([...activeStories, ...archivedStories].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
   }
 
   async function toggleViewedUserBlock() {
