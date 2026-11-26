@@ -1909,8 +1909,8 @@ function App() {
         <button className={activeTab==='profile'?'active':''} onClick={openOwnProfile}><UserRound size={16}/> Профиль</button>
         <button onClick={openAdvancedSettings}><Settings size={16}/> Настройки</button>
       </div>
-      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КОНТАКТЫ':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
-      <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
+      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КОНТАКТЫ':activeTab==='search'?'ПОИСК':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:activeTab==='search'?contactResults.length:0}</span></div>
+      <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:activeTab==='search'?contactQuery:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):activeTab==='search'?setContactQuery(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
       {activeTab==='chats'&&<button className="saved-messages-shortcut" onClick={openSavedMessages}><Star size={16} fill="currentColor"/> Избранное</button>}
       {activeTab==='chats'&&<div className="chat-filter-row" role="group" aria-label="Фильтр чатов">
         {[['all','Все'],['unread','Непрочитанные'],['favorites','Избранное']].map(([value,label])=><button key={value} className={chatListFilter===value?'active':''} onClick={()=>setChatListFilter(value)}>{label}</button>)}
@@ -1935,7 +1935,7 @@ function App() {
           </button>)}
           {peopleBusy && <div className="list-hint">Загружаем пользователей…</div>}
           {!peopleBusy && peopleHasMore && <button className="load-more-people" onClick={()=>loadPeople()}>{people.length?'Показать ещё':'Загрузить людей'}</button>}
-        </> : <div className="empty-list"><><UserRound size={24}/><b>Профиль открыт</b><span>Управляй своими публикациями в основной области.</span></></div>}
+        </> : activeTab==='search' ? <>{contactResults.map(person=><button key={person.id} className="chat-item" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar} name={person.title}/><div className="chat-meta"><b>{person.title||'Пользователь'}</b><span>{person.username?'@'+person.username:'Пользователь Nexura'}</span></div><div className="contact-open"><UserRoundSearch size={16}/></div></button>)}{contactBusy&&<div className="list-hint">Ищем пользователей…</div>}</> : <div className="empty-list"><><UserRound size={24}/><b>Профиль открыт</b><span>Управляй своими публикациями в основной области.</span></></div>}
       </div>
       <div className="sidebar-foot"><ShieldCheck size={15}/> Nexura · веб-клиент</div>
     </aside>
