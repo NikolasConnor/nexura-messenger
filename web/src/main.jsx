@@ -765,6 +765,7 @@ function App() {
     const channel=supabase.channel('web-community-feed-'+session.user.id)
       .on('postgres_changes',{event:'*',schema:'public',table:'user_stories'},refresh)
       .on('postgres_changes',{event:'*',schema:'public',table:'profile_photos'},refresh)
+      .on('postgres_changes',{event:'*',schema:'public',table:'profile_photo_likes'},refresh)
       .subscribe();
     return()=>{if(timer)clearTimeout(timer);supabase.removeChannel(channel);};
   },[activeTab,session?.user?.id]);
@@ -858,10 +859,12 @@ function App() {
         const {error:removeError}=await supabase.from(table).delete().eq('id',data.id);
         if(removeError)throw removeError;
         setSocialLiked(false); setSocialViewer(v=>({...v,likeCount:Math.max(0,(v.likeCount||0)-1)}));
+        if(kind==='photo')setPhotoFeed(previous=>previous.map(item=>item.id===socialViewer.id?{...item,likedByMe:false,likeCount:Math.max(0,(item.likeCount||0)-1)}:item));
       } else {
         const {error:addError}=await supabase.from(table).insert({[key]:socialViewer.id,user_id:session.user.id});
         if(addError)throw addError;
         setSocialLiked(true); setSocialViewer(v=>({...v,likeCount:(v.likeCount||0)+1}));
+        if(kind==='photo')setPhotoFeed(previous=>previous.map(item=>item.id===socialViewer.id?{...item,likedByMe:true,likeCount:(item.likeCount||0)+1}:item));
       }
     } catch(error) { setNotice('Не удалось поставить реакцию: '+error.message); }
     finally { setSocialBusy(false); }
