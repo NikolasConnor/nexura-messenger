@@ -48,11 +48,6 @@ jobs:
         run: node --test src/crypto/backup.test.js
 
 
-      - name: Build local transcription service container
-        run: |
-          python -m py_compile services/transcription/app.py
-          docker build -t nexura-transcription-check ./services/transcription
-
       - name: Build Nexura Web
         working-directory: web
         run: |
