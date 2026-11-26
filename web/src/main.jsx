@@ -112,6 +112,10 @@ function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [phoneMode, setPhoneMode] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [phoneCode, setPhoneCode] = useState('');
+  const [smsSent, setSmsSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -120,7 +124,27 @@ function AuthScreen() {
   async function submit(event) {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     try {
-      if (mode === 'register') {
+      if (phoneMode) {
+        const normalizedPhone = phone.replace(/[\\s().-]/g, '');
+        if (!/^\\+[1-9]\\d{7,14}$/.test(normalizedPhone)) {
+          throw new Error('Введите номер в международном формате, например +79991234567');
+        }
+        if (!smsSent) {
+          const { error: authError } = await supabase.auth.signInWithOtp({
+            phone: normalizedPhone,
+            options: { shouldCreateUser: true }
+          });
+          if (authError) throw authError;
+          setPhone(normalizedPhone);
+          setSmsSent(true);
+          setNotice('Код подтверждения отправлен. Проверьте SMS.');
+        } else {
+          const { error: authError } = await supabase.auth.verifyOtp({
+            phone: normalizedPhone, token: phoneCode.trim(), type: 'sms'
+          });
+          if (authError) throw authError;
+        }
+      } else if (mode === 'register') {
         const { data, error: authError } = await supabase.auth.signUp({
           email: email.trim(), password,
           options: { data: { display_name: displayName.trim() }, emailRedirectTo: window.location.origin + window.location.pathname }
@@ -165,13 +189,19 @@ function AuthScreen() {
         <div className="mobile-brand"><span className="brand-mark"><MessageCircle size={21}/></span>Nexura</div>
         <div className="auth-heading"><div className="eyebrow">РАДЫ ТЕБЯ ВИДЕТЬ</div><h2>{mode === 'login' ? 'С возвращением' : 'Создать аккаунт'}</h2><p>{mode === 'login' ? 'Войди, чтобы продолжить общение.' : 'Заполни данные, чтобы присоединиться к Nexura.'}</p></div>
         <form onSubmit={submit} className="auth-form">
-          {mode === 'register' && <label>Как тебя называть<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Твоё имя" required autoComplete="name"/></label>}
-          <label>Email<div className="input-wrap"><Mail size={17}/><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@example.com" required autoComplete="email"/></div></label>
-          <label>Пароль<div className="input-wrap"><LockKeyhole size={17}/><input type={showPassword?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="Не менее 6 символов" required minLength={6} autoComplete={mode==='login'?'current-password':'new-password'}/><button type="button" className="icon-button" onClick={()=>setShowPassword(!showPassword)} aria-label="Показать пароль">{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>
+          {phoneMode ? <>
+            <label>Номер телефона<div className="input-wrap"><Phone size={17}/><input type="tel" inputMode="tel" value={phone} onChange={e=>{setPhone(e.target.value);setSmsSent(false);setPhoneCode('');}} placeholder="+79991234567" required autoComplete="tel" disabled={smsSent}/></div></label>
+            {smsSent && <label>Код из SMS<input inputMode="numeric" autoComplete="one-time-code" value={phoneCode} onChange={e=>setPhoneCode(e.target.value.replace(/\\D/g,'').slice(0,8))} placeholder="Введите код" required minLength={4}/></label>}
+          </> : <>
+            {mode === 'register' && <label>Как тебя называть<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Твоё имя" required autoComplete="name"/></label>}
+            <label>Email<div className="input-wrap"><Mail size={17}/><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@example.com" required autoComplete="email"/></div></label>
+            <label>Пароль<div className="input-wrap"><LockKeyhole size={17}/><input type={showPassword?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="Не менее 6 символов" required minLength={6} autoComplete={mode==='login'?'current-password':'new-password'}/><button type="button" className="icon-button" onClick={()=>setShowPassword(!showPassword)} aria-label="Показать пароль">{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>
+          </>}
           {error && <div className="alert error">{error}</div>}
           {notice && <div className="alert success">{notice}</div>}
-          <button className="primary-btn wide" disabled={busy}>{busy?'Подожди…':mode==='login'?'Войти в Nexura':'Создать аккаунт'}</button>
+          <button className="primary-btn wide" disabled={busy || (phoneMode && smsSent && phoneCode.trim().length<4)}>{busy?'Подожди…':phoneMode?(smsSent?'Подтвердить код':'Отправить SMS'):mode==='login'?'Войти в Nexura':'Создать аккаунт'}</button>
         </form>
+        <div className="auth-method-switch"><button type="button" disabled={busy} onClick={()=>{setPhoneMode(!phoneMode);setSmsSent(false);setPhoneCode('');setError('');setNotice('');}}>{phoneMode?'Войти по email':'Войти по номеру телефона'}</button></div>
         <div className="auth-divider"><span>или</span></div>
         <button type="button" className="oauth-btn" onClick={signInWithGoogle} disabled={busy}>
           <span className="google-mark" aria-hidden="true">G</span>
