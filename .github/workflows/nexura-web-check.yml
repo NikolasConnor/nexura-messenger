@@ -8,6 +8,7 @@ on:
     paths:
       - "web/**"
       - "crypto-wasm/**"
+      - "services/transcription/**"
       - ".github/workflows/nexura-web-check.yml"
   pull_request:
     paths:
@@ -44,6 +45,12 @@ jobs:
       - name: Test encrypted browser backup and recovery
         working-directory: web
         run: node --test src/crypto/backup.test.js
+
+
+      - name: Build local transcription service container
+        run: |
+          python -m py_compile services/transcription/app.py
+          docker build -t nexura-transcription-check ./services/transcription
 
       - name: Build Nexura Web
         working-directory: web
