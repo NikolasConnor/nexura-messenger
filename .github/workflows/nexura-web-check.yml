@@ -9,6 +9,7 @@ on:
       - "web/**"
       - "crypto-wasm/**"
       - "services/transcription/**"
+      - "supabase/functions/send-call-push/**"
       - ".github/workflows/nexura-web-check.yml"
   pull_request:
     paths:
@@ -46,6 +47,14 @@ jobs:
       - name: Test encrypted browser backup and recovery
         working-directory: web
         run: node --test src/crypto/backup.test.js
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check incoming call push Edge Function
+        run: deno check supabase/functions/send-call-push/index.ts
 
       - name: Build Nexura Web
         working-directory: web
