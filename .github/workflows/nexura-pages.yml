@@ -49,6 +49,8 @@ jobs:
 
       - name: Build Nexura Web
         working-directory: web
+        env:
+          VITE_NEXURA_TRANSCRIPTION_URL: ${{ vars.NEXURA_TRANSCRIPTION_URL }}
         run: |
           npm install --no-audit --no-fund
           npm run build -- --base=/nexura-messenger/app/ --outDir=../website/app
