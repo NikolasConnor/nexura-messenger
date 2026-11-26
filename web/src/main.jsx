@@ -274,7 +274,7 @@ function App() {
   const scheduledSendingRef = useRef(new Set());
 
   const [chatThemeOpen, setChatThemeOpen] = useState(false);
-  const [chatTheme, setChatTheme] = useState(() => { try { return JSON.parse(localStorage.getItem('nexura_chat_theme') || '{}'); } catch { return {}; } });
+  const [chatTheme, setChatTheme] = useState({});
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -1668,9 +1668,16 @@ function App() {
     setReactionPickerFor(null);
   }
 
+  useEffect(() => {
+    if (!selected?.id) { setChatTheme({}); return; }
+    try { setChatTheme(JSON.parse(localStorage.getItem('nexura_chat_theme_' + selected.id) || '{}')); }
+    catch { setChatTheme({}); }
+  }, [selected?.id]);
+
   function applyChatTheme(theme) {
     setChatTheme(theme);
-    try { localStorage.setItem('nexura_chat_theme', JSON.stringify(theme)); } catch {}
+    if (!selected?.id) return;
+    try { localStorage.setItem('nexura_chat_theme_' + selected.id, JSON.stringify(theme)); } catch {}
   }
 
   function openProfileSettings() {
