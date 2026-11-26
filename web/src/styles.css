@@ -966,3 +966,24 @@ button{ touch-action:manipulation; }
 .voice-transcript-text{border-left:2px solid var(--accent,#4F8DFF);padding:4px 9px;color:var(--text,#e8edf7);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
 .voice-transcript-text b{display:block;color:var(--muted,#8c9ab1);font-size:11px;font-weight:600;margin-bottom:3px}
 .voice-transcript-text p{margin:0;white-space:pre-wrap}
+
+
+/* Browser video-call stage */
+.nexura-call-video-remote{
+  position:fixed;z-index:88;inset:50% auto auto 50%;transform:translate(-50%,-50%);
+  width:min(78vw,960px);height:min(72vh,640px);object-fit:cover;
+  border:1px solid rgba(141,184,255,.35);border-radius:20px;background:#050912;
+  box-shadow:0 24px 90px #000b;
+}
+.nexura-call-video-local{
+  position:fixed;z-index:90;right:22px;bottom:100px;width:min(22vw,220px);
+  aspect-ratio:3/4;object-fit:cover;border:1px solid rgba(141,184,255,.55);
+  border-radius:16px;background:#111c2d;box-shadow:0 12px 40px #0009;
+  transform:scaleX(-1);
+}
+.call-floating-panel{z-index:100}
+@media(max-width:700px){
+  .nexura-call-video-remote{width:calc(100vw - 20px);height:min(62vh,520px);border-radius:14px}
+  .nexura-call-video-local{right:14px;bottom:112px;width:112px;border-radius:12px}
+  .call-floating-panel{bottom:max(78px,calc(env(safe-area-inset-bottom) + 74px))}
+}
