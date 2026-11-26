@@ -3,6 +3,7 @@ name: Nexura Web — build check
 on:
   push:
     branches:
+      - feature/nexura-web-parity
       - feature/nexura-profile-polish-2026-11
     paths:
       - "web/**"
@@ -20,6 +21,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
