@@ -89,6 +89,42 @@ export async function loadProfilePhotos(supabase, userId) {
   return resolved.filter(Boolean);
 }
 
+export async function loadPhotoFeed(supabase, currentUserId, limit = 60) {
+  const { data: photos, error } = await supabase.from('profile_photos')
+    .select('id,user_id,storage_path,caption,created_at')
+    .order('created_at', { ascending: false }).limit(Math.max(1, Math.min(limit, 100)));
+  if (error) throw error;
+  const rows = photos || [];
+  if (!rows.length) return [];
+  const userIds = [...new Set(rows.map(row => row.user_id))];
+  const photoIds = rows.map(row => row.id);
+  const [{ data: profiles, error: profilesError }, { data: likes, error: likesError }] = await Promise.all([
+    supabase.from('profiles').select('id,display_name,username,avatar_url').in('id', userIds),
+    supabase.from('profile_photo_likes').select('photo_id,user_id').in('photo_id', photoIds)
+  ]);
+  if (profilesError) throw profilesError;
+  if (likesError) throw likesError;
+  const profileById = new Map((profiles || []).map(profile => [profile.id, profile]));
+  const likesByPhoto = new Map();
+  for (const like of likes || []) {
+    const item = likesByPhoto.get(like.photo_id) || { count: 0, likedByMe: false };
+    item.count += 1;
+    if (like.user_id === currentUserId) item.likedByMe = true;
+    likesByPhoto.set(like.photo_id, item);
+  }
+  const resolved = await Promise.all(rows.map(async row => {
+    try {
+      const url = await socialSignedUrl(supabase, row.storage_path);
+      const stats = likesByPhoto.get(row.id) || { count: 0, likedByMe: false };
+      return { ...row, url, profile: profileById.get(row.user_id) || { display_name: 'Пользователь' }, likeCount: stats.count, likedByMe: stats.likedByMe };
+    } catch (mediaError) {
+      console.warn('Nexura: skipping unavailable feed photo', row.id, mediaError?.message);
+      return null;
+    }
+  }));
+  return resolved.filter(Boolean);
+}
+
 export async function loadStories(supabase, { userId = null, activeOnly = true } = {}) {
   let query = supabase.from('user_stories').select('id,user_id,storage_path,media_type,caption,created_at,expires_at');
   if (userId) query = query.eq('user_id', userId);
