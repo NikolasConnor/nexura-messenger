@@ -781,7 +781,7 @@ function App() {
       const {error:storageError}=await supabase.storage.from('nexura-social-media').remove([socialViewer.storage_path]);
       if(storageError)throw storageError;
       if(socialViewer.kind==='story'){setProfileStories(previous=>previous.filter(item=>item.id!==socialViewer.id));setStoriesFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
-      else setProfilePhotos(previous=>previous.filter(item=>item.id!==socialViewer.id));
+      else {setProfilePhotos(previous=>previous.filter(item=>item.id!==socialViewer.id));setPhotoFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
       setSocialViewer(null);setNotice('Публикация удалена');
     }catch(error){setNotice('Не удалось удалить публикацию: '+error.message);}
     finally{setSocialBusy(false);}
@@ -907,7 +907,10 @@ function App() {
         const published={...data,url:signed.signedUrl,profile:{display_name:profile?.display_name||'Вы',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂'}};
         setProfileStories(previous=>[published,...previous.filter(item=>item.id!==data.id)]);
         setStoriesFeed(previous=>[published,...previous.filter(item=>item.id!==data.id)].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
-      } else setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
+      } else {
+        setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
+        void loadPhotoFeed();
+      }
       setSocialCaption('');
       setNotice(kind==='story'?'История опубликована на 24 часа':'Фотография добавлена в профиль');
     } catch(error) { setNotice('Не удалось опубликовать: '+error.message); }
