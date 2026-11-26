@@ -874,3 +874,5 @@ body{overscroll-behavior:none}
  .stories-feed-actions{display:grid;grid-template-columns:1fr 1fr}
  .stories-feed-actions .social-add-button{padding:9px 7px;font-size:10px}
 }
+
+.auth-method-switch{display:flex;justify-content:center;margin-top:13px}.auth-method-switch button{border:0;background:transparent;color:#70D9FF;font-size:12px;font-weight:700;padding:8px 12px;border-radius:9px}.auth-method-switch button:hover:not(:disabled){background:#ffffff0a}.auth-method-switch button:disabled{opacity:.55;cursor:wait}
