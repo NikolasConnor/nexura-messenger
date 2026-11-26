@@ -66,7 +66,6 @@ export async function transcribeVoiceMessage(_supabase, blob, _filename = 'voice
   const result = await recognizer(audio, {
     sampling_rate: 16000,
     task: 'transcribe',
-    language: 'russian',
     chunk_length_s: 30,
     stride_length_s: 5
   });
