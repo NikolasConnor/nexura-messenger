@@ -33,10 +33,10 @@ async function encryptWebPush(sub:any,payload:string){
  const as=new Uint8Array(await crypto.subtle.exportKey("raw",pair.publicKey));
  const shared=new Uint8Array(await crypto.subtle.deriveBits({name:"ECDH",public:uaKey},pair.privateKey,256));
  const prkAuth=await hmac(auth,shared);
- const ikm=await hkdfExpand(prkAuth,joinBytes(textBytes("WebPush: info\\0"),ua,as),32);
+ const ikm=await hkdfExpand(prkAuth,joinBytes(textBytes("WebPush: info\0"),ua,as),32);
  const salt=crypto.getRandomValues(new Uint8Array(16)),prk=await hmac(salt,ikm);
- const cek=await hkdfExpand(prk,textBytes("Content-Encoding: aes128gcm\\0"),16);
- const nonce=await hkdfExpand(prk,textBytes("Content-Encoding: nonce\\0"),12);
+ const cek=await hkdfExpand(prk,textBytes("Content-Encoding: aes128gcm\0"),16);
+ const nonce=await hkdfExpand(prk,textBytes("Content-Encoding: nonce\0"),12);
  const aes=await crypto.subtle.importKey("raw",cek,{name:"AES-GCM"},false,["encrypt"]);
  const cipher=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:nonce},aes,joinBytes(textBytes(payload),new Uint8Array([2]))));
  const head=new Uint8Array(86);head.set(salt);new DataView(head.buffer).setUint32(16,4096,false);head[20]=65;head.set(as,21);
