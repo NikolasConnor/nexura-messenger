@@ -1885,11 +1885,11 @@ function App() {
       <div className="me-card"><Avatar className="self" value={profile?.avatar_url} name={profile?.display_name || session.user.email}/><div className="me-info"><b>{profile?.display_name || session.user.email?.split('@')[0]}</b><span>Профиль Nexura</span></div><button className="icon-button" onClick={openProfileSettings} title="Редактировать профиль"><Settings size={17}/></button><button className="icon-button" onClick={openAdvancedSettings} title="Настройки приватности и безопасности"><ShieldCheck size={17}/></button><button className="icon-button" onClick={signOut} title="Выйти"><LogOut size={17}/></button></div>
       <div className="side-tabs side-tabs-expanded">
         <button className={activeTab==='chats'?'active':''} onClick={()=>{setActiveTab('chats');setViewedProfile(null);}}><MessageCircle size={16}/> Чаты</button>
-        <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setMobileChatOpen(false);setPeopleOffset(0);setPeople([]);}}><Users size={16}/> Люди</button>
+        <button className={activeTab==='people'?'active':''} onClick={()=>{setActiveTab('people');setMobileChatOpen(false);setPeopleOffset(0);setPeople([]);}}><Users size={16}/> Контакты</button>
         <button className={activeTab==='profile'?'active':''} onClick={openOwnProfile}><UserRound size={16}/> Профиль</button>
         <button onClick={openAdvancedSettings}><Settings size={16}/> Настройки</button>
       </div>
-      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КАТАЛОГ ПОЛЬЗОВАТЕЛЕЙ':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
+      <div className="list-heading"><span>{activeTab==='chats'?'ТВОИ ЧАТЫ':activeTab==='people'?'КОНТАКТЫ':'ТВОЙ ПРОФИЛЬ'}</span><span>{activeTab==='chats'?chats.length:activeTab==='people'?people.length:0}</span></div>
       <div className="search-box"><Search size={16}/><input value={activeTab==='chats'?search:peopleQuery} onChange={e=>activeTab==='chats'?setSearch(e.target.value):setPeopleQuery(e.target.value)} placeholder={activeTab==='chats'?'Поиск переписки':'Имя или @username'}/></div>
       {activeTab==='chats'&&<button className="saved-messages-shortcut" onClick={openSavedMessages}><Star size={16} fill="currentColor"/> Избранное</button>}
       <div className="chat-list">
