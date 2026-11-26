@@ -395,7 +395,7 @@ object AudioTranscriber {
             completed = true
         } catch (error: Exception) {
             throw if (error is IOException) error else IOException(
-                "Не удалось подготовить аудио для Whisper: \${error.message}", error
+                "Не удалось подготовить аудио для Whisper: ${error.message}", error
             )
         } finally {
             if (!completed) sink?.abort()
