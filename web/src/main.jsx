@@ -124,7 +124,7 @@ function PendingMediaPreview({ file }) {
   return <span className="pending-file-icon">📎</span>;
 }
 
-import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, loadPhotoFeed, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
+import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, loadPhotoFeed as fetchPhotoFeed, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
 
 class AppErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { failed: false }; }
@@ -745,7 +745,7 @@ function App() {
     if(!session?.user?.id)return;
     setPhotoFeedLoading(true);setPhotoFeedError('');
     try {
-      const rows=await loadPhotoFeed(supabase,session.user.id,60);
+      const rows=await fetchPhotoFeed(supabase,session.user.id,60);
       setPhotoFeed(rows);
     } catch(error) {
       console.error('Nexura photo feed:',error);
