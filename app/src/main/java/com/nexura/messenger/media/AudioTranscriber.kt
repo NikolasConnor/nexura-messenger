@@ -6,11 +6,14 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import dev.ffmpegkit.whisper.Whisper
+import dev.ffmpegkit.whisper.WhisperConfig
 import org.vosk.Model
 import org.vosk.Recognizer
 import java.io.BufferedInputStream
@@ -19,8 +22,10 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.ZipInputStream
@@ -36,6 +41,11 @@ object AudioTranscriber {
     private const val SAMPLE_RATE = 16_000
     private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
     private const val MODEL_FOLDER = "vosk-model-small-ru-0.22"
+    private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/fb5ed9369c26eaf08392504d8446da431e0fffb9/ggml-base.bin"
+    private const val WHISPER_MODEL_NAME = "ggml-base.bin"
+    private const val WHISPER_MODEL_BYTES = 147_951_465L
+    private const val WHISPER_MODEL_SHA256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
+    private const val MAX_WAV_DATA_BYTES = 512L * 1024L * 1024L
     private const val MAX_AUDIO_BYTES = 25L * 1024L * 1024L
     private const val MAX_ARCHIVE_BYTES = 100L * 1024L * 1024L
     private const val MAX_EXTRACTED_BYTES = 250L * 1024L * 1024L
@@ -75,6 +85,36 @@ object AudioTranscriber {
             if (audioFile.length() > MAX_AUDIO_BYTES) {
                 throw IOException("Голосовое сообщение превышает лимит расшифровки 25 МБ")
             }
+            // Whisper Base is multilingual and more accurate than the legacy small Russian-only Vosk model.
+            if (Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }) {
+                val modelFile = modelMutex.withLock { ensureWhisperModel(app) }
+                return@withContext recognitionMutex.withLock {
+                    val wavFile = File.createTempFile("nexura-whisper-", ".wav", app.cacheDir)
+                    try {
+                        decodeToWav(audioFile, wavFile)
+                        val whisperModel = Whisper.loadModel(app, modelFile.absolutePath)
+                        try {
+                            val result = Whisper.transcribe(
+                                whisperModel,
+                                wavFile.absolutePath,
+                                WhisperConfig(
+                                    language = "auto",
+                                    threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4),
+                                    printTimestamps = false
+                                )
+                            )
+                            result.text.trim().ifBlank {
+                                throw IOException("Не удалось распознать речь в этом сообщении")
+                            }
+                        } finally {
+                            Whisper.releaseModel(whisperModel)
+                        }
+                    } finally {
+                        wavFile.delete()
+                    }
+                }
+            }
+            // Compatibility fallback for devices without arm64 support.
             val modelDirectory = modelMutex.withLock { ensureModel(app) }
             recognitionMutex.withLock {
                 val model = Model(modelDirectory.absolutePath)
@@ -232,6 +272,231 @@ object AudioTranscriber {
         } finally {
             archive.delete()
             staging.deleteRecursively()
+        }
+    }
+
+
+    private fun ensureWhisperModel(context: Context): File {
+        val root = File(context.filesDir, "nexura-voice-models")
+        if (!root.exists() && !root.mkdirs()) throw IOException("Не удалось подготовить место для модели распознавания")
+        val model = File(root, WHISPER_MODEL_NAME)
+        if (model.isFile && model.length() == WHISPER_MODEL_BYTES && sha256(model) == WHISPER_MODEL_SHA256) return model
+        model.delete()
+        val partial = File(root, "$WHISPER_MODEL_NAME.part")
+        partial.delete()
+        val connection = (URL(WHISPER_MODEL_URL).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 25_000
+            readTimeout = 120_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "Nexura-Android")
+        }
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) throw IOException("Не удалось загрузить модель Whisper (HTTP $status)")
+            if (connection.contentLengthLong > WHISPER_MODEL_BYTES) throw IOException("Сервер вернул файл модели неожиданного размера")
+            var total = 0L
+            connection.inputStream.use { input ->
+                partial.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > WHISPER_MODEL_BYTES) throw IOException("Файл модели Whisper превышает ожидаемый размер")
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            if (total != WHISPER_MODEL_BYTES || sha256(partial) != WHISPER_MODEL_SHA256) {
+                throw IOException("Проверка целостности модели Whisper не пройдена. Повторите загрузку")
+            }
+            if (!partial.renameTo(model)) throw IOException("Не удалось сохранить модель Whisper")
+            return model
+        } finally {
+            connection.disconnect()
+            partial.delete()
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(128 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun decodeToWav(source: File, destination: File) {
+        val extractor = MediaExtractor()
+        var decoder: MediaCodec? = null
+        var sink: WavSink? = null
+        var completed = false
+        try {
+            extractor.setDataSource(source.absolutePath)
+            val audioTrack = (0 until extractor.trackCount).firstOrNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: throw IOException("В файле не найдена аудиодорожка")
+            extractor.selectTrack(audioTrack)
+            val sourceFormat = extractor.getTrackFormat(audioTrack)
+            val mime = sourceFormat.getString(MediaFormat.KEY_MIME)
+                ?: throw IOException("Не удалось определить формат голосового сообщения")
+            decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(sourceFormat, null, null, 0)
+            decoder.start()
+            var inputEnded = false
+            var outputEnded = false
+            var outputFormat = sourceFormat
+            val info = MediaCodec.BufferInfo()
+            sink = WavSink(destination)
+            while (!outputEnded) {
+                if (!inputEnded) {
+                    val inputIndex = decoder.dequeueInputBuffer(10_000)
+                    if (inputIndex >= 0) {
+                        val inputBuffer = decoder.getInputBuffer(inputIndex)
+                            ?: throw IOException("Не удалось получить входной аудиобуфер")
+                        inputBuffer.clear()
+                        val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                        if (sampleSize < 0) {
+                            decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputEnded = true
+                        } else {
+                            decoder.queueInputBuffer(inputIndex, 0, sampleSize, extractor.sampleTime, extractor.sampleFlags)
+                            extractor.advance()
+                        }
+                    }
+                }
+                when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000)) {
+                    MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> outputFormat = decoder.outputFormat
+                    MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
+                    else -> if (outputIndex >= 0) {
+                        val outputBuffer = decoder.getOutputBuffer(outputIndex)
+                        if (info.size > 0 && outputBuffer != null) {
+                            outputBuffer.position(info.offset)
+                            outputBuffer.limit(info.offset + info.size)
+                            sink.consume(outputBuffer.slice().order(ByteOrder.LITTLE_ENDIAN), outputFormat)
+                        }
+                        decoder.releaseOutputBuffer(outputIndex, false)
+                        if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputEnded = true
+                    }
+                }
+            }
+            sink.finish()
+            completed = true
+        } catch (error: Exception) {
+            throw if (error is IOException) error else IOException(
+                "Не удалось подготовить аудио для Whisper: \${error.message}", error
+            )
+        } finally {
+            if (!completed) sink?.abort()
+            runCatching { decoder?.stop() }
+            runCatching { decoder?.release() }
+            runCatching { extractor.release() }
+        }
+    }
+
+    private class WavSink(private val file: File) {
+        private val output = FileOutputStream(file)
+        private var sampleCount = 0L
+        private var inputIndex = -1L
+        private var nextOutputPosition = 0.0
+        private var previousSample = 0f
+        private var closed = false
+
+        init { output.write(ByteArray(44)) }
+
+        fun consume(buffer: ByteBuffer, format: MediaFormat) {
+            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(1)
+            val channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+            val encoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                format.getInteger(MediaFormat.KEY_PCM_ENCODING)
+            } else AudioFormat.ENCODING_PCM_16BIT
+            val bytesPerSample = when (encoding) {
+                AudioFormat.ENCODING_PCM_FLOAT -> 4
+                AudioFormat.ENCODING_PCM_8BIT -> 1
+                else -> 2
+            }
+            val frames = buffer.remaining() / (bytesPerSample * channels)
+            val step = sampleRate.toDouble() / SAMPLE_RATE.toDouble()
+            repeat(frames) {
+                var mixed = 0f
+                repeat(channels) {
+                    val sample = when (encoding) {
+                        AudioFormat.ENCODING_PCM_FLOAT -> buffer.float
+                        AudioFormat.ENCODING_PCM_8BIT -> ((buffer.get().toInt() and 0xFF) - 128) / 128f
+                        else -> buffer.short / 32768f
+                    }
+                    mixed += sample
+                }
+                val mono = (mixed / channels).coerceIn(-1f, 1f)
+                if (inputIndex < 0L) {
+                    inputIndex = 0L
+                    previousSample = mono
+                    push(mono)
+                    nextOutputPosition = step
+                } else {
+                    inputIndex++
+                    while (nextOutputPosition <= inputIndex.toDouble()) {
+                        val fraction = (nextOutputPosition - (inputIndex - 1).toDouble()).coerceIn(0.0, 1.0)
+                        push(previousSample + (mono - previousSample) * fraction.toFloat())
+                        nextOutputPosition += step
+                    }
+                    previousSample = mono
+                }
+            }
+        }
+
+        private fun push(value: Float) {
+            if (sampleCount * 2L >= MAX_WAV_DATA_BYTES) throw IOException("Голосовое сообщение слишком длинное для обработки на устройстве")
+            val sample = (value * 32767f).toInt().coerceIn(-32768, 32767)
+            output.write(sample and 0xFF)
+            output.write((sample shr 8) and 0xFF)
+            sampleCount++
+        }
+
+        fun finish() {
+            if (sampleCount == 0L) throw IOException("В голосовом сообщении нет аудиоданных")
+            output.flush()
+            output.close()
+            closed = true
+            val dataBytes = (sampleCount * 2L).toInt()
+            RandomAccessFile(file, "rw").use { wav ->
+                wav.seek(0)
+                wav.write("RIFF".toByteArray(Charsets.US_ASCII))
+                writeIntLe(wav, 36 + dataBytes)
+                wav.write("WAVEfmt ".toByteArray(Charsets.US_ASCII))
+                writeIntLe(wav, 16)
+                writeShortLe(wav, 1)
+                writeShortLe(wav, 1)
+                writeIntLe(wav, SAMPLE_RATE)
+                writeIntLe(wav, SAMPLE_RATE * 2)
+                writeShortLe(wav, 2)
+                writeShortLe(wav, 16)
+                wav.write("data".toByteArray(Charsets.US_ASCII))
+                writeIntLe(wav, dataBytes)
+            }
+        }
+
+        fun abort() {
+            if (!closed) runCatching { output.close() }
+            file.delete()
+        }
+
+        private fun writeIntLe(file: RandomAccessFile, value: Int) {
+            file.write(value and 0xFF)
+            file.write((value ushr 8) and 0xFF)
+            file.write((value ushr 16) and 0xFF)
+            file.write((value ushr 24) and 0xFF)
+        }
+
+        private fun writeShortLe(file: RandomAccessFile, value: Int) {
+            file.write(value and 0xFF)
+            file.write((value ushr 8) and 0xFF)
         }
     }
 
