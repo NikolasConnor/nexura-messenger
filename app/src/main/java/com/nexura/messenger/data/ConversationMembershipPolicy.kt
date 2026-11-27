@@ -14,7 +14,8 @@ internal fun isValidConversationMembership(
     savedConversationId: String,
     maxRecipients: Int
 ): Boolean {
-    val members = memberIds.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    val members = memberIds.map { it.trim() }
+    if (members.any { it.isEmpty() } || members.size != members.distinct().size) return false
     if (conversationId.equals(savedConversationId, ignoreCase = true)) {
         return members.size == 1 && members.singleOrNull()
             ?.equals(currentUserId, ignoreCase = true) == true
