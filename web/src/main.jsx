@@ -124,7 +124,7 @@ function PendingMediaPreview({ file }) {
   return <span className="pending-file-icon">📎</span>;
 }
 
-import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, loadPhotoFeed as fetchPhotoFeed, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
+import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, loadPhotoFeed as fetchPhotoFeed, socialSignedUrl, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
 
 
 function SocialFeedImage({ item }) {
