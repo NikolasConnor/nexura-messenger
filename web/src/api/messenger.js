@@ -223,3 +223,68 @@ export async function unblockUser(supabase, userId) {
     .eq('blocker_id', user.id).eq('blocked_id', id(userId));
   if (error) throw error;
 }
+
+
+export async function updateMyUsername(supabase, value) {
+  const username = String(value || '').trim().replace(/^@/, '').toLowerCase();
+  if (!/^[a-z][a-z0-9_]{2,23}$/.test(username)) {
+    throw new Error('Username: 3–24 символа, латинские буквы, цифры и _, начинаться должен с буквы.');
+  }
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Сессия истекла');
+  const { error } = await supabase.from('profiles').update({ username }).eq('id', user.id);
+  if (error) {
+    if (error.code === '23505' || /duplicate|unique/i.test(error.message || '')) {
+      throw new Error('Это имя пользователя уже занято. Выберите другое.');
+    }
+    throw error;
+  }
+  return username;
+}
+
+export async function getGroupMembers(supabase, chatId) {
+  const { data, error } = await supabase.from('conversation_members')
+    .select('user_id,member_role,joined_at,profiles(display_name,username,avatar_url)')
+    .eq('conversation_id', id(chatId)).order('joined_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(row => ({
+    id: row.user_id,
+    role: row.member_role || 'member',
+    joinedAt: row.joined_at,
+    name: row.profiles?.display_name || row.profiles?.username || 'Пользователь',
+    username: row.profiles?.username || '',
+    avatar: row.profiles?.avatar_url || '🙂'
+  }));
+}
+
+export async function renameGroup(supabase, chatId, title) {
+  const clean = String(title || '').trim();
+  if (clean.length < 2 || clean.length > 60) throw new Error('Название группы должно содержать от 2 до 60 символов');
+  const { error } = await supabase.from('conversations').update({ title: clean }).eq('id', id(chatId));
+  if (error) throw error;
+}
+
+export async function addGroupMember(supabase, chatId, userId) {
+  const conversation_id = id(chatId), user_id = id(userId);
+  const { data: existing, error: readError } = await supabase.from('conversation_members')
+    .select('user_id').eq('conversation_id', conversation_id).eq('user_id', user_id).maybeSingle();
+  if (readError) throw readError;
+  if (existing) return;
+  const { error } = await supabase.from('conversation_members').insert({
+    conversation_id, user_id, member_role: 'member'
+  });
+  if (error) throw error;
+}
+
+export async function setGroupMemberRole(supabase, chatId, userId, role) {
+  if (!['admin', 'member'].includes(role)) throw new Error('Недопустимая роль участника');
+  const { error } = await supabase.from('conversation_members').update({ member_role: role })
+    .eq('conversation_id', id(chatId)).eq('user_id', id(userId));
+  if (error) throw error;
+}
+
+export async function removeGroupMember(supabase, chatId, userId) {
+  const { error } = await supabase.from('conversation_members').delete()
+    .eq('conversation_id', id(chatId)).eq('user_id', id(userId));
+  if (error) throw error;
+}
