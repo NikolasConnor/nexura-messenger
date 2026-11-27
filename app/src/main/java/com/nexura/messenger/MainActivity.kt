@@ -39,6 +39,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -48,6 +50,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -250,6 +254,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var searching by remember { mutableStateOf(false) }
     var openingDirectUserId by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var motionLevel by remember {
+        mutableIntStateOf(context.getSharedPreferences("nexura_ui", Context.MODE_PRIVATE)
+            .getInt("motion_level", 0).coerceIn(0, 2))
+    }
     var lowDataMode by remember {
         mutableStateOf(context.getSharedPreferences("nexura_network", Context.MODE_PRIVATE)
             .getBoolean("low_data_mode", false))
@@ -1614,6 +1622,50 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(onClick = { settingsOpen = false; error = ""; notice = "" }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
                             Text("Настройки", color = MainText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.55).sp)
                         }
+                        Card(
+                            Modifier.fillMaxWidth().padding(bottom = 18.dp).then(
+                                if (motionLevel == 2) Modifier else Modifier.animateContentSize(
+                                    tween(durationMillis = if (motionLevel == 1) 120 else 260)
+                                )
+                            ),
+                            colors = CardDefaults.cardColors(containerColor = Surface1),
+                            shape = RoundedCornerShape(18.dp)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Settings, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
+                                    Text("Анимации интерфейса", color = MainText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 9.dp))
+                                }
+                                Text("Настройте движение экранов, отклик кнопок и декоративные эффекты.", color = SecondaryText, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp, bottom = 10.dp))
+                                listOf("Полные", "Минимальные", "Выключены").forEachIndexed { index, label ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                                            motionLevel = index
+                                            context.getSharedPreferences("nexura_ui", Context.MODE_PRIVATE)
+                                                .edit().putInt("motion_level", index).apply()
+                                        }.padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(label, color = MainText, fontSize = 13.sp, fontWeight = if (motionLevel == index) FontWeight.SemiBold else FontWeight.Normal)
+                                            Text(
+                                                when (index) {
+                                                    0 -> "Плавные переходы и выразительные эффекты"
+                                                    1 -> "Короткие и ненавязчивые движения"
+                                                    else -> "Без декоративных анимаций"
+                                                },
+                                                color = SecondaryText, fontSize = 10.sp
+                                            )
+                                        }
+                                        RadioButton(selected = motionLevel == index, onClick = {
+                                            motionLevel = index
+                                            context.getSharedPreferences("nexura_ui", Context.MODE_PRIVATE)
+                                                .edit().putInt("motion_level", index).apply()
+                                        }, colors = RadioButtonDefaults.colors(selectedColor = Accent))
+                                    }
+                                }
+                            }
+                        }
                         Text("АККАУНТ", color = Color(0xFF7CE7F2), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.15.sp)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(18.dp)) {
@@ -1629,7 +1681,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     TextButton(onClick = { avatarPicker.launch("image/*") }) { Text("Фото") }
                                 }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
-                                Card(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp).animateContentSize(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                                Card(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp).then(
+                                    if (motionLevel == 2) Modifier else Modifier.animateContentSize(if (motionLevel == 1) tween(120) else spring())
+                                ), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                                     Column(Modifier.padding(12.dp)) {
                                         Text("Обложка профиля", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                         Box(Modifier.fillMaxWidth().padding(top = 9.dp).height(126.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))).clickable { bannerPicker.launch("*/*") }, contentAlignment = Alignment.Center) {
@@ -1983,6 +2037,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         AudioMiniPlayer()
                         Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                             NexuraBottomBar(
+                                motionLevel = motionLevel,
                                 selected = if (settingsOpen) "settings" else homeTab,
                                 profileSelected = homeTab == "profile" && !settingsOpen,
                                 onSelect = { tab ->
@@ -2266,6 +2321,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "profile") {
                             OwnProfileScreen(
                                 modifier = Modifier.weight(1f),
+                                motionLevel = motionLevel,
                                 name = profileName,
                                 username = profileUsername,
                                 bio = profileBio,
@@ -2284,6 +2340,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "contacts") {
                             PeopleDirectoryScreen(
                                 modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp),
+                                motionLevel = motionLevel,
                                 users = contactsUsers,
                                 query = contactsSearch,
                                 loading = contactsLoading,
@@ -2528,7 +2585,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             .padding(start = 13.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0)
+                                        ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0, motionLevel)
                                         Column(Modifier.weight(1f).padding(start = 12.dp, end = 5.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, letterSpacing = 0.05.sp, maxLines = 1, modifier = Modifier.weight(1f))
@@ -2564,6 +2621,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         AudioMiniPlayer()
                         NexuraBottomBar(
+                            motionLevel = motionLevel,
                             selected = homeTab,
                             profileSelected = homeTab == "profile",
                             onSelect = { tab ->
@@ -2639,7 +2697,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }.padding(horizontal = 8.dp, vertical = 9.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0)
+                                                ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0, motionLevel)
                                                 Column(Modifier.weight(1f).padding(start = 11.dp)) {
                                                     Text(destination.title, color = MainText, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                                     Text(if (destination.kind == "group") "Группа" else "Личный чат", color = SecondaryText, fontSize = 11.sp)
@@ -3294,7 +3352,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Icon(Icons.Default.ArrowBack, "Назад к чатам", tint = MainText)
                             }
                             if (chat.kind == "group") {
-                                ChatListAvatar(chat.title, chat.avatar, true, false)
+                                ChatListAvatar(chat.title, chat.avatar, true, false, motionLevel)
                             } else {
                                 Box(Modifier.clickable {
                                     val peerId = chat.peerUserId
@@ -3311,7 +3369,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             finally { loadingProfile = false }
                                         }
                                     } else error = "Не удалось определить собеседника"
-                                }) { ChatListAvatar(chat.title, chat.avatar, false, false) }
+                                }) { ChatListAvatar(chat.title, chat.avatar, false, false, motionLevel) }
                             }
                             Column(Modifier.weight(1f).padding(start = 12.dp).clickable(enabled = chat.kind == "direct") {
                                 val peerId = chat.peerUserId
@@ -3694,8 +3752,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
                                     var swipeDragOffset by remember(msg.id) { mutableStateOf(0f) }
                                     val swipeTranslation by animateFloatAsState(
-                                        targetValue = swipeDragOffset,
-                                        animationSpec = spring(dampingRatio = 0.78f, stiffness = 520f),
+                                        targetValue = if (motionLevel == 2) 0f else swipeDragOffset,
+                                        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.78f, stiffness = 520f); 1 -> tween(110); else -> snap() },
                                         label = "message-swipe-reply"
                                     )
                                     Row(
@@ -3731,7 +3789,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
                                             )).background(if (mine) chatBubbleColor else Surface2)
-                                                .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
+                                                // Avoid per-message layout animations in the lazy list; swipe/reaction
+                                                // feedback remains animated without keeping size animators per bubble.
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
                                                     onLongClick = { openMessageMenu = null; reactionPickerFor = msg.id }
@@ -3981,6 +4040,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
                                                                 AnimatedReactionPickerItem(
                                                                     emoji = emoji,
+                                                                    motionLevel = motionLevel,
                                                                     onClick = {
                                                                         openMessageMenu = null
                                                                         scope.launch {
@@ -4049,8 +4109,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             val reactionsForMessage = messageReactions[msg.id].orEmpty()
                                             AnimatedVisibility(
                                                 visible = reactionsForMessage.isNotEmpty(),
-                                                enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.96f),
-                                                exit = fadeOut() + shrinkVertically()
+                                                enter = when (motionLevel) { 0 -> fadeIn(tween(180)) + expandVertically(tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180)); 1 -> fadeIn(tween(100)); else -> EnterTransition.None },
+                                                exit = when (motionLevel) { 0 -> fadeOut(tween(150)) + shrinkVertically(tween(150)); 1 -> fadeOut(tween(80)); else -> ExitTransition.None }
                                             ) {
                                                 Row(
                                                     Modifier.fillMaxWidth()
@@ -4062,6 +4122,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 ) {
                                                     reactionsForMessage.forEach { reaction ->
                                                         AnimatedReactionChip(
+
+                                                            motionLevel = motionLevel,
+
                                                             emoji = reaction.emoji,
                                                             count = reaction.count,
                                                             selected = reaction.selectedByMe,
@@ -4082,8 +4145,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                             AnimatedVisibility(
                                                 visible = reactionPickerFor == msg.id,
-                                                enter = fadeIn() + expandVertically(),
-                                                exit = fadeOut() + shrinkVertically()
+                                                enter = when (motionLevel) { 0 -> fadeIn(tween(180)) + expandVertically(tween(180)); 1 -> fadeIn(tween(100)); else -> EnterTransition.None },
+                                                exit = when (motionLevel) { 0 -> fadeOut(tween(150)) + shrinkVertically(tween(150)); 1 -> fadeOut(tween(80)); else -> ExitTransition.None }
                                             ) {
                                                 Row(
                                                     Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 4.dp)
@@ -4095,7 +4158,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
-                                                        AnimatedReactionPickerItem(emoji = emoji) {
+                                                        AnimatedReactionPickerItem(emoji = emoji, motionLevel = motionLevel) {
                                                             reactionPickerFor = null
                                                             scope.launch {
                                                                 try {
@@ -4229,8 +4292,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Spacer(Modifier.width(3.dp))
                                 val hasOutgoingContent = draft.isNotBlank() || pendingMediaUri != null
                                 val sendButtonScale by animateFloatAsState(
-                                    targetValue = if (hasOutgoingContent || recordingVoice) 1.06f else 1f,
-                                    animationSpec = spring(dampingRatio = 0.62f, stiffness = 420f),
+                                    targetValue = if (motionLevel == 2 || !(hasOutgoingContent || recordingVoice)) 1f else if (motionLevel == 1) 1.025f else 1.06f,
+                                    animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.62f, stiffness = 420f); 1 -> tween(120); else -> snap() },
                                     label = "composer-action-scale"
                                 )
                                 IconButton(
@@ -4432,7 +4495,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                 )
             }, contentAlignment = Alignment.Center) {
-                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
+                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, motionLevel = motionLevel, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
                 else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 if (mediaViewerType != "video") {
                     Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 16.dp, top = 30.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -4551,7 +4614,7 @@ private fun isVideoCover(value: String): Boolean =
     value.substringBefore("?").lowercase().let { it.endsWith(".mp4") || it.endsWith(".webm") || it.endsWith(".mov") || it.endsWith(".m4v") }
 
 @Composable
-private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
+private fun NexuraVideoPlayer(uri: Uri, motionLevel: Int, onClose: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var playbackError by remember(uri) { mutableStateOf<String?>(null) }
@@ -4621,7 +4684,12 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
             }
         }, update = { view -> if (view.player !== player) view.player = player }, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().clickable { showControls = !showControls })
-        AnimatedVisibility(visible = showControls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = showControls,
+            enter = when (motionLevel) { 0 -> fadeIn(tween(180)); 1 -> fadeIn(tween(100)); else -> EnterTransition.None },
+            exit = when (motionLevel) { 0 -> fadeOut(tween(150)); 1 -> fadeOut(tween(80)); else -> ExitTransition.None },
+            modifier = Modifier.fillMaxSize()
+        ) {
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().height(100.dp).align(Alignment.TopCenter).statusBarsPadding().background(Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent))))
                 Row(Modifier.align(Alignment.TopStart).fillMaxWidth().statusBarsPadding().padding(start = 12.dp, top = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -4937,7 +5005,7 @@ private fun AudioMessagePlayer(
         }
         if (transcript.isNullOrBlank() && !transcribing) {
             Text(
-                "Распознавание выполняется на устройстве: Whisper распознаёт русский и английский. При первом запуске потребуется загрузить модель (~148 МБ); аудио не отправляется на сервер.",
+                "Распознавание выполняется на устройстве: Whisper распознаёт русский и английский. Быстрая модель занимает около 78 МБ; если она недоступна, используется уже установленная Base. Аудио не отправляется на сервер.",
                 color = SecondaryText,
                 fontSize = 9.sp,
                 lineHeight = 12.sp,
@@ -5147,6 +5215,7 @@ private fun AudioMiniPlayer() {
 @Composable
 private fun OwnProfileScreen(
     modifier: Modifier = Modifier,
+    motionLevel: Int,
     name: String,
     username: String,
     bio: String,
@@ -5161,7 +5230,9 @@ private fun OwnProfileScreen(
     onAddPhoto: () -> Unit,
     onOpenPhoto: (SocialMediaItem) -> Unit
 ) {
-    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).animateContentSize()) {
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).then(
+        if (motionLevel == 2) Modifier else Modifier.animateContentSize(if (motionLevel == 1) tween(120) else spring())
+    )) {
         Box(Modifier.fillMaxWidth().height(196.dp).clip(RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)).background(Brush.linearGradient(listOf(Color(0xFF1A2940), Color(0xFF356DDB), Color(0xFF080D18))))) {
             if (isVideoCover(bannerUrl)) MutedVideoBanner(bannerUrl, Modifier.fillMaxSize())
             else if (bannerUrl.isNotBlank()) AsyncImage(model = bannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -5217,6 +5288,7 @@ private fun OwnProfileScreen(
 @Composable
 private fun PeopleDirectoryScreen(
     modifier: Modifier = Modifier,
+    motionLevel: Int,
     users: List<UserItem>,
     query: String,
     loading: Boolean,
@@ -5258,9 +5330,11 @@ private fun PeopleDirectoryScreen(
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 items(users, key = { it.id }) { person ->
                     Row(
-                        Modifier.fillMaxWidth().animateItemPlacement()
+                        Modifier.fillMaxWidth().then(
+                            when (motionLevel) { 0 -> Modifier.animateItemPlacement(); 1 -> Modifier.animateItemPlacement(tween(120)); else -> Modifier }
+                        )
                             .clip(RoundedCornerShape(18.dp)).background(Surface1).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
-                            .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 420f))
+                            // Keep placement motion, but avoid a second size animator on every directory row.
                             .clickable { onOpenProfile(person) }
                             .padding(horizontal = 12.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -5280,21 +5354,79 @@ private fun PeopleDirectoryScreen(
 }
 
 @Composable
-private fun NexuraBottomBar(selected: String, profileSelected: Boolean, onSelect: (String) -> Unit, onProfile: () -> Unit) {
+private fun NexuraBottomBar(motionLevel: Int, selected: String, profileSelected: Boolean, onSelect: (String) -> Unit, onProfile: () -> Unit) {
     Surface(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp), color = Surface1, shape = RoundedCornerShape(24.dp), shadowElevation = 12.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.14f))) {
         Row(Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(Triple("settings", "Настройки", Icons.Default.Settings), Triple("contacts", "Люди", Icons.Default.GroupAdd), Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline)).forEach { (key, label, icon) ->
                 val active = selected == key && !profileSelected
-                val scale by animateFloatAsState(if (active) 1.08f else 1f, animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f), label = "nav-$key")
-                val itemColor by animateColorAsState(if (active) Accent.copy(alpha = 0.15f) else Color.Transparent, animationSpec = spring(stiffness = 420f), label = "nav-color-$key")
-                Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(itemColor).animateContentSize(spring(dampingRatio = 0.72f, stiffness = 480f)).clickable { onSelect(key) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = scale; scaleY = scale })
+                val scale by animateFloatAsState(
+                    targetValue = if (motionLevel == 2 || !active) 1f else if (motionLevel == 1) 1.035f else 1.08f,
+                    animationSpec = when (motionLevel) {
+                        0 -> spring(dampingRatio = 0.62f, stiffness = 520f)
+                        1 -> tween(durationMillis = 120)
+                        else -> snap()
+                    },
+                    label = "nav-$key"
+                )
+                val itemColor by animateColorAsState(
+                    targetValue = if (active) Accent.copy(alpha = 0.15f) else Color.Transparent,
+                    animationSpec = when (motionLevel) {
+                        0 -> spring(stiffness = 420f)
+                        1 -> tween(durationMillis = 120)
+                        else -> snap()
+                    },
+                    label = "nav-color-$key"
+                )
+                val gearRotation by animateFloatAsState(
+                    targetValue = if (key == "settings" && active && motionLevel == 0) 180f else if (key == "settings" && active && motionLevel == 1) 90f else 0f,
+                    animationSpec = when (motionLevel) {
+                        0 -> spring(dampingRatio = 0.58f, stiffness = 230f)
+                        1 -> tween(durationMillis = 160)
+                        else -> snap()
+                    },
+                    label = "settings-gear-rotation"
+                )
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(itemColor)
+                        .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
+                            if (motionLevel == 1) tween(120) else spring(dampingRatio = 0.72f, stiffness = 480f)
+                        )).clickable { onSelect(key) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer {
+                        scaleX = scale; scaleY = scale
+                        if (key == "settings") rotationZ = gearRotation
+                    })
                     Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
                 }
             }
-            val profileScale by animateFloatAsState(if (profileSelected) 1.08f else 1f, animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f), label = "nav-profile")
-            val profileColor by animateColorAsState(if (profileSelected) Accent.copy(alpha = 0.15f) else Color.Transparent, animationSpec = spring(stiffness = 420f), label = "nav-profile-color")
-            Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(profileColor).animateContentSize(spring(dampingRatio = 0.72f, stiffness = 480f)).clickable { onProfile() }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            val profileScale by animateFloatAsState(
+                targetValue = if (motionLevel == 2 || !profileSelected) 1f else if (motionLevel == 1) 1.035f else 1.08f,
+                animationSpec = when (motionLevel) {
+                    0 -> spring(dampingRatio = 0.62f, stiffness = 520f)
+                    1 -> tween(120)
+                    else -> snap()
+                },
+                label = "nav-profile"
+            )
+            val profileColor by animateColorAsState(
+                targetValue = if (profileSelected) Accent.copy(alpha = 0.15f) else Color.Transparent,
+                animationSpec = when (motionLevel) {
+                    0 -> spring(stiffness = 420f)
+                    1 -> tween(120)
+                    else -> snap()
+                },
+                label = "nav-profile-color"
+            )
+            Column(
+                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(profileColor)
+                    .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
+                        if (motionLevel == 1) tween(120) else spring(dampingRatio = 0.72f, stiffness = 480f)
+                    )).clickable { onProfile() },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 Icon(Icons.Default.Person, contentDescription = "Профиль", tint = if (profileSelected) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = profileScale; scaleY = profileScale })
                 Text("Профиль", color = if (profileSelected) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (profileSelected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
@@ -5393,26 +5525,26 @@ private fun chatMessagePreview(message: MessageItem, ownUserId: String): String 
 }
 
 @Composable
-private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
+private fun AnimatedReactionPickerItem(emoji: String, motionLevel: Int, onClick: () -> Unit) {
     var pressed by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (pressed) 1.28f else 1f,
-        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.48f, stiffness = 520f); 1 -> tween(100); else -> snap() },
         label = "reaction-picker-scale"
     )
     val rotation by animateFloatAsState(
         targetValue = 0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
+        animationSpec = if (motionLevel == 0) spring(dampingRatio = 0.7f, stiffness = 520f) else snap(),
         label = "reaction-picker-rotation"
     )
     val lift by animateFloatAsState(
         targetValue = if (pressed && emoji == "👍") -13f else if (pressed && emoji == "🔥") -5f else 0f,
-        animationSpec = spring(dampingRatio = 0.32f, stiffness = 420f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.32f, stiffness = 420f); 1 -> tween(100); else -> snap() },
         label = "reaction-picker-lift"
     )
     LaunchedEffect(pressed) {
         if (pressed) {
-            delay(150)
+            if (motionLevel == 0) delay(150) else if (motionLevel == 1) delay(70)
             onClick()
             pressed = false
         }
@@ -5430,36 +5562,36 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+private fun AnimatedReactionChip(motionLevel: Int, emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
     var pulse by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (pulse) 1.06f else 1f,
-        animationSpec = spring(dampingRatio = 0.46f, stiffness = 520f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.46f, stiffness = 520f); 1 -> tween(100); else -> snap() },
         label = "reaction-chip-scale"
     )
     val emojiScale by animateFloatAsState(
         targetValue = if (pulse) 1.28f else 1f,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = 560f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.42f, stiffness = 560f); 1 -> tween(100); else -> snap() },
         label = "reaction-chip-emoji-scale"
     )
     val chipColor by animateColorAsState(
         targetValue = if (selected) Accent.copy(alpha = 0.92f) else Surface2.copy(alpha = 0.96f),
-        animationSpec = spring(stiffness = 420f),
+        animationSpec = when (motionLevel) { 0 -> spring(stiffness = 420f); 1 -> tween(100); else -> snap() },
         label = "reaction-chip-color"
     )
     val emojiRotation by animateFloatAsState(
         targetValue = 0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
+        animationSpec = if (motionLevel == 0) spring(dampingRatio = 0.7f, stiffness = 520f) else snap(),
         label = "reaction-emoji-rotation"
     )
     val emojiLift by animateFloatAsState(
         targetValue = if (pulse) -2f else 0f,
-        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.48f, stiffness = 520f); 1 -> tween(100); else -> snap() },
         label = "reaction-emoji-lift"
     )
     LaunchedEffect(pulse) {
         if (pulse) {
-            delay(300)
+            if (motionLevel == 0) delay(300) else if (motionLevel == 1) delay(100)
             pulse = false
         }
     }
@@ -5471,7 +5603,9 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
             .background(chipColor)
             .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.22f), CircleShape)
             .clickable { if (!pulse) { pulse = true; onClick() } }
-            .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 480f))
+            .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
+                if (motionLevel == 1) tween(100) else spring(dampingRatio = 0.82f, stiffness = 480f)
+            ))
             .padding(horizontal = 9.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -5485,14 +5619,18 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
                 scaleY = emojiScale
             }
         )
-        AnimatedContent(targetState = count, label = "reaction-count") { value ->
-            Text(value.toString(), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+        if (motionLevel == 2) {
+            Text(count.toString(), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+        } else {
+            AnimatedContent(targetState = count, label = "reaction-count") { value ->
+                Text(value.toString(), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean) {
+private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean, motionLevel: Int) {
     val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
     val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
         ?: name.takeIf { it in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙") }
@@ -5533,8 +5671,8 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
         }
         AnimatedVisibility(
             visible = hasUnread,
-            enter = fadeIn() + scaleIn(initialScale = 0.45f),
-            exit = fadeOut() + shrinkVertically(),
+            enter = when (motionLevel) { 0 -> fadeIn(tween(160)) + scaleIn(initialScale = 0.45f, animationSpec = tween(160)); 1 -> fadeIn(tween(90)); else -> EnterTransition.None },
+            exit = when (motionLevel) { 0 -> fadeOut(tween(130)) + shrinkVertically(tween(130)); 1 -> fadeOut(tween(70)); else -> ExitTransition.None },
             modifier = Modifier.align(Alignment.BottomEnd)
         ) {
             Box(

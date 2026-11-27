@@ -41,10 +41,14 @@ object AudioTranscriber {
     private const val SAMPLE_RATE = 16_000
     private const val MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
     private const val MODEL_FOLDER = "vosk-model-small-ru-0.22"
-    private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/fb5ed9369c26eaf08392504d8446da431e0fffb9/ggml-base.bin"
-    private const val WHISPER_MODEL_NAME = "ggml-base.bin"
-    private const val WHISPER_MODEL_BYTES = 147_951_465L
-    private const val WHISPER_MODEL_SHA256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
+    // Multilingual Tiny is about half the size of Base and substantially faster on mobile CPUs.
+    private const val WHISPER_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/fb5ed9369c26eaf08392504d8446da431e0fffb9/ggml-tiny.bin"
+    private const val WHISPER_MODEL_NAME = "ggml-tiny.bin"
+    private const val WHISPER_MODEL_BYTES = 77_691_713L
+    private const val WHISPER_MODEL_SHA256 = "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+    private const val LEGACY_BASE_MODEL_NAME = "ggml-base.bin"
+    private const val LEGACY_BASE_MODEL_BYTES = 147_951_465L
+    private const val LEGACY_BASE_MODEL_SHA256 = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
     private const val MAX_WAV_DATA_BYTES = 512L * 1024L * 1024L
     private const val MAX_AUDIO_BYTES = 25L * 1024L * 1024L
     private const val MAX_ARCHIVE_BYTES = 100L * 1024L * 1024L
@@ -317,6 +321,16 @@ object AudioTranscriber {
             }
             if (!partial.renameTo(model)) throw IOException("Не удалось сохранить модель Whisper")
             return model
+        } catch (error: Exception) {
+            // Keep existing Base installs usable when the faster Tiny model cannot be fetched.
+            val legacyBase = File(root, LEGACY_BASE_MODEL_NAME)
+            if (legacyBase.isFile && legacyBase.length() == LEGACY_BASE_MODEL_BYTES &&
+                sha256(legacyBase) == LEGACY_BASE_MODEL_SHA256) {
+                return legacyBase
+            }
+            throw if (error is IOException) error else IOException(
+                "Не удалось подготовить быструю модель Whisper: ${error.message}", error
+            )
         } finally {
             connection.disconnect()
             partial.delete()
@@ -407,6 +421,10 @@ object AudioTranscriber {
 
     private class WavSink(private val file: File) {
         private val output = FileOutputStream(file)
+        // Batch PCM writes: the previous implementation performed two file writes
+        // per sample, which made decoding needlessly slow on mid-range phones.
+        private val outputBuffer = ByteArray(64 * 1024)
+        private var outputBufferSize = 0
         private var sampleCount = 0L
         private var inputIndex = -1L
         private var nextOutputPosition = 0.0
@@ -459,13 +477,21 @@ object AudioTranscriber {
         private fun push(value: Float) {
             if (sampleCount * 2L >= MAX_WAV_DATA_BYTES) throw IOException("Голосовое сообщение слишком длинное для обработки на устройстве")
             val sample = (value * 32767f).toInt().coerceIn(-32768, 32767)
-            output.write(sample and 0xFF)
-            output.write((sample shr 8) and 0xFF)
+            outputBuffer[outputBufferSize++] = (sample and 0xFF).toByte()
+            outputBuffer[outputBufferSize++] = ((sample shr 8) and 0xFF).toByte()
             sampleCount++
+            if (outputBufferSize >= outputBuffer.size - 1) flushSamples()
+        }
+
+        private fun flushSamples() {
+            if (outputBufferSize == 0) return
+            output.write(outputBuffer, 0, outputBufferSize)
+            outputBufferSize = 0
         }
 
         fun finish() {
             if (sampleCount == 0L) throw IOException("В голосовом сообщении нет аудиоданных")
+            flushSamples()
             output.flush()
             output.close()
             closed = true
