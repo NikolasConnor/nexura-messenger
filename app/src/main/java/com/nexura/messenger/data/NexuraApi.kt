@@ -94,6 +94,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
     private val signedUrlCache = ConcurrentHashMap<String, Pair<String, Long>>()
     private val remoteDeviceCache = ConcurrentHashMap<String, Pair<E2eeRemoteDevice, Long>>()
     private val groupMemberCache = ConcurrentHashMap<String, Pair<List<String>, Long>>()
+    @Volatile private var savedConversationIdCache: String? = null
     // Supabase rotates refresh tokens. Serialize refreshes so simultaneous 401 responses
     // cannot race and invalidate the token another request has just stored.
     private val refreshMutex = Mutex()
@@ -900,11 +901,20 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
     suspend fun groupMemberIds(conversationId: String): List<String> {
         // Security-sensitive send paths always fetch fresh membership before and after encryption.
         val chatId = normalizeUuid(conversationId)
+        val uid = store.userId ?: throw IOException("Сессия истекла")
         val rows = JSONArray(call(
             "/rest/v1/conversation_members?select=user_id&conversation_id=eq.$chatId&order=joined_at.asc"
         ))
         val ids = (0 until rows.length()).map { rows.getJSONObject(it).getString("user_id") }.distinct()
-        if (ids.size !in 2..E2eeGroupMessageEnvelope.MAX_RECIPIENTS) {
+        // Saved Messages is a private one-owner conversation, not a normal group.
+        // Resolve its server-issued ID once; never weaken the 2+ member rule for other groups.
+        val savedChatId = savedConversationIdCache ?: getOrCreateSavedConversation()
+        if (!isValidConversationMembership(
+                chatId, ids, uid, savedChatId, E2eeGroupMessageEnvelope.MAX_RECIPIENTS
+            )) {
+            if (chatId == savedChatId) {
+                throw IOException("Чат «Избранное» должен оставаться личным пространством только для вас")
+            }
             throw IOException("В группе должно быть от 2 до ${E2eeGroupMessageEnvelope.MAX_RECIPIENTS} участников")
         }
         return ids
@@ -994,6 +1004,49 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                 }
             }
         }
+        // A one-owner Saved Messages chat can have no other registered devices.
+        // In that case create a valid self-device Olm envelope so the message remains
+        // a normal encrypted group envelope and can be restored on this device.
+        if (recipients.isEmpty() && members.size == 1 && members.single() == uid) {
+            val selfCurve = own.getString("curve25519")
+            val selfEd = own.getString("ed25519")
+            e2ee.trustRemoteDeviceOnFirstUse(uid, ownDeviceId, selfCurve, selfEd)
+            val pendingSelf = e2ee.pendingGroupEnvelope(chatId, messageId, uid, ownDeviceId)
+            if (pendingSelf != null) {
+                val cached = e2ee.cachedMessage(chatId, messageId)
+                    ?: throw IOException("Не найдена локальная копия ожидающего сообщения")
+                if (!cached.contentEquals(plaintext.toByteArray(Charsets.UTF_8))) {
+                    throw IOException("Текст не совпадает с ожидающим сообщением")
+                }
+                recipients += pendingSelf
+            } else if (e2ee.hasGroupSession(chatId, uid, ownDeviceId)) {
+                val ciphertext = e2ee.encryptGroupMessage(
+                    chatId, uid, ownDeviceId, plaintext.toByteArray(Charsets.UTF_8), messageId
+                )
+                recipients += E2eeGroupRecipientEnvelope(
+                    uid, ownDeviceId, E2eeMessageEnvelope.Kind.NORMAL, ciphertext
+                )
+            } else {
+                val preKey = consumeOwnE2eePreKey(chatId, ownDeviceId)
+                if (preKey.optString("ed25519_key") != selfEd ||
+                    preKey.optString("curve25519_key") != selfCurve) {
+                    throw IOException("Ключ собственного устройства изменился. Отправка отменена.")
+                }
+                val otk = preKey.optString("one_time_key")
+                val signature = preKey.optString("one_time_key_signature")
+                if (!e2ee.verifyPublishedOneTimeKey(selfEd, selfCurve, otk, signature)) {
+                    throw IOException("Подпись собственного одноразового ключа недействительна")
+                }
+                val ciphertext = e2ee.startGroupSession(
+                    chatId, uid, ownDeviceId, selfCurve, selfEd, otk, signature,
+                    plaintext.toByteArray(Charsets.UTF_8), messageId
+                )
+                recipients += E2eeGroupRecipientEnvelope(
+                    uid, ownDeviceId, E2eeMessageEnvelope.Kind.PRE_KEY, ciphertext
+                )
+            }
+        }
+
         val currentMembers = groupMemberIds(chatId)
         if (currentMembers.toSet() != members.toSet()) {
             throw IOException("Состав группы изменился во время отправки. Повторите отправку.")
@@ -1002,7 +1055,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
         for (memberId in members) {
             val currentDevices = (currentDevicesByUser[memberId] ?: emptyList())
                 .filterNot { memberId == uid && it.deviceId == ownDeviceId }
-            val sentDevices = recipients.filter { it.userId == memberId }
+            val sentDevices = recipients.filter { it.userId == memberId && it.deviceId != ownDeviceId }
             if (currentDevices.map { it.deviceId }.toSet() != sentDevices.map { it.deviceId }.toSet() ||
                 currentDevices.any { device ->
                     runCatching { e2ee.trustRemoteDeviceOnFirstUse(memberId, device.deviceId, device.curve25519Key, device.ed25519Key) }.isFailure
@@ -2535,7 +2588,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
 
     suspend fun getOrCreateSavedConversation(): String {
         val result = call("/rest/v1/rpc/get_or_create_saved_conversation", "POST", "{}")
-        return normalizeUuid(result.trim().trim('"'))
+        return normalizeUuid(result.trim().trim('"')).also { savedConversationIdCache = it }
     }
 
     suspend fun createDirect(userId: String): String {
