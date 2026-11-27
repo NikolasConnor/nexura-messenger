@@ -1679,7 +1679,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     TextButton(onClick = { avatarPicker.launch("image/*") }) { Text("Фото") }
                                 }
                                 HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Surface2)
-                                Card(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp).animateContentSize(), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
+                                Card(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp).then(
+                                    if (motionLevel == 2) Modifier else Modifier.animateContentSize(if (motionLevel == 1) tween(120) else spring())
+                                ), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                                     Column(Modifier.padding(12.dp)) {
                                         Text("Обложка профиля", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                         Box(Modifier.fillMaxWidth().padding(top = 9.dp).height(126.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Accent, Accent2, Surface2))).clickable { bannerPicker.launch("*/*") }, contentAlignment = Alignment.Center) {
@@ -2335,6 +2337,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "contacts") {
                             PeopleDirectoryScreen(
                                 modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp),
+                                motionLevel = motionLevel,
                                 users = contactsUsers,
                                 query = contactsSearch,
                                 loading = contactsLoading,
@@ -2579,7 +2582,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             .padding(start = 13.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0)
+                                        ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0, motionLevel)
                                         Column(Modifier.weight(1f).padding(start = 12.dp, end = 5.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, letterSpacing = 0.05.sp, maxLines = 1, modifier = Modifier.weight(1f))
@@ -2690,7 +2693,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }.padding(horizontal = 8.dp, vertical = 9.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0)
+                                                ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0, motionLevel)
                                                 Column(Modifier.weight(1f).padding(start = 11.dp)) {
                                                     Text(destination.title, color = MainText, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                                     Text(if (destination.kind == "group") "Группа" else "Личный чат", color = SecondaryText, fontSize = 11.sp)
@@ -3345,7 +3348,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Icon(Icons.Default.ArrowBack, "Назад к чатам", tint = MainText)
                             }
                             if (chat.kind == "group") {
-                                ChatListAvatar(chat.title, chat.avatar, true, false)
+                                ChatListAvatar(chat.title, chat.avatar, true, false, motionLevel)
                             } else {
                                 Box(Modifier.clickable {
                                     val peerId = chat.peerUserId
@@ -3362,7 +3365,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             finally { loadingProfile = false }
                                         }
                                     } else error = "Не удалось определить собеседника"
-                                }) { ChatListAvatar(chat.title, chat.avatar, false, false) }
+                                }) { ChatListAvatar(chat.title, chat.avatar, false, false, motionLevel) }
                             }
                             Column(Modifier.weight(1f).padding(start = 12.dp).clickable(enabled = chat.kind == "direct") {
                                 val peerId = chat.peerUserId
@@ -4488,7 +4491,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                 )
             }, contentAlignment = Alignment.Center) {
-                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
+                if (mediaViewerType == "video") NexuraVideoPlayer(uri = mediaViewerUri!!, motionLevel = motionLevel, onClose = { mediaViewerUri = null; mediaViewerItems = emptyList() })
                 else AsyncImage(model = mediaViewerUri, contentDescription = "Фото на весь экран", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 if (mediaViewerType != "video") {
                     Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(start = 16.dp, top = 30.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -4607,7 +4610,7 @@ private fun isVideoCover(value: String): Boolean =
     value.substringBefore("?").lowercase().let { it.endsWith(".mp4") || it.endsWith(".webm") || it.endsWith(".mov") || it.endsWith(".m4v") }
 
 @Composable
-private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
+private fun NexuraVideoPlayer(uri: Uri, motionLevel: Int, onClose: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var playbackError by remember(uri) { mutableStateOf<String?>(null) }
@@ -4677,7 +4680,12 @@ private fun NexuraVideoPlayer(uri: Uri, onClose: () -> Unit) {
             }
         }, update = { view -> if (view.player !== player) view.player = player }, modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().clickable { showControls = !showControls })
-        AnimatedVisibility(visible = showControls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = showControls,
+            enter = when (motionLevel) { 0 -> fadeIn(tween(180)); 1 -> fadeIn(tween(100)); else -> EnterTransition.None },
+            exit = when (motionLevel) { 0 -> fadeOut(tween(150)); 1 -> fadeOut(tween(80)); else -> ExitTransition.None },
+            modifier = Modifier.fillMaxSize()
+        ) {
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().height(100.dp).align(Alignment.TopCenter).statusBarsPadding().background(Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent))))
                 Row(Modifier.align(Alignment.TopStart).fillMaxWidth().statusBarsPadding().padding(start = 12.dp, top = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -5273,6 +5281,7 @@ private fun OwnProfileScreen(
 @Composable
 private fun PeopleDirectoryScreen(
     modifier: Modifier = Modifier,
+    motionLevel: Int,
     users: List<UserItem>,
     query: String,
     loading: Boolean,
@@ -5314,9 +5323,13 @@ private fun PeopleDirectoryScreen(
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 items(users, key = { it.id }) { person ->
                     Row(
-                        Modifier.fillMaxWidth().animateItemPlacement()
+                        Modifier.fillMaxWidth().then(
+                            when (motionLevel) { 0 -> Modifier.animateItemPlacement(); 1 -> Modifier.animateItemPlacement(tween(120)); else -> Modifier }
+                        )
                             .clip(RoundedCornerShape(18.dp)).background(Surface1).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
-                            .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 420f))
+                            .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
+                                if (motionLevel == 1) tween(120) else spring(dampingRatio = 0.82f, stiffness = 420f)
+                            ))
                             .clickable { onOpenProfile(person) }
                             .padding(horizontal = 12.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -5608,7 +5621,7 @@ private fun AnimatedReactionChip(motionLevel: Int, emoji: String, count: Int, se
 }
 
 @Composable
-private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean) {
+private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean, motionLevel: Int) {
     val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
     val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
         ?: name.takeIf { it in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙") }
@@ -5649,8 +5662,8 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
         }
         AnimatedVisibility(
             visible = hasUnread,
-            enter = fadeIn() + scaleIn(initialScale = 0.45f),
-            exit = fadeOut() + shrinkVertically(),
+            enter = when (motionLevel) { 0 -> fadeIn(tween(160)) + scaleIn(initialScale = 0.45f, animationSpec = tween(160)); 1 -> fadeIn(tween(90)); else -> EnterTransition.None },
+            exit = when (motionLevel) { 0 -> fadeOut(tween(130)) + shrinkVertically(tween(130)); 1 -> fadeOut(tween(70)); else -> ExitTransition.None },
             modifier = Modifier.align(Alignment.BottomEnd)
         ) {
             Box(
