@@ -27,6 +27,11 @@ class SavedConversationMembershipPolicyTest {
     }
 
     @Test
+    fun rejectsDuplicateMemberIds() {
+        assertFalse(isValidConversationMembership(group, listOf(owner, owner), owner, saved, 64))
+    }
+
+    @Test
     fun acceptsOrdinaryGroupsWithTwoOrMoreMembers() {
         assertTrue(isValidConversationMembership(group, listOf(owner, other), owner, saved, 64))
     }
