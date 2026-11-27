@@ -248,6 +248,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var searching by remember { mutableStateOf(false) }
     var openingDirectUserId by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var motionLevel by remember {
+        mutableIntStateOf(context.getSharedPreferences("nexura_ui", Context.MODE_PRIVATE).getInt("motion_level", 0).coerceIn(0, 2))
+    }
     var lowDataMode by remember {
         mutableStateOf(context.getSharedPreferences("nexura_network", Context.MODE_PRIVATE)
             .getBoolean("low_data_mode", false))
@@ -1609,6 +1612,39 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             IconButton(onClick = { settingsOpen = false; error = ""; notice = "" }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
                             Text("Настройки", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
+                        Card(
+                            Modifier.fillMaxWidth().padding(bottom = 20.dp).animateContentSize(),
+                            colors = CardDefaults.cardColors(containerColor = Surface1),
+                            shape = RoundedCornerShape(18.dp)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text("Анимации интерфейса", color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                                Text("Плавность переходов, отклик кнопок и движения элементов.", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+                                listOf("Полные", "Минимальные", "Выключены").forEachIndexed { index, label ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                motionLevel = index
+                                                context.getSharedPreferences("nexura_ui", Context.MODE_PRIVATE)
+                                                    .edit().putInt("motion_level", index).apply()
+                                            }.padding(vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(label, color = MainText, fontWeight = if (motionLevel == index) FontWeight.SemiBold else FontWeight.Normal)
+                                            if (index == 0) Text("Все декоративные эффекты", color = SecondaryText, fontSize = 10.sp)
+                                            if (index == 1) Text("Короткие и лёгкие эффекты", color = SecondaryText, fontSize = 10.sp)
+                                            if (index == 2) Text("Без анимации интерфейса", color = SecondaryText, fontSize = 10.sp)
+                                        }
+                                        RadioButton(selected = motionLevel == index, onClick = {
+                                            motionLevel = index
+                                            context.getSharedPreferences("nexura_ui", Context.MODE_PRIVATE)
+                                                .edit().putInt("motion_level", index).apply()
+                                        }, colors = RadioButtonDefaults.colors(selectedColor = Accent))
+                                    }
+                                }
+                            }
+                        }
                         Text("АККАУНТ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
                             Column(Modifier.padding(18.dp)) {
@@ -1978,6 +2014,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         AudioMiniPlayer()
                         Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
                             NexuraBottomBar(
+                                motionLevel = motionLevel,
                                 selected = if (settingsOpen) "settings" else homeTab,
                                 profileSelected = homeTab == "profile" && !settingsOpen,
                                 onSelect = { tab ->
@@ -5199,7 +5236,7 @@ private fun PeopleDirectoryScreen(
 }
 
 @Composable
-private fun NexuraBottomBar(selected: String, profileSelected: Boolean, onSelect: (String) -> Unit, onProfile: () -> Unit) {
+private fun NexuraBottomBar(motionLevel: Int, selected: String, profileSelected: Boolean, onSelect: (String) -> Unit, onProfile: () -> Unit) {
     Surface(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp), color = Surface1, shape = RoundedCornerShape(24.dp), shadowElevation = 12.dp, border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.14f))) {
         Row(Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 5.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(Triple("settings", "Настройки", Icons.Default.Settings), Triple("contacts", "Люди", Icons.Default.GroupAdd), Triple("chats", "Чаты", Icons.Default.ChatBubbleOutline)).forEach { (key, label, icon) ->
@@ -5207,7 +5244,17 @@ private fun NexuraBottomBar(selected: String, profileSelected: Boolean, onSelect
                 val scale by animateFloatAsState(if (active) 1.08f else 1f, animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f), label = "nav-$key")
                 val itemColor by animateColorAsState(if (active) Accent.copy(alpha = 0.15f) else Color.Transparent, animationSpec = spring(stiffness = 420f), label = "nav-color-$key")
                 Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(17.dp)).background(itemColor).animateContentSize(spring(dampingRatio = 0.72f, stiffness = 480f)).clickable { onSelect(key) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText, modifier = Modifier.size(21.dp).graphicsLayer { scaleX = scale; scaleY = scale })
+                    val gearRotation by animateFloatAsState(
+                        targetValue = if (key == "settings" && active && motionLevel == 0) 180f else 0f,
+                        animationSpec = if (motionLevel == 0) spring(dampingRatio = 0.55f, stiffness = 220f) else tween(durationMillis = 0),
+                        label = "settings-gear"
+                    )
+                    Icon(icon, contentDescription = label, tint = if (active) Accent else SecondaryText,
+                        modifier = Modifier.size(21.dp).graphicsLayer {
+                            scaleX = if (motionLevel == 2) 1f else scale
+                            scaleY = if (motionLevel == 2) 1f else scale
+                            rotationZ = gearRotation
+                        })
                     Text(label, color = if (active) Accent else SecondaryText, fontSize = 10.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
                 }
             }
