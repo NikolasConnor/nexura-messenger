@@ -2621,6 +2621,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         }
                         AudioMiniPlayer()
                         NexuraBottomBar(
+                            motionLevel = motionLevel,
                             selected = homeTab,
                             profileSelected = homeTab == "profile",
                             onSelect = { tab ->
@@ -4040,6 +4041,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                             listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
                                                                 AnimatedReactionPickerItem(
                                                                     emoji = emoji,
+                                                                    motionLevel = motionLevel,
                                                                     onClick = {
                                                                         openMessageMenu = null
                                                                         scope.launch {
