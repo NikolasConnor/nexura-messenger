@@ -3745,8 +3745,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                     val isRead = mine && chat.kind == "direct" && peerReadReceiptAt?.let { it >= msg.createdAt } == true
                                     var swipeDragOffset by remember(msg.id) { mutableStateOf(0f) }
                                     val swipeTranslation by animateFloatAsState(
-                                        targetValue = swipeDragOffset,
-                                        animationSpec = spring(dampingRatio = 0.78f, stiffness = 520f),
+                                        targetValue = if (motionLevel == 2) 0f else swipeDragOffset,
+                                        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.78f, stiffness = 520f); 1 -> tween(110); else -> snap() },
                                         label = "message-swipe-reply"
                                     )
                                     Row(
@@ -3782,7 +3782,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
                                             )).background(if (mine) chatBubbleColor else Surface2)
-                                                .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
+                                                .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
+                                                    if (motionLevel == 1) tween(120) else spring(dampingRatio = 0.82f, stiffness = 520f)
+                                                ))
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
                                                     onLongClick = { openMessageMenu = null; reactionPickerFor = msg.id }
@@ -4100,8 +4102,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             val reactionsForMessage = messageReactions[msg.id].orEmpty()
                                             AnimatedVisibility(
                                                 visible = reactionsForMessage.isNotEmpty(),
-                                                enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.96f),
-                                                exit = fadeOut() + shrinkVertically()
+                                                enter = when (motionLevel) { 0 -> fadeIn(tween(180)) + expandVertically(tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180)); 1 -> fadeIn(tween(100)); else -> EnterTransition.None },
+                                                exit = when (motionLevel) { 0 -> fadeOut(tween(150)) + shrinkVertically(tween(150)); 1 -> fadeOut(tween(80)); else -> ExitTransition.None }
                                             ) {
                                                 Row(
                                                     Modifier.fillMaxWidth()
@@ -4113,6 +4115,9 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 ) {
                                                     reactionsForMessage.forEach { reaction ->
                                                         AnimatedReactionChip(
+
+                                                            motionLevel = motionLevel,
+
                                                             emoji = reaction.emoji,
                                                             count = reaction.count,
                                                             selected = reaction.selectedByMe,
@@ -4133,8 +4138,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                         }
                                             AnimatedVisibility(
                                                 visible = reactionPickerFor == msg.id,
-                                                enter = fadeIn() + expandVertically(),
-                                                exit = fadeOut() + shrinkVertically()
+                                                enter = when (motionLevel) { 0 -> fadeIn(tween(180)) + expandVertically(tween(180)); 1 -> fadeIn(tween(100)); else -> EnterTransition.None },
+                                                exit = when (motionLevel) { 0 -> fadeOut(tween(150)) + shrinkVertically(tween(150)); 1 -> fadeOut(tween(80)); else -> ExitTransition.None }
                                             ) {
                                                 Row(
                                                     Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 4.dp)
@@ -4146,7 +4151,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     listOf("❤️", "👍", "😂", "😮", "😢", "🔥").forEach { emoji ->
-                                                        AnimatedReactionPickerItem(emoji = emoji) {
+                                                        AnimatedReactionPickerItem(emoji = emoji, motionLevel = motionLevel) {
                                                             reactionPickerFor = null
                                                             scope.launch {
                                                                 try {
@@ -4280,8 +4285,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Spacer(Modifier.width(3.dp))
                                 val hasOutgoingContent = draft.isNotBlank() || pendingMediaUri != null
                                 val sendButtonScale by animateFloatAsState(
-                                    targetValue = if (hasOutgoingContent || recordingVoice) 1.06f else 1f,
-                                    animationSpec = spring(dampingRatio = 0.62f, stiffness = 420f),
+                                    targetValue = if (motionLevel == 2 || !(hasOutgoingContent || recordingVoice)) 1f else if (motionLevel == 1) 1.025f else 1.06f,
+                                    animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.62f, stiffness = 420f); 1 -> tween(120); else -> snap() },
                                     label = "composer-action-scale"
                                 )
                                 IconButton(
@@ -5502,26 +5507,26 @@ private fun chatMessagePreview(message: MessageItem, ownUserId: String): String 
 }
 
 @Composable
-private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
+private fun AnimatedReactionPickerItem(emoji: String, motionLevel: Int, onClick: () -> Unit) {
     var pressed by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (pressed) 1.28f else 1f,
-        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.48f, stiffness = 520f); 1 -> tween(100); else -> snap() },
         label = "reaction-picker-scale"
     )
     val rotation by animateFloatAsState(
         targetValue = 0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
+        animationSpec = if (motionLevel == 0) spring(dampingRatio = 0.7f, stiffness = 520f) else snap(),
         label = "reaction-picker-rotation"
     )
     val lift by animateFloatAsState(
         targetValue = if (pressed && emoji == "👍") -13f else if (pressed && emoji == "🔥") -5f else 0f,
-        animationSpec = spring(dampingRatio = 0.32f, stiffness = 420f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.32f, stiffness = 420f); 1 -> tween(100); else -> snap() },
         label = "reaction-picker-lift"
     )
     LaunchedEffect(pressed) {
         if (pressed) {
-            delay(150)
+            if (motionLevel == 0) delay(150) else if (motionLevel == 1) delay(70)
             onClick()
             pressed = false
         }
@@ -5539,36 +5544,36 @@ private fun AnimatedReactionPickerItem(emoji: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+private fun AnimatedReactionChip(motionLevel: Int, emoji: String, count: Int, selected: Boolean, onClick: () -> Unit) {
     var pulse by remember(emoji) { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (pulse) 1.06f else 1f,
-        animationSpec = spring(dampingRatio = 0.46f, stiffness = 520f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.46f, stiffness = 520f); 1 -> tween(100); else -> snap() },
         label = "reaction-chip-scale"
     )
     val emojiScale by animateFloatAsState(
         targetValue = if (pulse) 1.28f else 1f,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = 560f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.42f, stiffness = 560f); 1 -> tween(100); else -> snap() },
         label = "reaction-chip-emoji-scale"
     )
     val chipColor by animateColorAsState(
         targetValue = if (selected) Accent.copy(alpha = 0.92f) else Surface2.copy(alpha = 0.96f),
-        animationSpec = spring(stiffness = 420f),
+        animationSpec = when (motionLevel) { 0 -> spring(stiffness = 420f); 1 -> tween(100); else -> snap() },
         label = "reaction-chip-color"
     )
     val emojiRotation by animateFloatAsState(
         targetValue = 0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
+        animationSpec = if (motionLevel == 0) spring(dampingRatio = 0.7f, stiffness = 520f) else snap(),
         label = "reaction-emoji-rotation"
     )
     val emojiLift by animateFloatAsState(
         targetValue = if (pulse) -2f else 0f,
-        animationSpec = spring(dampingRatio = 0.48f, stiffness = 520f),
+        animationSpec = when (motionLevel) { 0 -> spring(dampingRatio = 0.48f, stiffness = 520f); 1 -> tween(100); else -> snap() },
         label = "reaction-emoji-lift"
     )
     LaunchedEffect(pulse) {
         if (pulse) {
-            delay(300)
+            if (motionLevel == 0) delay(300) else if (motionLevel == 1) delay(100)
             pulse = false
         }
     }
@@ -5580,7 +5585,9 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, o
             .background(chipColor)
             .border(1.dp, if (selected) Accent else SecondaryText.copy(alpha = 0.22f), CircleShape)
             .clickable { if (!pulse) { pulse = true; onClick() } }
-            .animateContentSize(spring(dampingRatio = 0.82f, stiffness = 480f))
+            .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
+                if (motionLevel == 1) tween(100) else spring(dampingRatio = 0.82f, stiffness = 480f)
+            ))
             .padding(horizontal = 9.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
