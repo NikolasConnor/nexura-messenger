@@ -1,15 +1,15 @@
-name: Deploy Nexura website to GitHub Pages
+name: Deploy Nexura website and web app to GitHub Pages
 
 on:
   push:
     branches:
-      - release/messenger-first
+      - release/public-apk-site
     paths:
       - "website/**"
       - "web/**"
       - "crypto-core/**"
       - "crypto-wasm/**"
-      - ".github/workflows/pages.yml"
+      - ".github/workflows/nexura-pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: github-pages
+  group: nexura-pages
   cancel-in-progress: true
 
 jobs:
@@ -28,31 +28,43 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
+
       - name: Set up Rust and WebAssembly target
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
       - name: Set up wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
+
       - name: Build shared Olm WebAssembly module
         run: wasm-pack build crypto-wasm --target web --out-dir ../web/src/crypto/pkg
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Build Nexura Web
         working-directory: web
+        env:
+          VITE_NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY: ${{ vars.NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY }}
         run: |
-          npm install --no-audit --no-fund
+          npm install --no-audit --no-fund --onnxruntime-node-install-cuda=skip
           npm run build -- --base=/nexura-messenger/app/ --outDir=../website/app
-      - name: Configure Pages
+
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - name: Upload website
         uses: actions/upload-pages-artifact@v3
         with:
           path: website
-      - name: Deploy
+
+      - name: Deploy website
         id: deployment
         uses: actions/deploy-pages@v4

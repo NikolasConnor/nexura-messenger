@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nikolasconnor.github.io/nexura-messenger/sitemap.xml

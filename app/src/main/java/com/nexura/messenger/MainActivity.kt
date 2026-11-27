@@ -119,11 +119,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.messaging.FirebaseMessaging
 
-private val Bg = Color(0xFF0B0914)
-private val Surface1 = Color(0xFF151126)
-private val Surface2 = Color(0xFF211A35)
-private val Accent = Color(0xFF9B6BFF)
-private val Accent2 = Color(0xFF6842D8)
+private val Bg = Color(0xFF080D18)
+private val Surface1 = Color(0xFF111C2D)
+private val Surface2 = Color(0xFF1A2940)
+private val Accent = Color(0xFF4F8DFF)
+private val Accent2 = Color(0xFF2865C7)
 private val MainText = Color(0xFFF5F7FB)
 private val SecondaryText = Color(0xFFA4AFBF)
 private val Danger = Color(0xFFFF858D)
@@ -247,10 +247,10 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var showChatOptionsMenu by remember { mutableStateOf(false) }
     var showChatModeDialog by remember { mutableStateOf(false) }
     var changingChatMode by remember { mutableStateOf(false) }
-    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF100C1D)) }
+    var chatWallpaperColor by remember { mutableStateOf(Color(0xFF080D18)) }
     var chatWallpaperId by remember { mutableStateOf("midnight") }
     var chatWallpaperImage by remember { mutableStateOf<String?>(null) }
-    var chatBubbleColor by remember { mutableStateOf(Color(0xFF6945C7)) }
+    var chatBubbleColor by remember { mutableStateOf(Color(0xFF2865C7)) }
     var recordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceFile by remember { mutableStateOf<File?>(null) }
@@ -319,12 +319,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             chatWallpaperColor = Color(prefs.getInt("wallpaper_$chatId", 0xFF100C1D.toInt()))
             chatWallpaperId = prefs.getString("wallpaper_pattern_$chatId", "midnight") ?: "midnight"
             chatWallpaperImage = prefs.getString("wallpaper_image_$chatId", null)
-            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF6945C7.toInt()))
+            chatBubbleColor = Color(prefs.getInt("bubble_$chatId", 0xFF2865C7.toInt()))
         } ?: run {
-            chatWallpaperColor = Color(0xFF100C1D)
+            chatWallpaperColor = Color(0xFF080D18)
             chatWallpaperId = "midnight"
             chatWallpaperImage = null
-            chatBubbleColor = Color(0xFF6945C7)
+            chatBubbleColor = Color(0xFF2865C7)
         }
     }
 
@@ -2146,12 +2146,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     }
                     if (chatThemeOpen) {
                         val wallpaperOptions = listOf(
-                            Triple("midnight", "Полночь", Color(0xFF100C1D)), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
+                            Triple("midnight", "Полночь", Color(0xFF080D18)), Triple("circuit", "Схема", Color(0xFF0D1720)), Triple("orbit", "Орбита", Color(0xFF101526)),
                             Triple("forest", "Тайга", Color(0xFF101D1A)), Triple("ocean", "Глубина", Color(0xFF0D1C27)), Triple("rain", "Дождь", Color(0xFF171C27)),
                             Triple("mono", "Графит", Color(0xFF17191F)), Triple("bloom", "Сакура", Color(0xFF211923)), Triple("ember", "Жар", Color(0xFF241815)),
                             Triple("geometry", "Контур", Color(0xFF171725)), Triple("pixel", "Пиксель", Color(0xFF151B25)), Triple("tide", "Прилив", Color(0xFF101F25))
                         )
-                        val bubbleOptions = listOf("Фиолетовый" to Color(0xFF6945C7), "Лавандовый" to Color(0xFF7657B8), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
+                        val bubbleOptions = listOf("Электрический синий" to Color(0xFF4F8DFF), "Графитовый синий" to Color(0xFF1A2940), "Синий" to Color(0xFF304B83), "Голубой" to Color(0xFF245C78), "Изумрудный" to Color(0xFF23634F), "Розовый" to Color(0xFF79445F), "Графит" to Color(0xFF414B59))
                         AlertDialog(
                             onDismissRequest = { chatThemeOpen = false },
                             containerColor = Surface1,
@@ -2207,7 +2207,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             },
                             confirmButton = { TextButton(onClick = { chatThemeOpen = false }) { Text("Готово") } },
                             dismissButton = { TextButton(onClick = {
-                                chatWallpaperColor = Color(0xFF100C1D)
+                                chatWallpaperColor = Color(0xFF080D18)
                                 chatWallpaperId = "midnight"
                                 chatWallpaperImage = null
                                 chatBubbleColor = Color(0xFF304B83)
@@ -2525,7 +2525,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                     ) {
                         Column(Modifier.fillMaxSize()) {
                         Row(
-                            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF21143B)))).padding(horizontal = 6.dp, vertical = 8.dp),
+                            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(Surface1, Color(0xFF1A2940)))).padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = { selected = null; peerReadReceiptAt = null; messages = emptyList(); replyTarget = null; loadChats() }) {
@@ -2840,7 +2840,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     topStart = 20.dp, topEnd = 20.dp,
                                                     bottomStart = if (mine) 20.dp else 6.dp,
                                                     bottomEnd = if (mine) 6.dp else 20.dp
-                                                )).background(if (mine) chatBubbleColor else Color(0xFF211A35))
+                                                )).background(if (mine) chatBubbleColor else Color(0xFF1A2940))
                                                 .animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f))
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
@@ -2940,7 +2940,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 } else if (msg.mediaKind == "file") {
                                                     Row(
                                                         Modifier.width(250.dp).clip(RoundedCornerShape(16.dp))
-                                                            .background(Brush.linearGradient(listOf(Color(0xFF29203E), Surface2)))
+                                                            .background(Brush.linearGradient(listOf(Color(0xFF263F62), Surface2)))
                                                             .border(1.dp, Accent.copy(alpha = 0.20f), RoundedCornerShape(16.dp))
                                                             .clickable {
                                                                 try {
@@ -3200,7 +3200,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             if (replyTarget != null) {
                                 Row(
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
-                                        .background(Brush.horizontalGradient(listOf(Color(0xFF251A3D), Surface2)))
+                                        .background(Brush.horizontalGradient(listOf(Color(0xFF1A2940), Surface2)))
                                         .border(1.dp, Accent.copy(alpha = 0.28f), RoundedCornerShape(13.dp))
                                         .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -3448,7 +3448,7 @@ private fun AudioMessagePlayer(
     Column(
         Modifier.widthIn(min = 245.dp, max = 300.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF30234B), Surface2)))
+            .background(Brush.linearGradient(listOf(Color(0xFF263F62), Surface2)))
             .border(1.dp, Accent.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
             .padding(horizontal = 12.dp, vertical = 11.dp)
     ) {

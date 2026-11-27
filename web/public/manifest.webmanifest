@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "Nexura Messenger",
+  "short_name": "Nexura",
+  "description": "Личные и групповые переписки Nexura",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#080D18",
+  "theme_color": "#080D18",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
