@@ -1027,7 +1027,7 @@ class NexuraApi(private val store: SessionStore, private val appContext: Context
                     uid, ownDeviceId, E2eeMessageEnvelope.Kind.NORMAL, ciphertext
                 )
             } else {
-                val preKey = consumeOwnE2eePreKey(chatId, ownDeviceId)
+                val preKey = consumeGroupE2eePreKey(chatId, uid, ownDeviceId)
                 if (preKey.optString("ed25519_key") != selfEd ||
                     preKey.optString("curve25519_key") != selfCurve) {
                     throw IOException("Ключ собственного устройства изменился. Отправка отменена.")
