@@ -1922,7 +1922,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             .padding(start = 12.dp, end = 7.dp, top = 11.dp, bottom = 11.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0)
+                                        ChatListAvatar(chat.title, chat.avatar, chat.kind == "group", chat.unreadCount > 0, motionEnabled, motionDuration)
                                         Column(Modifier.weight(1f).padding(start = 12.dp, end = 5.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(chat.title, color = MainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
@@ -2017,7 +2017,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                     }.padding(horizontal = 8.dp, vertical = 9.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0)
+                                                ChatListAvatar(destination.title, destination.avatar, destination.kind == "group", destination.unreadCount > 0, motionEnabled, motionDuration)
                                                 Column(Modifier.weight(1f).padding(start = 11.dp)) {
                                                     Text(destination.title, color = MainText, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                                     Text(if (destination.kind == "group") "Группа" else "Личный чат", color = SecondaryText, fontSize = 11.sp)
@@ -2577,7 +2577,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                 Icon(Icons.Default.ArrowBack, "Назад к чатам", tint = MainText)
                             }
                             if (chat.kind == "group") {
-                                ChatListAvatar(chat.title, chat.avatar, true, false)
+                                ChatListAvatar(chat.title, chat.avatar, true, false, motionEnabled, motionDuration)
                             } else {
                                 Box(Modifier.clickable {
                                     val peerId = chat.peerUserId
@@ -2592,7 +2592,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                             finally { loadingProfile = false }
                                         }
                                     } else error = "Не удалось определить собеседника"
-                                }) { ChatListAvatar(chat.title, chat.avatar, false, false) }
+                                }) { ChatListAvatar(chat.title, chat.avatar, false, false, motionEnabled, motionDuration) }
                             }
                             Column(Modifier.weight(1f).padding(start = 12.dp).clickable(enabled = chat.kind == "direct") {
                                 val peerId = chat.peerUserId
@@ -3868,7 +3868,7 @@ private fun AnimatedReactionChip(emoji: String, count: Int, selected: Boolean, m
 }
 
 @Composable
-private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean) {
+private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasUnread: Boolean, motionEnabled: Boolean, motionDuration: Int) {
     val imageUrl = avatar?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
     val emoji = avatar?.takeIf { it.isNotBlank() && imageUrl == null && it != "null" }
         ?: name.takeIf { it in listOf("🙂", "😎", "🦊", "🐼", "🐸", "🐱", "🚀", "🌙") }
@@ -3909,8 +3909,8 @@ private fun ChatListAvatar(name: String, avatar: String?, isGroup: Boolean, hasU
         }
         AnimatedVisibility(
             visible = hasUnread,
-            enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.45f),
-            exit = fadeOut(tween(180)) + shrinkVertically(),
+            enter = if (motionEnabled) fadeIn(tween(motionDuration)) + scaleIn(initialScale = 0.45f) else EnterTransition.None,
+            exit = if (motionEnabled) fadeOut(tween(motionDuration)) + shrinkVertically() else ExitTransition.None,
             modifier = Modifier.align(Alignment.BottomEnd)
         ) {
             Box(
