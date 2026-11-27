@@ -3789,9 +3789,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                                                 bottomStart = if (mine) 20.dp else 6.dp,
                                                 bottomEnd = if (mine) 6.dp else 20.dp
                                             )).background(if (mine) chatBubbleColor else Surface2)
-                                                .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
-                                                    if (motionLevel == 1) tween(120) else spring(dampingRatio = 0.82f, stiffness = 520f)
-                                                ))
+                                                // Avoid per-message layout animations in the lazy list; swipe/reaction
+                                                // feedback remains animated without keeping size animators per bubble.
                                                 .combinedClickable(
                                                     onClick = { reactionPickerFor = null; openMessageMenu = null },
                                                     onLongClick = { openMessageMenu = null; reactionPickerFor = msg.id }
@@ -5006,7 +5005,7 @@ private fun AudioMessagePlayer(
         }
         if (transcript.isNullOrBlank() && !transcribing) {
             Text(
-                "Распознавание выполняется на устройстве: Whisper распознаёт русский и английский. При первом запуске потребуется загрузить модель (~148 МБ); аудио не отправляется на сервер.",
+                "Распознавание выполняется на устройстве: Whisper распознаёт русский и английский. При первом запуске потребуется загрузить быструю модель (~78 МБ); аудио не отправляется на сервер.",
                 color = SecondaryText,
                 fontSize = 9.sp,
                 lineHeight = 12.sp,
@@ -5335,9 +5334,7 @@ private fun PeopleDirectoryScreen(
                             when (motionLevel) { 0 -> Modifier.animateItemPlacement(); 1 -> Modifier.animateItemPlacement(tween(120)); else -> Modifier }
                         )
                             .clip(RoundedCornerShape(18.dp)).background(Surface1).border(1.dp, Surface2.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
-                            .then(if (motionLevel == 2) Modifier else Modifier.animateContentSize(
-                                if (motionLevel == 1) tween(120) else spring(dampingRatio = 0.82f, stiffness = 420f)
-                            ))
+                            // Keep placement motion, but avoid a second size animator on every directory row.
                             .clickable { onOpenProfile(person) }
                             .padding(horizontal = 12.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
