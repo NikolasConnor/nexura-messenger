@@ -2321,6 +2321,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         if (homeTab == "profile") {
                             OwnProfileScreen(
                                 modifier = Modifier.weight(1f),
+                                motionLevel = motionLevel,
                                 name = profileName,
                                 username = profileUsername,
                                 bio = profileBio,
@@ -5213,6 +5214,7 @@ private fun AudioMiniPlayer() {
 @Composable
 private fun OwnProfileScreen(
     modifier: Modifier = Modifier,
+    motionLevel: Int,
     name: String,
     username: String,
     bio: String,
@@ -5227,7 +5229,9 @@ private fun OwnProfileScreen(
     onAddPhoto: () -> Unit,
     onOpenPhoto: (SocialMediaItem) -> Unit
 ) {
-    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).animateContentSize()) {
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).then(
+        if (motionLevel == 2) Modifier else Modifier.animateContentSize(if (motionLevel == 1) tween(120) else spring())
+    )) {
         Box(Modifier.fillMaxWidth().height(196.dp).clip(RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp)).background(Brush.linearGradient(listOf(Color(0xFF1A2940), Color(0xFF356DDB), Color(0xFF080D18))))) {
             if (isVideoCover(bannerUrl)) MutedVideoBanner(bannerUrl, Modifier.fillMaxSize())
             else if (bannerUrl.isNotBlank()) AsyncImage(model = bannerUrl, contentDescription = "Обложка профиля", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -5616,8 +5620,12 @@ private fun AnimatedReactionChip(motionLevel: Int, emoji: String, count: Int, se
                 scaleY = emojiScale
             }
         )
-        AnimatedContent(targetState = count, label = "reaction-count") { value ->
-            Text(value.toString(), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+        if (motionLevel == 2) {
+            Text(count.toString(), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+        } else {
+            AnimatedContent(targetState = count, label = "reaction-count") { value ->
+                Text(value.toString(), color = MainText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+            }
         }
     }
 }
