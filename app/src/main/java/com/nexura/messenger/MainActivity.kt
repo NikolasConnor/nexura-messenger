@@ -36,6 +36,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -212,6 +213,12 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var searching by remember { mutableStateOf(false) }
     var openingDirectUserId by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var motionMode by remember {
+        mutableStateOf(context.getSharedPreferences("nexura_ui_preferences", Context.MODE_PRIVATE)
+            .getString("motion_mode", "full") ?: "full")
+    }
+    val motionEnabled = motionMode != "off"
+    val motionDuration = when (motionMode) { "minimal" -> 120; "off" -> 0; else -> 260 }
     var homeTab by remember { mutableStateOf("chats") }
     var deviceContacts by remember { mutableStateOf(emptyList<DeviceContact>()) }
     var syncingContacts by remember { mutableStateOf(false) }
@@ -1119,7 +1126,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
             onBackground = MainText, onSurface = MainText
         )
     ) {
-        Surface(Modifier.fillMaxSize(), color = Bg) {
+        Surface(Modifier.fillMaxSize().then(if (motionEnabled) Modifier.animateContentSize(tween(motionDuration)) else Modifier), color = Bg) {
             when {
                 !signedIn -> {
                     Column(
@@ -1231,6 +1238,40 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { settingsOpen = false; error = ""; notice = "" }) { Icon(Icons.Default.ArrowBack, "Назад", tint = MainText) }
                             Text("Настройки", color = MainText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Card(
+                            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp).animateContentSize(),
+                            colors = CardDefaults.cardColors(containerColor = Surface1),
+                            shape = RoundedCornerShape(18.dp)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Settings, contentDescription = null, tint = Accent, modifier = Modifier.size(22.dp))
+                                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                        Text("Анимации интерфейса", color = MainText, fontWeight = FontWeight.SemiBold)
+                                        Text("Плавность переходов и отклик элементов", color = SecondaryText, fontSize = 11.sp)
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                listOf("full" to "Полные", "minimal" to "Минимальные", "off" to "Выключены").forEach { (value, label) ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                motionMode = value
+                                                context.getSharedPreferences("nexura_ui_preferences", Context.MODE_PRIVATE)
+                                                    .edit().putString("motion_mode", value).apply()
+                                            }.padding(vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(selected = motionMode == value, onClick = {
+                                            motionMode = value
+                                            context.getSharedPreferences("nexura_ui_preferences", Context.MODE_PRIVATE)
+                                                .edit().putString("motion_mode", value).apply()
+                                        })
+                                        Text(label, color = MainText, modifier = Modifier.padding(start = 8.dp))
+                                    }
+                                }
+                            }
                         }
                         Text("АККАУНТ", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Card(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 22.dp), colors = CardDefaults.cardColors(containerColor = Surface1), shape = RoundedCornerShape(18.dp)) {
@@ -1499,7 +1540,7 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             Spacer(Modifier.width(7.dp))
                             Surface(shape = CircleShape, color = Surface1) {
                                 IconButton(onClick = { settingsOpen = true; error = ""; notice = ""; scope.launch { try { val p = api.myProfile(); profileName = p.displayName; profileAvatar = p.avatar.ifBlank { "🙂" }; profileBio = p.bio; profileAge = p.age?.toString().orEmpty(); val privacy = api.privacySettings(); showOnlineStatus = privacy.showOnlineStatus; readReceiptsEnabled = privacy.readReceiptsEnabled; blockedUsers = api.blockedUsers(); ownE2eeDevices = api.ownE2eeDevices() } catch (e: Exception) { error = e.message ?: "Не удалось загрузить настройки" } } }) {
-                                    Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText)
+                                    Icon(Icons.Default.Settings, "Профиль и настройки", tint = SecondaryText, modifier = Modifier.graphicsLayer { rotationZ = if (motionEnabled && settingsOpen) 180f else 0f })
                                 }
                             }
                         }
