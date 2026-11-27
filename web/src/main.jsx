@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { MessageCircle, Search, Settings, LogOut, Send, Plus, Palette, ShieldCheck, LockKeyhole, Users, ArrowLeft, RefreshCw, UserRound, Mail, Eye, EyeOff, CheckCheck, Copy, Reply, MoreHorizontal, SmilePlus, Pencil, Trash2, Forward, Paperclip, Mic, Square, Play, Pause, Camera, Image as ImageIcon, Video, Heart, MessageSquare, ChevronLeft, X, UserRoundSearch, Phone, PhoneOff, MicOff, Bell, Pin, Star, Clock } from 'lucide-react';
 import './styles.css';
-const NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY = 'BIj_8OWtr60he5EeUm-LOay_IHrLG2BOowpQNZT_XY_3Ib2b2yCisA6QnpknDGEc3os8mXKqKorzt3FaFDqgSbY';
+const NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY = String(import.meta.env.VITE_NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
 function decodeVapidPublicKey(value) {
   const padding = '='.repeat((4 - value.length % 4) % 4);
   const raw = atob(value.replace(/-/g, '+').replace(/_/g, '/') + padding);
@@ -18,6 +18,7 @@ import { createRecoveryCode, encryptBackup, decryptBackup } from './crypto/backu
 import { loadMessageReactions, toggleMessageReaction, markConversationRead, updateMyProfile, deleteMessage, editEncryptedDirectMessage, getPinnedMessage, setPinnedMessage, sendCloudMessage, editCloudMessage, updateConversationChatMode } from './api/messenger.js';
 import { ensureBrowserE2eeDevice, sendBrowserDirectMessage, sendBrowserGroupMessage, decryptBrowserGroupMessage } from './crypto/transport.js';
 import { encryptAndUploadMedia, downloadAndDecryptMedia } from './crypto/media.js';
+import { transcribeVoiceMessage } from './api/transcription.js';
 
 const SUPABASE_URL = 'https://lyhzawblxcvpgpjrkspc.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G-EJKck-KO2cgoxaMlg9ag_CQZvDUEY';
@@ -98,17 +99,18 @@ const browserVoiceUrls = new Set();
 let sharedVoiceMeta = { title:'', subtitle:'', playing:false, current:0, duration:0, speed:1, active:false };
 function publishVoiceState(patch={}) { sharedVoiceMeta={...sharedVoiceMeta,...patch}; if(typeof window!=='undefined') window.dispatchEvent(new CustomEvent('nexura:voice-state',{detail:sharedVoiceMeta})); }
 function MediaMessage({ payload, supabase, chatTitle }) {
- const [url,setUrl]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(true),[playerState,setPlayerState]=useState(sharedVoiceMeta),[speed,setSpeed]=useState(1);
- useEffect(()=>{let alive=true,objectUrl='';downloadAndDecryptMedia(supabase,payload).then(blob=>{if(!alive)return;objectUrl=URL.createObjectURL(blob);browserVoiceUrls.add(objectUrl);setUrl(objectUrl);}).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;if(objectUrl){browserVoiceUrls.delete(objectUrl);if(objectUrl!==sharedVoiceUrl)URL.revokeObjectURL(objectUrl);}};},[payload.path,supabase]);
+ const [url,setUrl]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(true),[playerState,setPlayerState]=useState(sharedVoiceMeta),[speed,setSpeed]=useState(1),[audioBlob,setAudioBlob]=useState(null),[transcript,setTranscript]=useState(''),[transcribing,setTranscribing]=useState(false),[transcriptionError,setTranscriptionError]=useState('');
+ useEffect(()=>{let alive=true,objectUrl='';downloadAndDecryptMedia(supabase,payload).then(blob=>{if(!alive)return;objectUrl=URL.createObjectURL(blob);browserVoiceUrls.add(objectUrl);setUrl(objectUrl);if(payload.media_type==='audio')setAudioBlob(blob);}).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;if(objectUrl){browserVoiceUrls.delete(objectUrl);if(objectUrl!==sharedVoiceUrl)URL.revokeObjectURL(objectUrl);}};},[payload.path,supabase]);
  useEffect(()=>{const sync=e=>setPlayerState(e.detail||sharedVoiceMeta);window.addEventListener('nexura:voice-state',sync);return()=>window.removeEventListener('nexura:voice-state',sync);},[]);
  const isCurrent=!!url&&sharedVoiceUrl===url,playing=isCurrent&&playerState.playing,current=isCurrent?playerState.current:0,duration=isCurrent?playerState.duration:0;
  const toggle=async()=>{if(!sharedVoiceAudio||!url)return;try{if(sharedVoiceUrl!==url){sharedVoiceAudio.pause();if(sharedVoiceUrl&&!browserVoiceUrls.has(sharedVoiceUrl))URL.revokeObjectURL(sharedVoiceUrl);sharedVoiceAudio.src=url;sharedVoiceUrl=url;sharedVoiceAudio.playbackRate=speed;publishVoiceState({title:payload.name||chatTitle||'Голосовое сообщение',subtitle:chatTitle||'Nexura',playing:false,current:0,duration:0,speed,active:true});}if(sharedVoiceAudio.paused)await sharedVoiceAudio.play();else sharedVoiceAudio.pause();}catch{setError('Браузер не смог воспроизвести аудио');}};
  const changeSpeed=()=>{const next=speed===1?1.5:speed===1.5?2:1;setSpeed(next);if(isCurrent&&sharedVoiceAudio){sharedVoiceAudio.playbackRate=next;publishVoiceState({speed:next});}};
+ const runTranscription=async()=>{if(!audioBlob||transcribing)return;setTranscribing(true);setTranscriptionError('');try{const result=await transcribeVoiceMessage(supabase,audioBlob,payload.name||'voice-message.webm');setTranscript(result.text);}catch(e){setTranscriptionError(e?.message||'Не удалось распознать голосовое сообщение');}finally{setTranscribing(false);}};
  if(busy)return <div className="media-loading">Расшифровываем вложение…</div>;
  if(error)return <div className="media-error">{error}</div>;
  if(payload.media_type==='image')return <img className="media-image-preview" src={url} alt={payload.name||'Изображение'}/>;
  if(payload.media_type==='video')return <video className="media-video-preview" src={url} controls preload="metadata"/>;
- if(payload.media_type==='audio')return <div className="voice-player"><button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button><div className="voice-track"><div className="voice-wave" aria-hidden="true">{Array.from({length:32},(_,i)=><span key={i} style={{height:(7+Math.abs(Math.sin(i*2.17)*Math.cos(i*.43))*19)+'px',opacity:duration&&i/32<=current/duration?1:.55}}/>)}</div><input aria-label="Позиция воспроизведения" type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={e=>{if(isCurrent&&sharedVoiceAudio)sharedVoiceAudio.currentTime=Number(e.target.value);}}/><div className="voice-time"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div><button type="button" className="voice-speed" onClick={changeSpeed} aria-label="Скорость воспроизведения">{speed}×</button></div>;
+ if(payload.media_type==='audio')return <div className="voice-message"><div className="voice-player"><button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button><div className="voice-track"><div className="voice-wave" aria-hidden="true">{Array.from({length:32},(_,i)=><span key={i} style={{height:(7+Math.abs(Math.sin(i*2.17)*Math.cos(i*.43))*19)+'px',opacity:duration&&i/32<=current/duration?1:.55}}/>)}</div><input aria-label="Позиция воспроизведения" type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={e=>{if(isCurrent&&sharedVoiceAudio)sharedVoiceAudio.currentTime=Number(e.target.value);}}/><div className="voice-time"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div><button type="button" className="voice-speed" onClick={changeSpeed} aria-label="Скорость воспроизведения">{speed}×</button></div><div className="voice-transcription"><button type="button" className="voice-transcribe-btn" onClick={runTranscription} disabled={!audioBlob||transcribing}>{transcribing?'Распознаём…':transcript?'Распознать заново':'Расшифровать'}</button>{transcriptionError&&<div className="voice-transcription-error">{transcriptionError}</div>}{transcript&&<div className="voice-transcript-text"><b>Расшифровка</b><p>{transcript}</p></div>}</div></div>;
  return <a className="file-attachment" href={url} download={payload.name||'attachment'}><span className="file-attachment-icon">↧</span><span className="file-attachment-info"><b>{payload.name}</b><small>{(payload.size/1024/1024).toFixed(2)} МБ · зашифрованный файл</small></span><span className="file-download">Скачать</span></a>;
 }
 function BrowserAudioDock({state,onToggle,onSeek,onClose}) { if(!state.active)return null;return <div className="audio-dock" role="region" aria-label="Аудиопроигрыватель"><div className="audio-dock-icon"><Mic size={18}/></div><div className="audio-dock-info"><b>{state.title||'Голосовое сообщение'}</b><span>{state.subtitle||'Nexura'}</span><input aria-label="Перемотка аудио" type="range" min="0" max={state.duration||0} step="0.1" value={Math.min(state.current,state.duration||0)} onChange={e=>onSeek(Number(e.target.value))}/><small>{formatDuration(state.current)} / {formatDuration(state.duration)}</small></div><button type="button" className="voice-play" onClick={onToggle} aria-label={state.playing?'Пауза':'Продолжить'}>{state.playing?<Pause size={17}/>:<Play size={17}/>}</button><button type="button" className="audio-dock-close" onClick={onClose} aria-label="Закрыть плеер">×</button></div>;}
@@ -122,7 +124,7 @@ function PendingMediaPreview({ file }) {
   return <span className="pending-file-icon">📎</span>;
 }
 
-import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
+import { loadProfile, saveProfile, uploadProfileBanner, loadProfilePhotos, loadStories, loadPhotoFeed as fetchPhotoFeed, publishSocialMedia, deleteSocialMedia, toggleSocialLike, loadSocialComments, addSocialComment, loadPeopleDirectory } from './api/social.js';
 
 class AppErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { failed: false }; }
@@ -230,6 +232,9 @@ function App() {
   const [storiesFeed, setStoriesFeed] = useState([]);
   const [storiesFeedLoading, setStoriesFeedLoading] = useState(false);
   const [storiesFeedError, setStoriesFeedError] = useState('');
+  const [photoFeed, setPhotoFeed] = useState([]);
+  const [photoFeedLoading, setPhotoFeedLoading] = useState(false);
+  const [photoFeedError, setPhotoFeedError] = useState('');
   const [people, setPeople] = useState([]);
   const [peopleQuery, setPeopleQuery] = useState('');
   const [peopleOffset, setPeopleOffset] = useState(0);
@@ -399,13 +404,35 @@ function App() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     const onWorkerMessage = event => {
-      if (event.data?.type !== 'NEXURA_OPEN_CONVERSATION' || !event.data.conversationId) return;
-      const target = chats.find(item => item.id === event.data.conversationId);
-      if (target) { setActiveTab('chats'); setSelected(target); setMobileChatOpen(true); }
+      const data=event.data||{};
+      if(data.type==='NEXURA_INCOMING_CALL'){
+        if(!session?.user?.id||!data.callId||!data.callerId)return;
+        const target=chats.find(item=>item.id===data.conversationId);
+        if(target){setActiveTab('chats');setSelected(target);setMobileChatOpen(true);}
+        void receiveCallSignal({type:'offer',call_id:data.callId,from:data.callerId,to:session.user.id,conversation_id:data.conversationId,video:!!data.video,sent_at:data.sentAt});
+        return;
+      }
+      if(data.type!=='NEXURA_OPEN_CONVERSATION'||!data.conversationId)return;
+      const target=chats.find(item=>item.id===data.conversationId);
+      if(target){setActiveTab('chats');setSelected(target);setMobileChatOpen(true);}
     };
-    navigator.serviceWorker.addEventListener('message', onWorkerMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', onWorkerMessage);
-  }, [chats]);
+    navigator.serviceWorker.addEventListener('message',onWorkerMessage);
+    return()=>navigator.serviceWorker.removeEventListener('message',onWorkerMessage);
+  },[chats,session?.user?.id]);
+
+  useEffect(()=>{
+    if(!session?.user?.id)return;
+    const params=new URLSearchParams(window.location.search);
+    const callId=params.get('nexura_call'),callerId=params.get('nexura_caller');
+    if(!callId||!callerId)return;
+    const conversationId=params.get('nexura_conversation')||'';
+    const video=params.get('nexura_video')==='1';
+    const sentAt=Number(params.get('nexura_sent_at'))||Date.now();
+    ['nexura_call','nexura_caller','nexura_conversation','nexura_video','nexura_sent_at'].forEach(key=>params.delete(key));
+    const query=params.toString();
+    window.history.replaceState({},'',window.location.pathname+(query?'?'+query:'')+window.location.hash);
+    void receiveCallSignal({type:'offer',call_id:callId,from:callerId,to:session.user.id,conversation_id:conversationId,video,sent_at:sentAt});
+  },[session?.user?.id]);
 
   const chatLoadSeq = useRef(0);
   const loadChats = useCallback(async ({ silent = false } = {}) => {
@@ -484,8 +511,9 @@ function App() {
   useEffect(() => {
     if (!session) { setChats([]); setSelected(null); setProfile(null); return; }
     loadChats();
-    supabase.from('profiles').select('id,display_name,username,avatar_url,bio,age').eq('id', session.user.id).maybeSingle()
-      .then(({data}) => setProfile(data));
+    loadProfile(supabase, session.user.id)
+      .then(data => setProfile(data))
+      .catch(error => setNotice('Не удалось загрузить профиль: ' + (error?.message || 'ошибка')));
   }, [session?.user?.id]);
 
   const decryptMessageRow = useCallback(async (chat, message, cloudPlaintext = null) => {
@@ -735,15 +763,32 @@ function App() {
     } finally { setStoriesFeedLoading(false); }
   }
 
+  async function loadPhotoFeed() {
+    if(!session?.user?.id)return;
+    setPhotoFeedLoading(true);setPhotoFeedError('');
+    try {
+      const rows=await fetchPhotoFeed(supabase,session.user.id,60);
+      setPhotoFeed(rows);
+    } catch(error) {
+      console.error('Nexura photo feed:',error);
+      setPhotoFeedError(error?.message||'Не удалось загрузить ленту');
+    } finally {setPhotoFeedLoading(false);}
+  }
+
   useEffect(()=>{
     if(activeTab!=='people'||!session?.user?.id)return;
     void loadStoriesFeed();
+    void loadPhotoFeed();
     let timer=null;
-    const channel=supabase.channel('web-stories-feed-'+session.user.id)
-      .on('postgres_changes',{event:'*',schema:'public',table:'user_stories'},()=>{
-        if(timer)clearTimeout(timer);
-        timer=setTimeout(()=>void loadStoriesFeed(),250);
-      }).subscribe();
+    const refresh=()=>{
+      if(timer)clearTimeout(timer);
+      timer=setTimeout(()=>{void loadStoriesFeed();void loadPhotoFeed();},250);
+    };
+    const channel=supabase.channel('web-community-feed-'+session.user.id)
+      .on('postgres_changes',{event:'*',schema:'public',table:'user_stories'},refresh)
+      .on('postgres_changes',{event:'*',schema:'public',table:'profile_photos'},refresh)
+      .on('postgres_changes',{event:'*',schema:'public',table:'profile_photo_likes'},refresh)
+      .subscribe();
     return()=>{if(timer)clearTimeout(timer);supabase.removeChannel(channel);};
   },[activeTab,session?.user?.id]);
 
@@ -758,7 +803,7 @@ function App() {
       const {error:storageError}=await supabase.storage.from('nexura-social-media').remove([socialViewer.storage_path]);
       if(storageError)throw storageError;
       if(socialViewer.kind==='story'){setProfileStories(previous=>previous.filter(item=>item.id!==socialViewer.id));setStoriesFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
-      else setProfilePhotos(previous=>previous.filter(item=>item.id!==socialViewer.id));
+      else {setProfilePhotos(previous=>previous.filter(item=>item.id!==socialViewer.id));setPhotoFeed(previous=>previous.filter(item=>item.id!==socialViewer.id));}
       setSocialViewer(null);setNotice('Публикация удалена');
     }catch(error){setNotice('Не удалось удалить публикацию: '+error.message);}
     finally{setSocialBusy(false);}
@@ -766,15 +811,21 @@ function App() {
 
   async function loadOwnSocial() {
     if (!session?.user?.id) return;
-    try {
-      const [photos, activeStories, archivedStories] = await Promise.all([
-        loadProfilePhotos(supabase, session.user.id),
-        loadStories(supabase, {userId:session.user.id, activeOnly:true}),
-        loadStories(supabase, {userId:session.user.id, activeOnly:false})
-      ]);
-      const stories=[...activeStories,...archivedStories].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-      setProfilePhotos(photos); setProfileStories(stories);
-    } catch(error) { setNotice('Не удалось загрузить публикации: '+error.message); }
+    const userId = session.user.id;
+    const results = await Promise.allSettled([
+      loadProfilePhotos(supabase, userId),
+      loadStories(supabase, {userId, activeOnly:true}),
+      loadStories(supabase, {userId, activeOnly:false})
+    ]);
+    if (results[0].status === 'fulfilled') setProfilePhotos(results[0].value);
+    else setNotice('Не удалось загрузить фотографии: ' + (results[0].reason?.message || 'ошибка'));
+    const activeStories = results[1].status === 'fulfilled' ? results[1].value : [];
+    const archivedStories = results[2].status === 'fulfilled' ? results[2].value : [];
+    if (results[1].status === 'rejected' || results[2].status === 'rejected') {
+      const failure = results[1].status === 'rejected' ? results[1].reason : results[2].reason;
+      setNotice('Не удалось загрузить часть историй: ' + (failure?.message || 'ошибка'));
+    }
+    setProfileStories([...activeStories, ...archivedStories].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
   }
 
   async function toggleViewedUserBlock() {
@@ -830,10 +881,12 @@ function App() {
         const {error:removeError}=await supabase.from(table).delete().eq('id',data.id);
         if(removeError)throw removeError;
         setSocialLiked(false); setSocialViewer(v=>({...v,likeCount:Math.max(0,(v.likeCount||0)-1)}));
+        if(kind==='photo')setPhotoFeed(previous=>previous.map(item=>item.id===socialViewer.id?{...item,likedByMe:false,likeCount:Math.max(0,(item.likeCount||0)-1)}:item));
       } else {
         const {error:addError}=await supabase.from(table).insert({[key]:socialViewer.id,user_id:session.user.id});
         if(addError)throw addError;
         setSocialLiked(true); setSocialViewer(v=>({...v,likeCount:(v.likeCount||0)+1}));
+        if(kind==='photo')setPhotoFeed(previous=>previous.map(item=>item.id===socialViewer.id?{...item,likedByMe:true,likeCount:(item.likeCount||0)+1}:item));
       }
     } catch(error) { setNotice('Не удалось поставить реакцию: '+error.message); }
     finally { setSocialBusy(false); }
@@ -876,7 +929,10 @@ function App() {
         const published={...data,url:signed.signedUrl,profile:{display_name:profile?.display_name||'Вы',username:profile?.username||'',avatar_url:profile?.avatar_url||'🙂'}};
         setProfileStories(previous=>[published,...previous.filter(item=>item.id!==data.id)]);
         setStoriesFeed(previous=>[published,...previous.filter(item=>item.id!==data.id)].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)));
-      } else setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
+      } else {
+        setProfilePhotos(previous=>[{...data,url:signed.signedUrl},...previous]);
+        void loadPhotoFeed();
+      }
       setSocialCaption('');
       setNotice(kind==='story'?'История опубликована на 24 часа':'Фотография добавлена в профиль');
     } catch(error) { setNotice('Не удалось опубликовать: '+error.message); }
@@ -1016,6 +1072,7 @@ function App() {
 
   async function ensureWebPushSubscription() {
     if (!session?.user?.id) throw new Error('Сессия истекла');
+    if (!NEXURA_WEB_PUSH_VAPID_PUBLIC_KEY) throw new Error('Web Push ещё не настроен администратором Nexura.');
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Этот браузер не поддерживает Web Push');
     const registration = await navigator.serviceWorker.ready;
     let subscription = await registration.pushManager.getSubscription();
@@ -1044,6 +1101,15 @@ function App() {
       });
       if (error) console.warn('Nexura Web Push trigger failed:', error.message);
     } catch (error) { console.warn('Nexura Web Push trigger failed:', error?.message); }
+  }
+
+  async function triggerCallPush(conversationId, recipientUserId, callId, video=false) {
+    try {
+      const { error } = await supabase.functions.invoke('send-call-push', {
+        body: { conversation_id:conversationId, recipient_user_id:recipientUserId, call_id:callId, video, sent_at:Date.now() }
+      });
+      if (error) console.warn('Nexura call push trigger failed:', error.message);
+    } catch (error) { console.warn('Nexura call push trigger failed:', error?.message); }
   }
 
   useEffect(() => {
@@ -1409,6 +1475,7 @@ function App() {
       supabase.removeChannel(own);
       if(current.room){current.ending=true;current.room.disconnect().catch(()=>{});}
       (current.audioElements||[]).forEach(element=>{try{element.pause();element.remove();}catch{}});
+      (current.videoElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
       callRef.current={};
     };
   },[session?.user?.id]);
@@ -1420,7 +1487,7 @@ function App() {
     if(result!=='ok')throw new Error('Сервер сигнализации не подтвердил доставку');
   }
 
-  async function connectCallRoom({callId,peerUserId,conversationId,sendAnswer=false}) {
+  async function connectCallRoom({callId,peerUserId,conversationId,sendAnswer=false,video=false}) {
     const current=callRef.current;
     if(current.callId!==callId||current.room)return;
     const {data,error}=await supabase.functions.invoke('livekit-token',{
@@ -1431,15 +1498,21 @@ function App() {
     const room=new Room({adaptiveStream:true,dynacast:true});
     callRef.current={...callRef.current,room,ending:false};
     room.on(RoomEvent.TrackSubscribed,(track)=>{
-      if(track.kind!==Track.Kind.Audio)return;
       const element=track.attach();
       element.autoplay=true;element.setAttribute('playsinline','');
-      document.body.appendChild(element);
-      callRef.current.audioElements=[...(callRef.current.audioElements||[]),element];
+      if(track.kind===Track.Kind.Audio){
+        document.body.appendChild(element);
+        callRef.current.audioElements=[...(callRef.current.audioElements||[]),element];
+      }else if(track.kind===Track.Kind.Video){
+        element.className='nexura-call-video-remote';element.playsInline=true;
+        document.body.appendChild(element);
+        callRef.current.videoElements=[...(callRef.current.videoElements||[]),element];
+      }else track.detach().forEach(node=>node.remove());
     });
     room.on(RoomEvent.TrackUnsubscribed,(track)=>{
       track.detach().forEach(element=>{element.remove();});
       callRef.current.audioElements=(callRef.current.audioElements||[]).filter(element=>element.isConnected);
+      callRef.current.videoElements=(callRef.current.videoElements||[]).filter(element=>element.isConnected);
     });
     room.on(RoomEvent.ParticipantConnected,()=>{
       setCallUi(previous=>previous?{...previous,connected:true,status:'На связи',connectedAt:previous.connectedAt||Date.now()}:previous);
@@ -1453,14 +1526,25 @@ function App() {
     await room.connect(data.server_url,data.token);
     if(callRef.current.callId!==callId){await room.disconnect();return;}
     await room.localParticipant.setMicrophoneEnabled(true);
-    setCallUi(previous=>previous?{...previous,status:room.remoteParticipants.size?'На связи':'Ожидаем собеседника…',connected:room.remoteParticipants.size>0,connectedAt:room.remoteParticipants.size?(previous.connectedAt||Date.now()):previous.connectedAt}:previous);
-    if(sendAnswer)await sendCallSignal({type:'answer',call_id:callId,from:session.user.id,to:peerUserId});
+    if(video){
+      await room.localParticipant.setCameraEnabled(true);
+      const publication=[...room.localParticipant.videoTrackPublications.values()].find(item=>item.track);
+      if(publication?.track){
+        const preview=publication.track.attach();preview.className='nexura-call-video-local';
+        preview.autoplay=true;preview.muted=true;preview.playsInline=true;
+        document.body.appendChild(preview);
+        callRef.current.videoElements=[...(callRef.current.videoElements||[]),preview];
+      }
+    }
+    setCallUi(previous=>previous?{...previous,status:room.remoteParticipants.size?'На связи':'Ожидаем собеседника…',connected:room.remoteParticipants.size>0,connectedAt:room.remoteParticipants.size?(previous.connectedAt||Date.now()):previous.connectedAt,video,cameraEnabled:video}:previous);
+    if(sendAnswer)await sendCallSignal({type:'answer',call_id:callId,from:session.user.id,to:peerUserId,video});
   }
 
   async function receiveCallSignal(signal) {
     if(!signal||signal.to!==session.user.id||!signal.from||signal.from===session.user.id)return;
     const type=signal.type, id=signal.call_id;
     if(!id)return;
+    if(type==='offer'&&Number.isFinite(Number(signal.sent_at))&&Date.now()-Number(signal.sent_at)>35_000){setNotice('Пропущенный вызов');return;}
     if(type==='offer'){
       if(callRef.current.callId||incomingCall){
         await ensureCallChannels(signal.from).catch(()=>{});
@@ -1469,7 +1553,7 @@ function App() {
       }
       try{
         await ensureCallChannels(signal.from);
-        let conversationId=selected?.peerUserId===signal.from?selected.id:null;
+        let conversationId=signal.conversation_id||(selected?.peerUserId===signal.from?selected.id:null);
         if(!conversationId){
           const {data,error}=await supabase.rpc('create_direct_conversation',{p_other_user_id:signal.from});
           if(error)throw error;
@@ -1477,7 +1561,7 @@ function App() {
         }
         const {data:peer,error:peerError}=await supabase.from('profiles').select('display_name,username').eq('id',signal.from).maybeSingle();
         if(peerError)throw peerError;
-        setIncomingCall({callId:id,peerUserId:signal.from,peerName:peer?.display_name||peer?.username||'Входящий вызов',conversationId});
+        setIncomingCall({callId:id,peerUserId:signal.from,peerName:peer?.display_name||peer?.username||'Входящий вызов',conversationId,video:!!signal.video});
         await sendCallSignal({type:'ringing',call_id:id,from:session.user.id,to:signal.from});
       }catch(error){setNotice('Не удалось принять сигнал звонка: '+error.message);}
       return;
@@ -1487,7 +1571,7 @@ function App() {
     if(type==='answer'){
       clearTimeout(callRef.current.timeout);
       setCallUi(previous=>previous?{...previous,status:'Соединяем…'}:previous);
-      try{await connectCallRoom({callId:id,peerUserId:callRef.current.peerUserId,conversationId:callRef.current.conversationId,sendAnswer:false});}
+      try{await connectCallRoom({callId:id,peerUserId:callRef.current.peerUserId,conversationId:callRef.current.conversationId,sendAnswer:false,video:!!callRef.current.video});}
       catch(error){setNotice('Не удалось подключить звонок: '+error.message);await endCall(false);}
       return;
     }
@@ -1504,6 +1588,7 @@ function App() {
     current.ending=true;
     if(current.room){try{await current.room.disconnect();}catch{}}
     (current.audioElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
+    (current.videoElements||[]).forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
     if(current.peerChannel)await supabase.removeChannel(current.peerChannel);
     callRef.current=current.ownChannel?{ownChannel:current.ownChannel}:{};
     setCallUi(null);setIncomingCall(null);
@@ -1517,9 +1602,11 @@ function App() {
       permissionStream.getTracks().forEach(track=>track.stop());
       await ensureCallChannels(selected.peerUserId);
       const callId=crypto.randomUUID();
-      callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null};
-      setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Вызов…',connected:false,muted:false});
-      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:false,sent_at:Date.now()});
+      callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null,video:false};
+      setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Вызов…',connected:false,muted:false,video:false});
+      const sentAt=Date.now();
+      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:false,sent_at:sentAt});
+      void triggerCallPush(selected.id,selected.peerUserId,callId,false);
       callRef.current.timeout=setTimeout(async()=>{
         if(callRef.current.callId!==callId)return;
         await sendCallSignal({type:'end',call_id:callId,from:session.user.id,to:selected.peerUserId}).catch(()=>{});
@@ -1528,19 +1615,40 @@ function App() {
     }catch(error){await finishCallLocal();setNotice('Не удалось начать звонок: '+error.message);}
   }
 
+  async function startVideoCall() {
+    if(!selected||selected.kind!=='direct'||!selected.peerUserId||callRef.current.callId||incomingCall)return;
+    try{
+      if(!navigator.mediaDevices?.getUserMedia)throw new Error('Браузер не поддерживает видеозвонки');
+      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true,video:true});
+      permissionStream.getTracks().forEach(track=>track.stop());
+      await ensureCallChannels(selected.peerUserId);
+      const callId=crypto.randomUUID();
+      callRef.current={...callRef.current,callId,peerUserId:selected.peerUserId,conversationId:selected.id,timeout:null,video:true};
+      setCallUi({callId,peerName:selected.title,direction:'outgoing',status:'Видеовызов…',connected:false,muted:false,video:true,cameraEnabled:true});
+      const sentAt=Date.now();
+      await sendCallSignal({type:'offer',call_id:callId,from:session.user.id,to:selected.peerUserId,video:true,sent_at:sentAt});
+      void triggerCallPush(selected.id,selected.peerUserId,callId,true);
+      callRef.current.timeout=setTimeout(async()=>{
+        if(callRef.current.callId!==callId)return;
+        await sendCallSignal({type:'end',call_id:callId,from:session.user.id,to:selected.peerUserId}).catch(()=>{});
+        await finishCallLocal();setNotice('Нет ответа');
+      },35000);
+    }catch(error){await finishCallLocal();setNotice('Не удалось начать видеозвонок: '+error.message);}
+  }
+
   async function acceptIncomingCall() {
     const incoming=incomingCall;
     if(!incoming)return;
     if(!incoming.conversationId){setNotice('Открой личный чат с этим пользователем и повтори приём звонка.');return;}
     try{
       if(!navigator.mediaDevices?.getUserMedia)throw new Error('Браузер не поддерживает аудиозвонки');
-      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const permissionStream=await navigator.mediaDevices.getUserMedia({audio:true,video:!!incoming.video});
       permissionStream.getTracks().forEach(track=>track.stop());
-    }catch(error){setNotice('Для звонка разреши доступ к микрофону: '+error.message);return;}
-    callRef.current={...callRef.current,callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId};
+    }catch(error){setNotice('Разреши Nexura доступ к микрофону'+(incoming.video?' и камере':'')+': '+error.message);return;}
+    callRef.current={...callRef.current,callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId,video:!!incoming.video};
     setIncomingCall(null);
-    setCallUi({callId:incoming.callId,peerName:incoming.peerName,direction:'incoming',status:'Соединяем…',connected:false,muted:false});
-    try{await connectCallRoom({callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId,sendAnswer:true});}
+    setCallUi({callId:incoming.callId,peerName:incoming.peerName,direction:'incoming',status:'Соединяем…',connected:false,muted:false,video:!!incoming.video,cameraEnabled:!!incoming.video});
+    try{await connectCallRoom({callId:incoming.callId,peerUserId:incoming.peerUserId,conversationId:incoming.conversationId,sendAnswer:true,video:!!incoming.video});}
     catch(error){setNotice('Не удалось подключиться к звонку: '+error.message);await endCall(false);}
   }
 
@@ -1564,6 +1672,27 @@ function App() {
     const muted=!callUi?.muted;
     try{await room.localParticipant.setMicrophoneEnabled(!muted);setCallUi(previous=>previous?{...previous,muted}:previous);}
     catch(error){setNotice('Не удалось изменить микрофон: '+error.message);}
+  }
+
+  async function toggleCallCamera() {
+    const room=callRef.current.room;if(!room||!callUi?.video)return;
+    const enabled=!callUi.cameraEnabled;
+    try{
+      await room.localParticipant.setCameraEnabled(enabled);
+      const existing=(callRef.current.videoElements||[]).filter(element=>element.classList?.contains('nexura-call-video-local'));
+      existing.forEach(element=>{try{element.pause();element.srcObject=null;element.remove();}catch{}});
+      callRef.current.videoElements=(callRef.current.videoElements||[]).filter(element=>!existing.includes(element));
+      if(enabled){
+        const publication=[...room.localParticipant.videoTrackPublications.values()].find(item=>item.track);
+        if(publication?.track){
+          const preview=publication.track.attach();preview.className='nexura-call-video-local';
+          preview.autoplay=true;preview.muted=true;preview.playsInline=true;
+          document.body.appendChild(preview);
+          callRef.current.videoElements=[...(callRef.current.videoElements||[]),preview];
+        }
+      }
+      setCallUi(previous=>previous?{...previous,cameraEnabled:enabled}:previous);
+    }catch(error){setNotice('Не удалось изменить камеру: '+error.message);}
   }
 
   async function openSavedMessages() {
@@ -2039,7 +2168,7 @@ function App() {
         </div>
       </section> : activeTab==='profile' ? <section className="web-profile-page"><button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button>
         <div className="web-profile-cover" onClick={()=>bannerInputRef.current?.click()}>
-          {profile?.banner_display_url || profile?.banner_url?.startsWith('http') ? (profile.banner_url?.startsWith('social:') ? <video src={profile.banner_display_url} autoPlay muted loop playsInline/> : <img src={profile.banner_url} alt="Обложка профиля"/>) : <div className="cover-placeholder"><ImageIcon size={34}/><b>Добавь обложку профиля</b><span>Фото или видео без звука</span></div>}
+          {profile?.banner_display_url || profile?.banner_url?.startsWith('http') ? (profile.banner_url?.startsWith('social:') ? <video src={profile.banner_display_url} autoPlay muted loop playsInline/> : <img src={profile.banner_display_url || profile.banner_url} alt="Обложка профиля"/>) : <div className="cover-placeholder"><ImageIcon size={34}/><b>{profile?.banner_display_error?'Не удалось загрузить обложку':'Добавь обложку профиля'}</b><span>{profile?.banner_display_error?'Проверь доступ к файлу в хранилище':'Фото или видео без звука'}</span></div>}
           <button className="cover-edit" onClick={event=>{event.stopPropagation();bannerInputRef.current?.click();}}><Camera size={15}/> Изменить обложку</button>
           <input ref={bannerInputRef} type="file" accept="image/*,video/*" className="visually-hidden-file" onChange={async event=>{const file=event.target.files?.[0];if(!file)return;setSocialBusy(true);try{const path=profile?.id+'/'+(file.type.startsWith('video/')?'banners/':'banner-')+crypto.randomUUID()+'.'+((file.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'')||'jpg');const bucket=file.type.startsWith('video/')?'nexura-social-media':'nexura-avatars';const {error:uploadError}=await supabase.storage.from(bucket).upload(path,file,{upsert:false,contentType:file.type});if(uploadError)throw uploadError;const banner_url=bucket==='nexura-social-media'?'social:'+path:supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;const {error:updateError}=await supabase.from('profiles').update({banner_url}).eq('id',session.user.id);if(updateError)throw updateError;let banner_display_url=banner_url;if(banner_url.startsWith('social:')){const {data:signed,error}=await supabase.storage.from('nexura-social-media').createSignedUrl(path,7*86400);if(error)throw error;banner_display_url=signed.signedUrl;}setProfile(previous=>({...previous,banner_url,banner_display_url}));setNotice('Обложка профиля обновлена');}catch(error){setNotice('Не удалось обновить обложку: '+error.message);}finally{setSocialBusy(false);event.target.value='';}}}/>
         </div>
@@ -2053,8 +2182,8 @@ function App() {
         </div>
       </section> : activeTab==='people' ? <div className="people-page"><button className="web-mobile-back" onClick={()=>{setActiveTab('chats');setMobileChatOpen(false);}}><ArrowLeft size={16}/> Назад к чатам</button><div className="people-page-heading"><div className="eyebrow">СООБЩЕСТВО NEXURA</div><h2>Люди</h2><p>Находи собеседников, открывай профили и начинай общение.</p><div className="people-tools"><button className="secondary-btn" onClick={syncBrowserContacts} disabled={contactSyncBusy}>{contactSyncBusy?'Проверяем…':'Синхронизировать контакты'}</button><button className="primary-btn" onClick={shareNexuraInvite}>Пригласить друзей</button><small>Браузер попросит выбрать контакты вручную. На сервер отправляются только выбранные номера для поиска совпадений.</small></div></div>
       {contactMatches.length>0&&<section className="contact-matches"><div className="web-section-heading"><h3>Знакомые в Nexura</h3><span>{contactMatches.length}</span></div><div className="contact-match-grid">{contactMatches.map(person=><article key={person.user_id} className="contact-match-item"><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.phone||''}</small></span><button className="primary-btn" onClick={()=>createDirectChat({id:person.user_id,title:person.display_name||'Пользователь',avatar:person.avatar_url})}><MessageCircle size={14}/> Написать</button></article>)}</div></section>}
-      <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>{storiesFeed.length ? `${storiesFeed.length} активных публикаций` : 'Свежие публикации участников'}</span></div><div className="stories-feed-actions"><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading} title="Обновить истории"><RefreshCw size={15}/> Обновить</button><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')} aria-label={`Открыть историю: ${item.profile?.display_name||item.profile?.username||'Участник'}`}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline preload="metadata"/>:<img src={item.url} alt="История" loading="lazy"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{storiesFeedLoading&&!storiesFeed.length&&<div className="social-empty stories-feed-empty">Загружаем истории…</div>}{!storiesFeedLoading&&!storiesFeed.length&&<div className="stories-feed-empty"><div className="social-empty">{storiesFeedError ? `Не удалось загрузить истории: ${storiesFeedError}` : 'Пока нет активных историй. Будь первым — опубликуй свою в профиле.'}</div><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading}><RefreshCw size={15}/> Повторить загрузку</button></div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
-        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_visible&&peerPresence?.is_online?'в сети':peerPresence?.is_visible&&peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Позвонить" aria-label="Позвонить"><Phone size={17}/></button>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><button className="icon-button" onClick={toggleConversationMode} title="Режим шифрования" aria-label="Режим шифрования"><LockKeyhole size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
+      <section className="stories-feed-section"><div className="web-section-heading"><div><h3>Истории</h3><span>{storiesFeed.length ? `${storiesFeed.length} активных публикаций` : 'Свежие публикации участников'}</span></div><div className="stories-feed-actions"><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading} title="Обновить истории"><RefreshCw size={15}/> Обновить</button><button className="social-add-button" onClick={openOwnProfile}><Plus size={15}/> Моя история</button></div></div><div className="stories-feed-row">{storiesFeed.map(item=><button className="stories-feed-card" key={item.id} onClick={()=>openSocialItem(item,'story')} aria-label={`Открыть историю: ${item.profile?.display_name||item.profile?.username||'Участник'}`}><div className="stories-feed-media">{item.media_type==='video'?<video src={item.url} muted autoPlay loop playsInline preload="metadata"/>:<img src={item.url} alt="История" loading="lazy"/>}</div><div className="stories-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span>{item.profile?.display_name||item.profile?.username||'Участник'}</span></div></button>)}{storiesFeedLoading&&!storiesFeed.length&&<div className="social-empty stories-feed-empty">Загружаем истории…</div>}{!storiesFeedLoading&&!storiesFeed.length&&<div className="stories-feed-empty"><div className="social-empty">{storiesFeedError ? `Не удалось загрузить истории: ${storiesFeedError}` : 'Пока нет активных историй. Будь первым — опубликуй свою в профиле.'}</div><button className="social-add-button" onClick={()=>void loadStoriesFeed()} disabled={storiesFeedLoading}><RefreshCw size={15}/> Повторить загрузку</button></div>}</div></section><section className="photo-feed-section"><div className="web-section-heading"><div><h3>Лента</h3><span>Фотографии сообщества Nexura</span></div><button className="social-add-button" onClick={()=>void loadPhotoFeed()} disabled={photoFeedLoading}><RefreshCw size={15}/> Обновить</button></div>{photoFeedError&&<div className="social-empty">Не удалось загрузить ленту: {photoFeedError}</div>}{photoFeedLoading&&!photoFeed.length&&<div className="social-empty">Загружаем публикации…</div>}<div className="photo-feed-grid">{photoFeed.map(item=><button type="button" className="photo-feed-card" key={item.id} onClick={()=>openSocialItem(item,'photo')}><img src={item.url} alt={item.caption||'Публикация Nexura'} loading="lazy"/><span className="photo-feed-author"><Avatar value={item.profile?.avatar_url} name={item.profile?.display_name}/><span><b>{item.profile?.display_name||item.profile?.username||'Пользователь'}</b><small>{dateLabel(item.created_at)}</small></span></span>{item.caption&&<span className="photo-feed-caption">{item.caption}</span>}<span className="photo-feed-stats"><Heart size={14} fill={item.likedByMe?'currentColor':'none'}/>{item.likeCount||0}<MessageSquare size={14}/>Открыть</span></button>)}{!photoFeedLoading&&!photoFeedError&&!photoFeed.length&&<div className="social-empty photo-feed-empty">Лента пока пуста. Добавь фотографию в профиль, чтобы начать.</div>}</div></section><div className="people-directory-grid">{people.map(person=><article className="people-person-card" key={person.id}><button className="people-person-main" onClick={()=>openUserProfile(person)}><Avatar value={person.avatar_url} name={person.display_name}/><span><b>{person.display_name||'Пользователь'}</b><small>{person.username?'@'+person.username:'Пользователь Nexura'}</small></span></button><p>{person.bio||'Пока ничего не рассказал о себе.'}</p><div><button className="secondary-btn" onClick={()=>openUserProfile(person)}>Профиль</button><button className="primary-btn" onClick={()=>createDirectChat({id:person.id,title:person.display_name||person.username,avatar:person.avatar_url})}><MessageCircle size={15}/> Написать</button></div></article>)}</div>{peopleBusy&&<div className="list-hint">Загружаем каталог…</div>}{peopleHasMore&&!peopleBusy&&<button className="load-more-people" onClick={()=>loadPeople()}>Показать ещё</button>}</div> : !selected ? <div className="welcome-pane"><div className="welcome-symbol"><MessageCircle size={38}/><span/></div><div className="eyebrow">ТВОЁ ПРОСТРАНСТВО</div><h2>Всё начинается<br/>с разговора.</h2><p>Выбери переписку слева, чтобы продолжить общение.</p><div className="welcome-tags"><span><LockKeyhole size={14}/> Приватность</span><span><Users size={14}/> Свои люди</span></div></div> :
+        <><header className="chat-header"><button className="icon-button back-button" onClick={()=>setMobileChatOpen(false)} aria-label="Назад к чатам"><ArrowLeft size={19}/></button><Avatar value={selected.avatar} name={selected.title}/><div className="header-person"><b>{selected.title}</b><span>{selected.kind==='group'?'Групповой чат':peerTyping?'печатает…':peerPresence?.is_visible&&peerPresence?.is_online?'в сети':peerPresence?.is_visible&&peerPresence?.last_seen_at?'был(а) в сети '+new Date(peerPresence.last_seen_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'Личная переписка'}</span></div>{selected.kind==='direct'&&<><button className="icon-button" onClick={startAudioCall} disabled={!!callUi||!!incomingCall} title="Аудиозвонок" aria-label="Аудиозвонок"><Phone size={17}/></button><button className="icon-button" onClick={startVideoCall} disabled={!!callUi||!!incomingCall} title="Видеозвонок" aria-label="Видеозвонок"><Video size={17}/></button></>}{selected.kind==='group'&&<button className="icon-button" onClick={openGroupManagement} title="Участники и настройки группы" aria-label="Участники группы"><Users size={17}/></button>}<button className="icon-button chat-theme-trigger" onClick={()=>setChatThemeOpen(true)} title="Оформление чата" aria-label="Оформление чата"><Palette size={17}/></button><button className="icon-button" onClick={toggleConversationMode} title="Режим шифрования" aria-label="Режим шифрования"><LockKeyhole size={17}/></button><div className="chat-tools-wrap"><button className="icon-button" onClick={()=>setChatToolsOpen(value=>!value)} title="Действия чата" aria-label="Действия чата"><MoreHorizontal size={18}/></button>{chatToolsOpen&&<div className="chat-tools-menu">
           <button onClick={()=>toggleFavoriteChat(selected.id)}><Star size={15} fill={favoriteChatIds.includes(selected.id)?'currentColor':'none'}/>{favoriteChatIds.includes(selected.id)?'Убрать из избранного':'В избранное'}</button>
           <button onClick={()=>{setChatSearchOpen(value=>!value);setChatSearchQuery('');setChatToolsOpen(false);}}><Search size={15}/>Поиск по переписке</button>
           <button onClick={()=>{setChatGalleryOpen(true);setChatToolsOpen(false);}}><ImageIcon size={15}/>Медиа и ссылки</button>
@@ -2183,8 +2312,8 @@ function App() {
         </form>
       </section>
     </div>}
-    {incomingCall&&<div className="modal-backdrop call-backdrop"><section className="call-modal incoming-call-modal"><div className="call-avatar"><Phone size={27}/></div><div className="eyebrow">ВХОДЯЩИЙ ЗВОНОК</div><h3>{incomingCall.peerName}</h3><p>Вам звонят в Nexura</p><div className="call-controls"><button className="call-decline" onClick={declineIncomingCall}><PhoneOff size={19}/> Отклонить</button><button className="call-accept" onClick={acceptIncomingCall}><Phone size={19}/> Принять</button></div></section></div>}
-    {callUi&&<div className="call-floating-panel"><div className="call-floating-info"><span className="call-live-dot"/><div><b>{callUi.peerName}</b><small>{callUi.status}</small></div></div><div className="call-floating-actions"><button onClick={toggleCallMute} title={callUi.muted?'Включить микрофон':'Выключить микрофон'}>{callUi.muted?<MicOff size={17}/>:<Mic size={17}/>}</button><button className="call-hangup" onClick={()=>endCall(true)} title="Завершить звонок"><PhoneOff size={17}/></button></div></div>}
+    {incomingCall&&<div className="modal-backdrop call-backdrop"><section className="call-modal incoming-call-modal"><div className="call-avatar">{incomingCall.video?<Video size={27}/>:<Phone size={27}/>}</div><div className="eyebrow">{incomingCall.video?'ВХОДЯЩИЙ ВИДЕОЗВОНОК':'ВХОДЯЩИЙ ЗВОНОК'}</div><h3>{incomingCall.peerName}</h3><p>{incomingCall.video?'Вам звонят по видео в Nexura':'Вам звонят в Nexura'}</p><div className="call-controls"><button className="call-decline" onClick={declineIncomingCall}><PhoneOff size={19}/> Отклонить</button><button className="call-accept" onClick={acceptIncomingCall}><Phone size={19}/> Принять</button></div></section></div>}
+    {callUi&&<div className="call-floating-panel"><div className="call-floating-info"><span className="call-live-dot"/><div><b>{callUi.peerName}</b><small>{callUi.video?'Видеозвонок · ':''}{callUi.status}</small></div></div><div className="call-floating-actions"><button onClick={toggleCallMute} title={callUi.muted?'Включить микрофон':'Выключить микрофон'}>{callUi.muted?<MicOff size={17}/>:<Mic size={17}/>}</button>{callUi.video&&<button onClick={toggleCallCamera} title={callUi.cameraEnabled?'Выключить камеру':'Включить камеру'}>{callUi.cameraEnabled?<Video size={17}/>:<Video size={17}/>}</button>}<button className="call-hangup" onClick={()=>endCall(true)} title="Завершить звонок"><PhoneOff size={17}/></button></div></div>}
     {viewedProfile && <div className="modal-backdrop profile-view-backdrop" onClick={()=>setViewedProfile(null)}><section className="web-user-profile-modal" onClick={event=>event.stopPropagation()}>
       <button className="profile-modal-close" onClick={()=>setViewedProfile(null)} aria-label="Закрыть"><X size={19}/></button>
       <div className="web-profile-cover user-cover">{viewedProfile.banner_display_url ? (viewedProfile.banner_url?.startsWith('social:')?<video src={viewedProfile.banner_display_url} autoPlay muted loop playsInline/>:<img src={viewedProfile.banner_display_url} alt="Обложка"/>) : <div className="cover-placeholder"><UserRound size={30}/></div>}</div>

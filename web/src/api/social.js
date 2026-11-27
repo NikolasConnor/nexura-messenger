@@ -16,6 +16,19 @@ export async function loadProfile(supabase, userId) {
     const { data: signed, error: signError } = await supabase.storage.from(SOCIAL_BUCKET)
       .createSignedUrl(data.banner_url.slice(7), 7 * 24 * 60 * 60);
     if (!signError) data.banner_display_url = signed.signedUrl;
+    else data.banner_display_error = signError.message;
+  } else if (data?.banner_url?.startsWith('http')) {
+    // Older image banners were stored as public URLs. Resolve them through
+    // Storage again so private buckets and expired cached URLs still work.
+    const marker = '/storage/v1/object/public/' + AVATAR_BUCKET + '/';
+    const index = data.banner_url.indexOf(marker);
+    if (index >= 0) {
+      const path = decodeURIComponent(data.banner_url.slice(index + marker.length).split('?')[0]);
+      const { data: signed, error: signError } = await supabase.storage.from(AVATAR_BUCKET)
+        .createSignedUrl(path, 7 * 24 * 60 * 60);
+      if (!signError) data.banner_display_url = signed.signedUrl;
+      else data.banner_display_error = signError.message;
+    } else data.banner_display_url = data.banner_url;
   }
   return data;
 }
@@ -65,7 +78,51 @@ export async function loadProfilePhotos(supabase, userId) {
     .select('id,user_id,storage_path,caption,created_at').eq('user_id', userId)
     .order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
-  return Promise.all((data || []).map(async row => ({ ...row, media_type: 'image', url: await socialSignedUrl(supabase, row.storage_path) })));
+  const resolved = await Promise.all((data || []).map(async row => {
+    try {
+      return { ...row, media_type: 'image', url: await socialSignedUrl(supabase, row.storage_path) };
+    } catch (mediaError) {
+      console.warn('Nexura: skipping unavailable profile photo', row.id, mediaError?.message);
+      return null;
+    }
+  }));
+  return resolved.filter(Boolean);
+}
+
+export async function loadPhotoFeed(supabase, currentUserId, limit = 60) {
+  const { data: photos, error } = await supabase.from('profile_photos')
+    .select('id,user_id,storage_path,caption,created_at')
+    .order('created_at', { ascending: false }).limit(Math.max(1, Math.min(limit, 100)));
+  if (error) throw error;
+  const rows = photos || [];
+  if (!rows.length) return [];
+  const userIds = [...new Set(rows.map(row => row.user_id))];
+  const photoIds = rows.map(row => row.id);
+  const [{ data: profiles, error: profilesError }, { data: likes, error: likesError }] = await Promise.all([
+    supabase.from('profiles').select('id,display_name,username,avatar_url').in('id', userIds),
+    supabase.from('profile_photo_likes').select('photo_id,user_id').in('photo_id', photoIds)
+  ]);
+  if (profilesError) throw profilesError;
+  if (likesError) throw likesError;
+  const profileById = new Map((profiles || []).map(profile => [profile.id, profile]));
+  const likesByPhoto = new Map();
+  for (const like of likes || []) {
+    const item = likesByPhoto.get(like.photo_id) || { count: 0, likedByMe: false };
+    item.count += 1;
+    if (like.user_id === currentUserId) item.likedByMe = true;
+    likesByPhoto.set(like.photo_id, item);
+  }
+  const resolved = await Promise.all(rows.map(async row => {
+    try {
+      const url = await socialSignedUrl(supabase, row.storage_path);
+      const stats = likesByPhoto.get(row.id) || { count: 0, likedByMe: false };
+      return { ...row, url, profile: profileById.get(row.user_id) || { display_name: 'Пользователь' }, likeCount: stats.count, likedByMe: stats.likedByMe };
+    } catch (mediaError) {
+      console.warn('Nexura: skipping unavailable feed photo', row.id, mediaError?.message);
+      return null;
+    }
+  }));
+  return resolved.filter(Boolean);
 }
 
 export async function loadStories(supabase, { userId = null, activeOnly = true } = {}) {

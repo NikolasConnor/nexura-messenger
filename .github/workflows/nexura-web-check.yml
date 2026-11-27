@@ -8,11 +8,15 @@ on:
     paths:
       - "web/**"
       - "crypto-wasm/**"
+      - "services/transcription/**"
+      - "supabase/functions/send-call-push/**"
       - ".github/workflows/nexura-web-check.yml"
   pull_request:
     paths:
       - "web/**"
       - "crypto-wasm/**"
+      - "services/transcription/**"
+      - "supabase/functions/send-call-push/**"
       - ".github/workflows/nexura-web-check.yml"
 
 permissions:
@@ -41,12 +45,22 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install Web dependencies
+        working-directory: web
+        run: npm install --legacy-peer-deps --no-audit --no-fund --no-package-lock --onnxruntime-node-install-cuda=skip
+
       - name: Test encrypted browser backup and recovery
         working-directory: web
-        run: node --test src/crypto/backup.test.js
+        run: node --test src/crypto/backup.test.js src/api/social.test.js src/api/transcription.test.js
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check incoming call push Edge Function
+        run: deno check supabase/functions/send-call-push/index.ts
 
       - name: Build Nexura Web
         working-directory: web
-        run: |
-          npm install --legacy-peer-deps --no-audit --no-fund --no-package-lock
-          npm run build
+        run: npm run build
