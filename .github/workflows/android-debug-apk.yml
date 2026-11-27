@@ -1,7 +1,7 @@
 name: Android debug APK
 on:
   push:
-    branches: [ main, feature/voice-video-calls, livekit-cloud-android-studio, release/messenger-first ]
+    branches: [ main, feature/voice-video-calls, livekit-cloud-android-studio, release/messenger-first, feature/telegram-style-cloud-chats ]
     paths:
       - "app/**"
       - "crypto-core/**"

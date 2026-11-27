@@ -112,47 +112,35 @@ function formatDuration(seconds) {
   const value=Math.max(0,Math.floor(seconds));
   return Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
 }
-function MediaMessage({ payload, supabase }) {
-  const [url,setUrl]=useState('');
-  const [error,setError]=useState('');
-  const [busy,setBusy]=useState(true);
-  const [playing,setPlaying]=useState(false);
-  const [duration,setDuration]=useState(0);
-  const [current,setCurrent]=useState(0);
-  const [speed,setSpeed]=useState(1);
-  const audioRef=useRef(null);
-  useEffect(()=>{
-    let alive=true, objectUrl='';
-    downloadAndDecryptMedia(supabase,payload).then(blob=>{
-      if(!alive)return; objectUrl=URL.createObjectURL(blob); setUrl(objectUrl);
-    }).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');})
-      .finally(()=>{if(alive)setBusy(false);});
-    return ()=>{alive=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
-  },[payload.path,supabase]);
-  const toggle=async()=>{const audio=audioRef.current;if(!audio)return;try{if(audio.paused)await audio.play();else audio.pause();}catch(e){setError('Браузер не смог воспроизвести аудио');}};
-  const changeSpeed=()=>{const next=speed===1?1.5:speed===1.5?2:1;setSpeed(next);if(audioRef.current)audioRef.current.playbackRate=next;};
-  if (busy) return <div className="media-loading">Расшифровываем вложение…</div>;
-  if (error) return <div className="media-error">{error}</div>;
-  if (payload.media_type==='image') return <img className="media-image-preview" src={url} alt={payload.name || 'Изображение'}/>;
-  if (payload.media_type==='video') return <video className="media-video-preview" src={url} controls preload="metadata"/>;
-  if (payload.media_type==='audio') return <div className="voice-player">
-    <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={e=>setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0)} onTimeUpdate={e=>setCurrent(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>{setPlaying(false);setCurrent(0);}}/>
-    <button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button>
-    <div className="voice-track">
-      <div className="voice-wave" aria-hidden="true">{Array.from({length:32},(_,i)=><span key={i} style={{height:(7+Math.abs(Math.sin(i*2.17)*Math.cos(i*.43))*19)+'px',opacity:duration&&i/32<=current/duration?1:.55}}/>)}</div>
-      <input aria-label="Позиция воспроизведения" type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={e=>{if(audioRef.current)audioRef.current.currentTime=Number(e.target.value);}}/>
-      <div className="voice-time"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div>
-    </div>
-    <button type="button" className="voice-speed" onClick={changeSpeed} aria-label="Скорость воспроизведения">{speed}×</button>
-  </div>;
-  return <a className="file-attachment" href={url} download={payload.name || 'attachment'}><span className="file-attachment-icon">↧</span><span className="file-attachment-info"><b>{payload.name}</b><small>{(payload.size/1024/1024).toFixed(2)} МБ · зашифрованный файл</small></span><span className="file-download">Скачать</span></a>;
+const sharedVoiceAudio = typeof Audio !== 'undefined' ? new Audio() : null;
+let sharedVoiceUrl = '';
+const browserVoiceUrls = new Set();
+let sharedVoiceMeta = { title:'', subtitle:'', playing:false, current:0, duration:0, speed:1, active:false };
+function publishVoiceState(patch={}) { sharedVoiceMeta={...sharedVoiceMeta,...patch}; if(typeof window!=='undefined') window.dispatchEvent(new CustomEvent('nexura:voice-state',{detail:sharedVoiceMeta})); }
+function formatDuration(seconds) { if(!Number.isFinite(seconds))return '0:00'; const value=Math.max(0,Math.floor(seconds)); return Math.floor(value/60)+':'+String(value%60).padStart(2,'0'); }
+function MediaMessage({ payload, supabase, chatTitle }) {
+ const [url,setUrl]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(true),[playerState,setPlayerState]=useState(sharedVoiceMeta),[speed,setSpeed]=useState(1);
+ useEffect(()=>{let alive=true,objectUrl='';downloadAndDecryptMedia(supabase,payload).then(blob=>{if(!alive)return;objectUrl=URL.createObjectURL(blob);browserVoiceUrls.add(objectUrl);setUrl(objectUrl);}).catch(e=>{if(alive)setError(e?.message||'Не удалось открыть файл');}).finally(()=>{if(alive)setBusy(false);});return()=>{alive=false;if(objectUrl){browserVoiceUrls.delete(objectUrl);if(objectUrl!==sharedVoiceUrl)URL.revokeObjectURL(objectUrl);}};},[payload.path,supabase]);
+ useEffect(()=>{const sync=e=>setPlayerState(e.detail||sharedVoiceMeta);window.addEventListener('nexura:voice-state',sync);return()=>window.removeEventListener('nexura:voice-state',sync);},[]);
+ const isCurrent=!!url&&sharedVoiceUrl===url,playing=isCurrent&&playerState.playing,current=isCurrent?playerState.current:0,duration=isCurrent?playerState.duration:0;
+ const toggle=async()=>{if(!sharedVoiceAudio||!url)return;try{if(sharedVoiceUrl!==url){sharedVoiceAudio.pause();if(sharedVoiceUrl&&!browserVoiceUrls.has(sharedVoiceUrl))URL.revokeObjectURL(sharedVoiceUrl);sharedVoiceAudio.src=url;sharedVoiceUrl=url;sharedVoiceAudio.playbackRate=speed;publishVoiceState({title:payload.name||chatTitle||'Голосовое сообщение',subtitle:chatTitle||'Nexura',playing:false,current:0,duration:0,speed,active:true});}if(sharedVoiceAudio.paused)await sharedVoiceAudio.play();else sharedVoiceAudio.pause();}catch{setError('Браузер не смог воспроизвести аудио');}};
+ const changeSpeed=()=>{const next=speed===1?1.5:speed===1.5?2:1;setSpeed(next);if(isCurrent&&sharedVoiceAudio){sharedVoiceAudio.playbackRate=next;publishVoiceState({speed:next});}};
+ if(busy)return <div className="media-loading">Расшифровываем вложение…</div>;
+ if(error)return <div className="media-error">{error}</div>;
+ if(payload.media_type==='image')return <img className="media-image-preview" src={url} alt={payload.name||'Изображение'}/>;
+ if(payload.media_type==='video')return <video className="media-video-preview" src={url} controls preload="metadata"/>;
+ if(payload.media_type==='audio')return <div className="voice-player"><button type="button" className="voice-play" onClick={toggle} aria-label={playing?'Пауза':'Воспроизвести'}>{playing?<Pause size={17}/>:<Play size={17}/>}</button><div className="voice-track"><div className="voice-wave" aria-hidden="true">{Array.from({length:32},(_,i)=><span key={i} style={{height:(7+Math.abs(Math.sin(i*2.17)*Math.cos(i*.43))*19)+'px',opacity:duration&&i/32<=current/duration?1:.55}/>)}</div><input aria-label="Позиция воспроизведения" type="range" min="0" max={duration||0} step="0.1" value={Math.min(current,duration||0)} onChange={e=>{if(isCurrent&&sharedVoiceAudio)sharedVoiceAudio.currentTime=Number(e.target.value);}}/><div className="voice-time"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div><button type="button" className="voice-speed" onClick={changeSpeed} aria-label="Скорость воспроизведения">{speed}×</button></div>;
+ return <a className="file-attachment" href={url} download={payload.name||'attachment'}><span className="file-attachment-icon">↧</span><span className="file-attachment-info"><b>{payload.name}</b><small>{(payload.size/1024/1024).toFixed(2)} МБ · зашифрованный файл</small></span><span className="file-download">Скачать</span></a>;
 }
-
+function BrowserAudioDock({state,onToggle,onSeek,onClose}) { if(!state.active)return null;return <div className="audio-dock" role="region" aria-label="Аудиопроигрыватель"><div className="audio-dock-icon"><Mic size={18}/></div><div className="audio-dock-info"><b>{state.title||'Голосовое сообщение'}</b><span>{state.subtitle||'Nexura'}</span><input aria-label="Перемотка аудио" type="range" min="0" max={state.duration||0} step="0.1" value={Math.min(state.current,state.duration||0)} onChange={e=>onSeek(Number(e.target.value))}/><small>{formatDuration(state.current)} / {formatDuration(state.duration)}</small></div><button type="button" className="voice-play" onClick={onToggle} aria-label={state.playing?'Пауза':'Продолжить'}>{state.playing?<Pause size={17}/>:<Play size={17}/>}</button><button type="button" className="audio-dock-close" onClick={onClose} aria-label="Закрыть плеер">×</button></div>;}
 function PendingMediaPreview({ file }) {
   const [url,setUrl]=useState('');
   useEffect(()=>{const next=URL.createObjectURL(file);setUrl(next);return()=>URL.revokeObjectURL(next);},[file]);
-  if (!url || !file.type.startsWith('audio/')) return null;
-  return <audio className="pending-audio-preview" controls preload="metadata" src={url}/>;
+  if (!url) return null;
+  if (file.type.startsWith('image/')) return <img className="media-image-preview pending-image-preview" src={url} alt={file.name || 'Фото'}/>;
+  if (file.type.startsWith('video/')) return <video className="media-video-preview pending-video-preview" controls preload="metadata" src={url}/>;
+  if (file.type.startsWith('audio/')) return <audio className="pending-audio-preview" controls preload="metadata" src={url}/>;
+  return <span className="pending-file-icon">📎</span>;
 }
 
 function AuthScreen() {
@@ -219,8 +207,12 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [chats, setChats] = useState([]);
   const [selected, setSelected] = useState(null);
+  const selectedChatIdRef = useRef(null);
+  selectedChatIdRef.current = selected?.id || null;
   const [messages, setMessages] = useState([]);
+  const [outgoingMediaStatus, setOutgoingMediaStatus] = useState({});
   const messageLoadSeq = useRef(0);
+  const pendingMediaOutboxRef = useRef(new Map());
   const messagesPaneRef = useRef(null);
   const [messageReactions, setMessageReactions] = useState({});
   const [loadingChats, setLoadingChats] = useState(false);
@@ -263,6 +255,18 @@ function App() {
   const [sending, setSending] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(false);
   const [e2eeStatus, setE2eeStatus] = useState('Подготавливаем защищённое устройство…');
+  const [browserAudioState, setBrowserAudioState] = useState(sharedVoiceMeta);
+
+  useEffect(() => {
+    if (!sharedVoiceAudio) return;
+    const publish=()=>publishVoiceState({playing:!sharedVoiceAudio.paused&&!sharedVoiceAudio.ended,current:Number.isFinite(sharedVoiceAudio.currentTime)?sharedVoiceAudio.currentTime:0,duration:Number.isFinite(sharedVoiceAudio.duration)?sharedVoiceAudio.duration:0});
+    const ended=()=>{publishVoiceState({playing:false,current:0,active:false});if(sharedVoiceUrl){browserVoiceUrls.delete(sharedVoiceUrl);URL.revokeObjectURL(sharedVoiceUrl);}sharedVoiceUrl='';};
+    ['timeupdate','loadedmetadata','play','pause'].forEach(name=>sharedVoiceAudio.addEventListener(name,publish));
+    sharedVoiceAudio.addEventListener('ended',ended);
+    const sync=e=>setBrowserAudioState(e.detail||sharedVoiceMeta);
+    window.addEventListener('nexura:voice-state',sync);
+    return()=>{['timeupdate','loadedmetadata','play','pause'].forEach(name=>sharedVoiceAudio.removeEventListener(name,publish));sharedVoiceAudio.removeEventListener('ended',ended);window.removeEventListener('nexura:voice-state',sync);};
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -387,7 +391,8 @@ function App() {
       const cloudPlaintext = await decryptCloudHistoryRows(supabase, chat.id, rawRows).catch(() => ({}));
       const rows = await Promise.all(rawRows.map(message => decryptMessageRow(chat, message, cloudPlaintext[message.id])));
       if (requestId !== messageLoadSeq.current) return;
-      setMessages(rows);
+      const localPending = [...pendingMediaOutboxRef.current.values()].filter(item => item.conversation_id === chat.id);
+      setMessages([...rows.filter(item => !localPending.some(pending => pending.id === item.id)), ...localPending].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-50));
       setMessageReactions(reactionsResult || {});
       markConversationRead(supabase, chat.id).catch(() => {});
     } catch (error) {
@@ -436,6 +441,7 @@ function App() {
         const cloudPlaintext = await decryptCloudHistoryRows(supabase, chat.id, [source]).catch(() => ({}));
         const message = await decryptMessageRow(chat, source, cloudPlaintext[source.id]);
         if (!active) return;
+        pendingMediaOutboxRef.current.delete(message.id);
         setMessages(previous => {
           const next = [...previous.filter(item => item.id !== message.id), message]
             .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -621,20 +627,45 @@ function App() {
     setMessageMenu(null);
   }
 
-  async function sendAttachment() {
-    if (!pendingMedia || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
+  async function sendAttachment(fileOverride = pendingMedia, existingMessageId = null) {
+    const file = fileOverride;
+    if (!file || !selected || selected.kind !== 'direct' || !selected.peerUserId || !e2eeReady || sending) return;
     setSending(true); setNotice('');
+    const conversationId = selected.id;
+    const messageId = existingMessageId || crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    if (!existingMessageId) {
+      const optimistic = {
+        id:messageId, sender_id:session.user.id, content:'', created_at:createdAt,
+        message_type:'media', encrypted:false, uploading:true, localMediaFile:file,
+        reply_to_id:replyTarget?.id || null
+      };
+      pendingMediaOutboxRef.current.set(messageId, {...optimistic,conversation_id:selected.id});
+      setMessages(previous=>[...previous,optimistic]);
+    }
+    setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sending'}));
+    const replyToId = existingMessageId ? (pendingMediaOutboxRef.current.get(existingMessageId)?.reply_to_id || null) : (replyTarget?.id || null);
     try {
-      const messageId = crypto.randomUUID();
-      const metadata = await encryptAndUploadMedia(supabase, { file:pendingMedia, userId:session.user.id, conversationId:selected.id, messageId });
+      const metadata = await encryptAndUploadMedia(supabase, { file, userId:session.user.id, conversationId, messageId });
       const sent = await sendBrowserDirectMessage(supabase, {
-        userId:session.user.id, conversationId:selected.id, peerUserId:selected.peerUserId,
-        messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId:replyTarget?.id || null
+        userId:session.user.id, conversationId, peerUserId:selected.peerUserId,
+        messageId, plaintext:JSON.stringify(metadata), messageType:'media', replyToId
       });
-      setMessages(previous=>[...previous,{...sent,content:JSON.stringify(metadata),media:metadata}]);
+      pendingMediaOutboxRef.current.delete(messageId);
+      if (selectedChatIdRef.current === conversationId) setMessages(previous=>[...previous.filter(item=>item.id!==messageId),{...sent,content:JSON.stringify(metadata),media:metadata}].sort((x,y)=>new Date(x.created_at)-new Date(y.created_at)));
+      setOutgoingMediaStatus(previous=>({...previous,[messageId]:'sent'}));
       setPendingMedia(null); setReplyTarget(null); loadChats();
-    } catch(error) { setNotice('Не удалось отправить вложение: '+(error?.message||'ошибка')); }
-    finally { setSending(false); }
+    } catch(error) {
+      setOutgoingMediaStatus(previous=>({...previous,[messageId]:'failed'}));
+      setNotice('Не удалось отправить вложение: '+(error?.message||'ошибка'));
+    } finally { setSending(false); }
+  }
+
+  function retryMediaMessage(message) {
+    const file = message.localMediaFile;
+    if (!file) { setNotice('Исходный файл больше недоступен. Выбери его заново.'); return; }
+    setOutgoingMediaStatus(previous=>({...previous,[message.id]:'sending'}));
+    sendAttachment(file,message.id);
   }
 
   async function startVoiceRecording() {
@@ -819,8 +850,8 @@ function App() {
                 <div className="message-shell">
                   <div className="message-bubble">
                     {m.reply_to_id && <button className="reply-reference" onClick={()=>document.getElementById('message-'+m.reply_to_id)?.scrollIntoView({behavior:'smooth',block:'center'})}><span>↪ {replyMessage?.sender_id===session.user.id?'Вы':selected.title}</span><b>{replyMessage?.content || 'Ответ на сообщение'}</b></button>}
-                    {m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : parseMediaPayload(m.content) ? <MediaMessage payload={parseMediaPayload(m.content)} supabase={supabase}/> : <div className="message-content">{m.content}</div>}
-                    <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && <CheckCheck size={13}/>}</div>
+                    {m.uploading ? <div className="pending-chat-media"><PendingMediaPreview file={m.localMediaFile}/><div><b>{m.localMediaFile?.name || 'Вложение'}</b><small>{outgoingMediaStatus[m.id]==='failed'?'Не отправлено': 'Отправляется…'}</small>{outgoingMediaStatus[m.id]==='failed' && <button type="button" onClick={()=>retryMediaMessage(m)}>Повторить</button>}</div></div> : m.encrypted ? <div className="encrypted-placeholder"><LockKeyhole size={17}/><span>Не удалось расшифровать</span><small>{m.decryptionError || 'Не удалось открыть защищённое сообщение.'}</small></div> : parseMediaPayload(m.content) ? <MediaMessage payload={parseMediaPayload(m.content)} supabase={supabase} chatTitle={selected.title}/> : <div className="message-content">{m.content}</div>}
+                    <div className="message-meta"><time>{timeLabel(m.created_at)}</time>{m.edited_at && <span className="edited-label">изм.</span>}{mine && <span className="media-send-status">{outgoingMediaStatus[m.id]==='sending'?'◷':outgoingMediaStatus[m.id]==='failed'?'!':'✓'}</span>}</div>
                   </div>
                   <div className={"message-tools "+(reactions.length?"has-reactions":"")}>
                     <div className="message-reactions">
@@ -901,6 +932,10 @@ function App() {
         <div className="modal-foot"><span>Выбрано: {groupMembers.length}</span><button className="primary-btn" onClick={createGroupChat} disabled={groupBusy}>{groupBusy?'Создаём…':'Создать группу'}</button></div>
       </section>
     </div>}
+    <BrowserAudioDock state={browserAudioState}
+      onToggle={async()=>{if(!sharedVoiceAudio)return;try{if(sharedVoiceAudio.paused)await sharedVoiceAudio.play();else sharedVoiceAudio.pause();}catch{}}}
+      onSeek={value=>{if(sharedVoiceAudio)sharedVoiceAudio.currentTime=value;}}
+      onClose={()=>{if(sharedVoiceAudio){sharedVoiceAudio.pause();sharedVoiceAudio.removeAttribute('src');sharedVoiceAudio.load();}if(sharedVoiceUrl){browserVoiceUrls.delete(sharedVoiceUrl);URL.revokeObjectURL(sharedVoiceUrl);}sharedVoiceUrl='';publishVoiceState({active:false,playing:false,current:0,duration:0});}}/>
   </div>;
 }
 
