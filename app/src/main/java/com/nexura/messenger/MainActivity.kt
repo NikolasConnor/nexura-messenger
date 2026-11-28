@@ -107,6 +107,8 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     var chats by remember { mutableStateOf(emptyList<ChatItem>()) }
     var selected by remember { mutableStateOf<ChatItem?>(null) }
     var messages by remember { mutableStateOf(emptyList<MessageItem>()) }
+    var hasOlderMessages by remember { mutableStateOf(false) }
+    var loadingOlderMessages by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(emptyList<UserItem>()) }
@@ -214,13 +216,34 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
     fun openChat(chat: ChatItem) {
         selected = chat
         messages = emptyList()
+        hasOlderMessages = false
+        loadingOlderMessages = false
         replyTarget = null
         scope.launch {
             try {
-                messages = api.messages(chat.id)
+                val firstPage = api.messages(chat.id)
+                messages = firstPage
+                hasOlderMessages = firstPage.size == 50
                 api.markChatRead(chat.id)
                 chats = chats.map { if (it.id == chat.id) it.copy(unreadCount = 0) else it }
             } catch (e: Exception) { error = e.message ?: "Не удалось загрузить сообщения" }
+        }
+    }
+
+    fun loadOlderMessages(chatId: String) {
+        val cursor = messages.firstOrNull()?.createdAt ?: return
+        if (loadingOlderMessages || !hasOlderMessages) return
+        scope.launch {
+            loadingOlderMessages = true
+            try {
+                val older = api.messages(chatId, before = cursor)
+                messages = older + messages
+                hasOlderMessages = older.size == 50
+            } catch (e: Exception) {
+                error = e.message ?: "Не удалось загрузить предыдущие сообщения"
+            } finally {
+                loadingOlderMessages = false
+            }
         }
     }
 
@@ -688,14 +711,38 @@ private fun NexuraApp(api: NexuraApi, store: SessionStore, authCallback: Uri?) {
                             }
                         } else {
                             val messageListState = rememberLazyListState()
-                            LaunchedEffect(chat.id, messages.size) {
-                                if (messages.isNotEmpty()) messageListState.animateScrollToItem(messages.lastIndex)
+                            LaunchedEffect(chat.id, messages.lastOrNull()?.id) {
+                                // Keep the viewport anchored when older pages are prepended.
+                                // Only follow the tail when a genuinely newer message arrives.
+                                if (messages.isNotEmpty() && messageListState.layoutInfo.totalItemsCount > 0) {
+                                    val lastVisible = messageListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                    val total = messageListState.layoutInfo.totalItemsCount
+                                    if (total <= 1 || lastVisible >= total - 3) {
+                                        messageListState.animateScrollToItem(total - 1)
+                                    }
+                                }
                             }
                             LazyColumn(
                                 state = messageListState,
                                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                                 contentPadding = PaddingValues(bottom = 10.dp)
                             ) {
+                                if (hasOlderMessages) {
+                                    item(key = "older-messages-control") {
+                                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                            TextButton(
+                                                onClick = { loadOlderMessages(chat.id) },
+                                                enabled = !loadingOlderMessages
+                                            ) {
+                                                if (loadingOlderMessages) {
+                                                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                                    Spacer(Modifier.width(8.dp))
+                                                }
+                                                Text(if (loadingOlderMessages) "Загружаем…" else "Загрузить предыдущие сообщения")
+                                            }
+                                        }
+                                    }
+                                }
                                 items(messages, key = { it.id }) { msg ->
                                     val mine = msg.senderId == store.userId
                                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
