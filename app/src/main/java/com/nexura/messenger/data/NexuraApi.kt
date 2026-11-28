@@ -188,9 +188,20 @@ class NexuraApi(private val store: SessionStore) {
             }
         }
     }
-    suspend fun messages(chatId: String): List<MessageItem> {
-        val raw = JSONArray(call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at&conversation_id=eq.$chatId&deleted_at=is.null&order=created_at.asc&limit=150"))
-        return (0 until raw.length()).map { i ->
+    /**
+     * Loads the newest page of a conversation, or a page immediately older than [before].
+     * Results are always returned oldest-first so the UI can append/prepend without reordering.
+     */
+    suspend fun messages(chatId: String, before: String? = null, pageSize: Int = 50): List<MessageItem> {
+        val safeLimit = pageSize.coerceIn(1, 100)
+        val beforeFilter = before?.takeIf { it.isNotBlank() }?.let {
+            "&created_at=lt.${java.net.URLEncoder.encode(it, "UTF-8")}"
+        }.orEmpty()
+        val raw = JSONArray(
+            call("/rest/v1/messages?select=id,sender_id,content,created_at,message_type,reply_to_id,edited_at" +
+                "&conversation_id=eq.$chatId&deleted_at=is.null$beforeFilter&order=created_at.desc&limit=$safeLimit")
+        )
+        val page = (0 until raw.length()).map { i ->
             val m = raw.getJSONObject(i)
             val type = m.optString("message_type", "text")
             val content = m.optString("content")
@@ -199,6 +210,7 @@ class NexuraApi(private val store: SessionStore) {
                 m.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" },
                 m.optString("edited_at").takeIf { it.isNotBlank() && it != "null" })
         }
+        return page.reversed()
     }
     suspend fun registerPushToken(token: String) {
         val uid = store.userId ?: throw IOException("Сессия истекла")
